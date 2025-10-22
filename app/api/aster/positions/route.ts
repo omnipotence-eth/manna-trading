@@ -1,0 +1,66 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { buildSignedQuery } from '@/lib/asterAuth';
+import { logger } from '@/lib/logger';
+
+const ASTER_BASE_URL = process.env.ASTER_BASE_URL || 'https://fapi.asterdex.com';
+const API_KEY = process.env.ASTER_API_KEY;
+const API_SECRET = process.env.ASTER_SECRET_KEY;
+
+/**
+ * GET /api/aster/positions
+ * Fetches open positions from Aster DEX (authenticated)
+ */
+export async function GET(req: NextRequest) {
+  if (!API_KEY || !API_SECRET) {
+    logger.error('Aster API credentials not configured', undefined, { context: 'AsterAPI' });
+    return NextResponse.json(
+      { error: 'API credentials not configured' },
+      { status: 500 }
+    );
+  }
+
+  try {
+    // Build signed query
+    const queryString = await buildSignedQuery({}, API_SECRET);
+    const url = `${ASTER_BASE_URL}/fapi/v1/positionRisk?${queryString}`;
+
+    logger.debug('Fetching Aster positions', { context: 'AsterAPI', data: { url } });
+
+    const response = await fetch(url, {
+      headers: {
+        'X-MBX-APIKEY': API_KEY,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error('Aster API positions fetch failed', undefined, {
+        context: 'AsterAPI',
+        data: { status: response.status, error: errorText },
+      });
+      return NextResponse.json(
+        { error: `Aster API error: ${errorText}` },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    
+    // Filter only positions with non-zero size
+    const activePositions = data.filter((pos: any) => parseFloat(pos.positionAmt) !== 0);
+    
+    logger.info('Successfully fetched Aster positions', {
+      context: 'AsterAPI',
+      data: { totalPositions: data.length, activePositions: activePositions.length },
+    });
+
+    return NextResponse.json(activePositions);
+  } catch (error: any) {
+    logger.error('Failed to fetch Aster positions', error, { context: 'AsterAPI' });
+    return NextResponse.json(
+      { error: 'Failed to fetch positions' },
+      { status: 500 }
+    );
+  }
+}
+
