@@ -318,10 +318,10 @@ export class DeepSeekR1Model extends AITradingModel {
       reasons.push(`High volatility detected: ${volatility.toFixed(2)}%`);
     }
 
-    // Decision logic with confidence calculation (MORE AGGRESSIVE - 1 signal enough)
+    // Decision logic with confidence calculation (ULTRA AGGRESSIVE - trade on ANY signal)
     const totalSignals = bullishSignals + bearishSignals;
     
-    if (bullishSignals >= 1 && bullishSignals > bearishSignals) {
+    if (bullishSignals > bearishSignals) {
       // Higher base confidence: 50% for 1 signal, 70% for 2, 90% for 3
       const confidence = Math.min(0.5 + (bullishSignals - 1) * 0.2, 0.95);
       return {
@@ -331,7 +331,7 @@ export class DeepSeekR1Model extends AITradingModel {
         size: 0.1 * confidence, // Size scales with confidence
         reasoning: `BULLISH SIGNAL (${bullishSignals}/3 indicators): ${reasons.join('. ')}`,
       };
-    } else if (bearishSignals >= 1 && bearishSignals > bullishSignals) {
+    } else if (bearishSignals > bullishSignals) {
       // Higher base confidence: 50% for 1 signal, 70% for 2, 90% for 3
       const confidence = Math.min(0.5 + (bearishSignals - 1) * 0.2, 0.95);
       return {
@@ -340,6 +340,17 @@ export class DeepSeekR1Model extends AITradingModel {
         confidence,
         size: 0.1 * confidence,
         reasoning: `BEARISH SIGNAL (${bearishSignals}/3 indicators): ${reasons.join('. ')}`,
+      };
+    } else if (bullishSignals === bearishSignals && totalSignals > 0) {
+      // TIE-BREAKER: Use price change direction with 40% confidence
+      const action = priceChange >= 0 ? 'BUY' : 'SELL';
+      const confidence = 0.4; // Lower confidence for tie situations
+      return {
+        symbol,
+        action,
+        confidence,
+        size: 0.1 * confidence,
+        reasoning: `TIE-BREAKER (${bullishSignals}v${bearishSignals}): Following price momentum (${priceChange.toFixed(2)}%). ${reasons.join('. ')}`,
       };
     }
 
@@ -493,8 +504,8 @@ class AITradingService {
           }
         }
         
-        // Execute the best signal if confidence > 50% (AGGRESSIVE MODE)
-        if (bestSignal && bestSignal.confidence > 0.5) {
+        // Execute the best signal if confidence > 40% (ULTRA AGGRESSIVE MODE)
+        if (bestSignal && bestSignal.confidence > 0.4) {
           logger.info(`💰 DeepSeek R1 Trading BEST SIGNAL: ${bestSignal.action} ${bestSignal.size.toFixed(4)} ${bestSignal.symbol}`, {
             context: 'AITrading',
             data: { 

@@ -76,8 +76,8 @@ export default function Dashboard() {
               });
             });
             
-            // If there's a best signal that will be executed, add execution message (50% threshold)
-            if (data.bestSignal && data.bestSignal.action !== 'HOLD' && data.bestSignal.confidence > 0.5) {
+            // If there's a best signal that will be executed, add execution message (40% threshold)
+            if (data.bestSignal && data.bestSignal.action !== 'HOLD' && data.bestSignal.confidence > 0.4) {
               const symbol = data.bestSignal.symbol;
               const action = data.bestSignal.action;
               const confidence = (data.bestSignal.confidence * 100).toFixed(1);
