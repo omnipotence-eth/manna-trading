@@ -108,7 +108,11 @@ export default function RiskManagementPanel({
           </div>
           <div className="flex justify-between">
             <span className="text-green-500/60">Max Risk/Trade:</span>
-            <span className="text-green-500 font-mono">2%</span>
+            <span className="text-neon-green font-mono font-bold">5%</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-green-500/60">Max Position:</span>
+            <span className="text-neon-green font-mono font-bold">30%</span>
           </div>
           <div className="flex justify-between">
             <span className="text-green-500/60">Stop Loss:</span>

@@ -263,12 +263,12 @@ export interface RiskConfig {
 }
 
 const DEFAULT_RISK_CONFIG: RiskConfig = {
-  maxRiskPerTrade: 0.02,      // 2% per trade
-  maxPositionSize: 0.20,      // 20% max in one position
-  maxPortfolioRisk: 0.10,     // 10% total portfolio risk
+  maxRiskPerTrade: 0.05,      // 5% per trade (increased for small account)
+  maxPositionSize: 0.30,      // 30% max in one position (increased for flexibility)
+  maxPortfolioRisk: 0.15,     // 15% total portfolio risk (more aggressive)
   stopLossPercent: 0.03,      // 3% stop loss
   takeProfitPercent: 0.06,    // 6% take profit
-  maxDrawdown: 0.15,          // 15% max drawdown
+  maxDrawdown: 0.20,          // 20% max drawdown (more room to trade)
   trailingStopPercent: 0.02,  // 2% trailing stop
   maxOpenPositions: 3,        // Max 3 positions at once
 };
@@ -347,30 +347,60 @@ export class DeepSeekR1Model extends AITradingModel {
   private async calculatePositionSize(signal: TradingSignal, price: number): Promise<number> {
     const balance = await asterDexService.getBalance();
     
-    // Max risk per trade (e.g., 2% of $100 = $2)
+    // Define minimum order sizes per market (Aster DEX requirements)
+    const MIN_ORDER_SIZES: Record<string, number> = {
+      'BTC/USDT': 0.001,   // ~$107
+      'ETH/USDT': 0.01,    // ~$38
+      'SOL/USDT': 0.1,     // ~$18
+      'ASTER/USDT': 10,    // ~$10
+      'ZEC/USDT': 0.05,    // ~$13
+    };
+    
+    const minSize = MIN_ORDER_SIZES[signal.symbol] || 0.001;
+    
+    // Max risk per trade (e.g., 5% of $101 = $5.05)
     const maxRiskAmount = balance * this.riskConfig.maxRiskPerTrade;
     
-    // Max position size (e.g., 20% of $100 = $20)
+    // Max position size (e.g., 30% of $101 = $30.30)
     const maxPositionValue = balance * this.riskConfig.maxPositionSize;
     
     // Calculate size based on stop loss distance
-    // If stop loss is 3%, we can risk $2 / 0.03 = $66.67 worth of crypto
+    // If stop loss is 3%, we can risk $5.05 / 0.03 = $168.33 worth of crypto
     const riskBasedSize = maxRiskAmount / (this.riskConfig.stopLossPercent * price);
     
     // Take the smaller of risk-based size and max position size
-    const finalSize = Math.min(
+    let finalSize = Math.min(
       riskBasedSize,
       maxPositionValue / price
     );
     
-    logger.info(`📊 Position Size Calculation`, {
+    // Ensure we meet minimum order size
+    if (finalSize < minSize) {
+      logger.warn(`⚠️ Calculated size ${finalSize.toFixed(6)} < minimum ${minSize} for ${signal.symbol}`, {
+        context: 'RiskManagement',
+      });
+      finalSize = minSize; // Use minimum size (will be checked against balance)
+    }
+    
+    // Verify we can afford this position
+    const positionValue = finalSize * price;
+    if (positionValue > balance) {
+      logger.warn(`⚠️ Position value $${positionValue.toFixed(2)} exceeds balance $${balance.toFixed(2)}`, {
+        context: 'RiskManagement',
+      });
+      return 0; // Can't afford this trade
+    }
+    
+    logger.info(`📊 Position Size Calculation for ${signal.symbol}`, {
       context: 'RiskManagement',
       data: {
         balance: balance.toFixed(2),
         maxRisk: maxRiskAmount.toFixed(2),
         stopLoss: (this.riskConfig.stopLossPercent * 100).toFixed(1) + '%',
+        minOrderSize: minSize.toFixed(6),
         calculatedSize: finalSize.toFixed(6),
         estimatedValue: (finalSize * price).toFixed(2),
+        meetsMinimum: finalSize >= minSize ? '✅' : '❌',
       }
     });
     
@@ -409,6 +439,23 @@ export class DeepSeekR1Model extends AITradingModel {
       // 2. Calculate proper position size based on risk
       const price = await asterDexService.getPrice(signal.symbol);
       const safeSize = await this.calculatePositionSize(signal, price);
+      
+      // Check if position size is valid
+      if (safeSize <= 0) {
+        logger.warn(`🛑 Position size too small or can't afford ${signal.symbol} trade`, {
+          context: 'RiskManagement',
+        });
+        
+        useStore.getState().addModelMessage({
+          id: `${Date.now()}-size-block`,
+          model: this.config.name,
+          message: `⚠️ SKIPPED: ${signal.symbol} position too small or insufficient balance`,
+          timestamp: Date.now(),
+          type: 'alert',
+        });
+        
+        return false;
+      }
       
       logger.info(`🤖 ${this.config.name}: ${signal.reasoning}`, {
         context: 'AITrading',
@@ -709,10 +756,52 @@ class AITradingService {
           // Store ALL signals for Model Chat display
           allSignals.push(signal);
           
-          // Track the best signal across all symbols
+          // Track the best signal across all symbols (with affordability check)
           if (signal.action !== 'HOLD' && signal.confidence > highestConfidence) {
             highestConfidence = signal.confidence;
             bestSignal = signal;
+          }
+        }
+        
+        // SMART SELECTION: If best signal is expensive, find most affordable alternative
+        if (bestSignal && bestSignal.action !== 'HOLD') {
+          const balance = await asterDexService.getBalance();
+          const MIN_ORDER_VALUES: Record<string, number> = {
+            'BTC/USDT': 107,  // ~0.001 BTC
+            'ETH/USDT': 38,   // ~0.01 ETH
+            'SOL/USDT': 18,   // ~0.1 SOL
+            'ASTER/USDT': 10, // ~10 ASTER
+            'ZEC/USDT': 13,   // ~0.05 ZEC
+          };
+          
+          const bestSignalMinValue = MIN_ORDER_VALUES[bestSignal.symbol] || 100;
+          
+          // If we can't afford the best signal, find a cheaper alternative
+          if (bestSignalMinValue > balance * 0.5) { // If min order > 50% of balance
+            logger.warn(`💡 Best signal ${bestSignal.symbol} requires ~$${bestSignalMinValue}, finding cheaper alternative...`, {
+              context: 'SmartSelection',
+            });
+            
+            // Find most affordable tradeable signal
+            let affordableBest: TradingSignal | null = null;
+            let affordableBestValue = Infinity;
+            
+            for (const sig of allSignals) {
+              if (sig.action !== 'HOLD' && sig.confidence > 0.4) {
+                const minValue = MIN_ORDER_VALUES[sig.symbol] || 100;
+                if (minValue < balance * 0.5 && minValue < affordableBestValue) {
+                  affordableBest = sig;
+                  affordableBestValue = minValue;
+                }
+              }
+            }
+            
+            if (affordableBest) {
+              logger.info(`✅ Switching to affordable alternative: ${affordableBest.symbol} (min ~$${affordableBestValue})`, {
+                context: 'SmartSelection',
+              });
+              bestSignal = affordableBest;
+            }
           }
         }
         
