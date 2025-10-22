@@ -43,6 +43,26 @@ export default function Dashboard() {
       }
     });
 
+    // Call server-side trading API every 10 seconds
+    const callTradingAPI = async () => {
+      if (!isMounted) return;
+      try {
+        const response = await fetch('/api/trading');
+        const data = await response.json();
+        if (data.success) {
+          logger.info('✅ Trading cycle completed', { context: 'Dashboard', data });
+        } else {
+          logger.error('❌ Trading cycle failed', data.error, { context: 'Dashboard' });
+        }
+      } catch (error) {
+        logger.error('Failed to call trading API', error, { context: 'Dashboard' });
+      }
+    };
+
+    // Start trading cycles
+    callTradingAPI(); // Initial call
+    const tradingInterval = setInterval(callTradingAPI, 10000); // Every 10 seconds
+
     // Connect to WebSocket for real-time data (supports all 6 symbols)
     asterDexService.connectWebSocket((data) => {
       if (!isMounted) return; // Ignore data if unmounted
@@ -174,6 +194,7 @@ export default function Dashboard() {
       clearTimeout(connectionTimeout);
       clearInterval(valueInterval);
       clearInterval(latencyInterval);
+      clearInterval(tradingInterval); // Stop trading API calls
       asterDexService.disconnect();
     };
   }, []);
