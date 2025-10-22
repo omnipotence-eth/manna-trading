@@ -57,41 +57,42 @@ export default function Dashboard() {
         if (data.success) {
           logger.info('✅ Trading cycle completed', { context: 'Dashboard', data });
           
-          // If there's analysis data, show it in console AND store it for MODEL CHAT
-          if (data.analysis) {
-            logger.info('📨 Adding message to Model Chat', { context: 'Dashboard', data: { symbol: data.analysis.symbol, action: data.analysis.action } });
-            logger.info(`🤖 DeepSeek R1: ${data.analysis.action} (${(data.analysis.confidence * 100).toFixed(1)}%)`, {
-              context: 'Dashboard',
-              data: { reasoning: data.analysis.reasoning }
-            });
+          // Process ALL signals (all 5 markets)
+          if (data.signals && Array.isArray(data.signals)) {
+            logger.info(`📨 Processing ${data.signals.length} market analyses`, { context: 'Dashboard' });
             
-            // Add detailed analysis to MODEL CHAT with symbol info
-            const symbol = data.analysis.symbol || 'BTC/USDT';
-            const action = data.analysis.action;
-            const confidence = (data.analysis.confidence * 100).toFixed(1);
-            
-            useStore.getState().addModelMessage({
-              id: `${Date.now()}-analysis`,
-              model: 'DeepSeek R1',
-              message: `[${symbol}] ${action} Signal (${confidence}% confidence) - ${data.analysis.reasoning}`,
-              timestamp: Date.now(),
-              type: action === 'HOLD' ? 'analysis' : 'alert',
-            });
-            
-            // Debug: Check if message was added
-            const currentMessages = useStore.getState().modelMessages;
-            logger.info(`📊 Model Chat now has ${currentMessages.length} messages`, { context: 'Dashboard' });
-            
-            // If it's a trade signal, add execution message
-            if (action !== 'HOLD' && data.analysis.confidence > 0.6) {
+            // Add each signal to Model Chat
+            data.signals.forEach((signal: any, index: number) => {
+              const symbol = signal.symbol;
+              const action = signal.action;
+              const confidence = (signal.confidence * 100).toFixed(1);
+              
               useStore.getState().addModelMessage({
-                id: `${Date.now()}-trade`,
+                id: `${Date.now()}-${index}-analysis`,
                 model: 'DeepSeek R1',
-                message: `✅ Executing ${action} ${data.analysis.size.toFixed(4)} ${symbol} @ ${confidence}% confidence`,
-                timestamp: Date.now(),
+                message: `[${symbol}] ${action} Signal (${confidence}% confidence) - ${signal.reasoning}`,
+                timestamp: Date.now() + index, // Slight offset to maintain order
+                type: action === 'HOLD' ? 'analysis' : 'alert',
+              });
+            });
+            
+            // If there's a best signal that will be executed, add execution message (50% threshold)
+            if (data.bestSignal && data.bestSignal.action !== 'HOLD' && data.bestSignal.confidence > 0.5) {
+              const symbol = data.bestSignal.symbol;
+              const action = data.bestSignal.action;
+              const confidence = (data.bestSignal.confidence * 100).toFixed(1);
+              
+              useStore.getState().addModelMessage({
+                id: `${Date.now()}-execution`,
+                model: 'DeepSeek R1',
+                message: `🚀 EXECUTING BEST SIGNAL: ${action} ${data.bestSignal.size.toFixed(4)} ${symbol} @ ${confidence}% confidence`,
+                timestamp: Date.now() + 1000, // Add at the end
                 type: 'trade',
               });
             }
+            
+            const currentMessages = useStore.getState().modelMessages;
+            logger.info(`📊 Model Chat now has ${currentMessages.length} messages`, { context: 'Dashboard' });
           }
         } else {
           logger.error('❌ Trading cycle failed', data.error, { context: 'Dashboard' });

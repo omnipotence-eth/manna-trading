@@ -31,18 +31,25 @@ export async function GET(request: NextRequest) {
 
     // Run a single trading cycle
     logger.info('🔍 Running DeepSeek R1 analysis cycle (CRON)...', { context: 'CronAPI' });
-    const analysis = await aiTradingService.runSingleCycle();
+    const result = await aiTradingService.runSingleCycle();
     logger.info('✅ Cron analysis cycle completed', { context: 'CronAPI' });
 
     return NextResponse.json({
       success: true,
       message: 'Cron trading cycle completed',
-      analysis: analysis ? {
-        symbol: analysis.symbol,
-        action: analysis.action,
-        confidence: analysis.confidence,
-        reasoning: analysis.reasoning,
-        size: analysis.size,
+      signals: result.signals.map(s => ({
+        symbol: s.symbol,
+        action: s.action,
+        confidence: s.confidence,
+        reasoning: s.reasoning,
+        size: s.size,
+      })),
+      bestSignal: result.bestSignal ? {
+        symbol: result.bestSignal.symbol,
+        action: result.bestSignal.action,
+        confidence: result.bestSignal.confidence,
+        reasoning: result.bestSignal.reasoning,
+        size: result.bestSignal.size,
       } : null,
       timestamp: new Date().toISOString(),
     });

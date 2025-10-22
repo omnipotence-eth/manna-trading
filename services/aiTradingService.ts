@@ -283,26 +283,26 @@ export class DeepSeekR1Model extends AITradingModel {
     let bearishSignals = 0;
     const reasons: string[] = [];
 
-    // 1. Momentum Analysis
-    if (momentum > 0.005) {
+    // 1. Momentum Analysis (MORE SENSITIVE - 0.3% instead of 0.5%)
+    if (momentum > 0.003) {
       bullishSignals++;
       reasons.push(`Bullish momentum: ${(momentum * 100).toFixed(2)}%`);
-    } else if (momentum < -0.005) {
+    } else if (momentum < -0.003) {
       bearishSignals++;
       reasons.push(`Bearish momentum: ${(momentum * 100).toFixed(2)}%`);
     }
 
-    // 2. Trend Analysis
-    if (trendDeviation > 0.01) {
+    // 2. Trend Analysis (MORE SENSITIVE - 0.5% instead of 1%)
+    if (trendDeviation > 0.005) {
       bullishSignals++;
       reasons.push('Price above moving average (uptrend)');
-    } else if (trendDeviation < -0.01) {
+    } else if (trendDeviation < -0.005) {
       bearishSignals++;
       reasons.push('Price below moving average (downtrend)');
     }
 
-    // 3. Volume Confirmation
-    if (volumeRatio > 1.2) {
+    // 3. Volume Confirmation (MORE SENSITIVE - 1.1x instead of 1.2x)
+    if (volumeRatio > 1.1) {
       if (priceChange > 0) {
         bullishSignals++;
         reasons.push('High volume supporting upward move');
@@ -318,11 +318,12 @@ export class DeepSeekR1Model extends AITradingModel {
       reasons.push(`High volatility detected: ${volatility.toFixed(2)}%`);
     }
 
-    // Decision logic with confidence calculation
+    // Decision logic with confidence calculation (MORE AGGRESSIVE - 1 signal enough)
     const totalSignals = bullishSignals + bearishSignals;
     
-    if (bullishSignals >= 2 && bullishSignals > bearishSignals) {
-      const confidence = Math.min((bullishSignals / 3) * 0.9, 0.95);
+    if (bullishSignals >= 1 && bullishSignals > bearishSignals) {
+      // Higher base confidence: 50% for 1 signal, 70% for 2, 90% for 3
+      const confidence = Math.min(0.5 + (bullishSignals - 1) * 0.2, 0.95);
       return {
         symbol,
         action: 'BUY',
@@ -330,8 +331,9 @@ export class DeepSeekR1Model extends AITradingModel {
         size: 0.1 * confidence, // Size scales with confidence
         reasoning: `BULLISH SIGNAL (${bullishSignals}/3 indicators): ${reasons.join('. ')}`,
       };
-    } else if (bearishSignals >= 2 && bearishSignals > bullishSignals) {
-      const confidence = Math.min((bearishSignals / 3) * 0.9, 0.95);
+    } else if (bearishSignals >= 1 && bearishSignals > bullishSignals) {
+      // Higher base confidence: 50% for 1 signal, 70% for 2, 90% for 3
+      const confidence = Math.min(0.5 + (bearishSignals - 1) * 0.2, 0.95);
       return {
         symbol,
         action: 'SELL',
@@ -420,7 +422,7 @@ class AITradingService {
   /**
    * Run a single trading cycle (for server-side cron jobs)
    */
-  async runSingleCycle(): Promise<TradingSignal | null> {
+  async runSingleCycle(): Promise<{ signals: TradingSignal[], bestSignal: TradingSignal | null }> {
     if (!this.isRunning) {
       // Initialize if not already running
       await asterDexService.initialize();
@@ -429,14 +431,14 @@ class AITradingService {
     return await this.runTradingCycle();
   }
 
-  private async runTradingCycle(): Promise<TradingSignal | null> {
+  private async runTradingCycle(): Promise<{ signals: TradingSignal[], bestSignal: TradingSignal | null }> {
+    const allSignals: TradingSignal[] = [];
+    
     try {
       // DeepSeek R1 analyzes multiple pairs on Aster DEX
       const symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'ASTER/USDT', 'ZEC/USDT'];
       let bestSignal: TradingSignal | null = null;
       let highestConfidence = 0;
-
-      let lastSignal: TradingSignal | null = null;
 
       for (const model of this.models) {
         // Analyze each symbol and pick the best signal
@@ -481,8 +483,8 @@ class AITradingService {
             },
           });
           
-          // Keep track of the last signal (even if HOLD)
-          lastSignal = signal;
+          // Store ALL signals for Model Chat display
+          allSignals.push(signal);
           
           // Track the best signal across all symbols
           if (signal.action !== 'HOLD' && signal.confidence > highestConfidence) {
@@ -491,8 +493,8 @@ class AITradingService {
           }
         }
         
-        // Execute the best signal if confidence > 60%
-        if (bestSignal && bestSignal.confidence > 0.6) {
+        // Execute the best signal if confidence > 50% (AGGRESSIVE MODE)
+        if (bestSignal && bestSignal.confidence > 0.5) {
           logger.info(`💰 DeepSeek R1 Trading BEST SIGNAL: ${bestSignal.action} ${bestSignal.size.toFixed(4)} ${bestSignal.symbol}`, {
             context: 'AITrading',
             data: { 
@@ -508,12 +510,12 @@ class AITradingService {
         }
       }
       
-      // Return the best signal, or the last analyzed signal if all were HOLD
-      return bestSignal || lastSignal;
+      // Return ALL signals for display + the best signal for execution
+      return { signals: allSignals, bestSignal };
     } catch (error) {
       logger.error('Error in trading cycle', error, { context: 'AITrading' });
     }
-    return null;
+    return { signals: allSignals, bestSignal: null };
   }
 
   getModels() {
