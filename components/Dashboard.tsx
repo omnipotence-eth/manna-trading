@@ -35,10 +35,11 @@ export default function Dashboard() {
     let firstMessageReceived = false;
     let isMounted = true; // Track component mount status
     
-    // Initialize Aster DEX service
+    // Initialize Aster DEX service for WebSocket connection only
     asterDexService.initialize().then(() => {
       if (isMounted) {
-        logger.info('Dashboard: Aster DEX initialized with $100 capital', { context: 'Dashboard' });
+        logger.info('Dashboard: Aster DEX initialized (WebSocket only)', { context: 'Dashboard' });
+        logger.info('🤖 DeepSeek R1 is running on the server 24/7!', { context: 'Dashboard' });
       }
     });
 
