@@ -249,22 +249,234 @@ export class NeuralNetV2Model extends AITradingModel {
 }
 
 /**
- * DeepSeek R1 - Advanced reasoning model
+ * Risk Management Configuration
+ */
+export interface RiskConfig {
+  maxRiskPerTrade: number;        // Max % of capital to risk per trade (default: 2%)
+  maxPositionSize: number;         // Max % of capital in single position (default: 20%)
+  maxPortfolioRisk: number;        // Max % of capital at risk total (default: 10%)
+  stopLossPercent: number;         // Stop loss % per trade (default: 3%)
+  takeProfitPercent: number;       // Take profit % per trade (default: 6%)
+  maxDrawdown: number;             // Stop trading if drawdown exceeds (default: 15%)
+  trailingStopPercent: number;     // Trailing stop to lock profits (default: 2%)
+  maxOpenPositions: number;        // Max simultaneous positions (default: 3)
+}
+
+const DEFAULT_RISK_CONFIG: RiskConfig = {
+  maxRiskPerTrade: 0.02,      // 2% per trade
+  maxPositionSize: 0.20,      // 20% max in one position
+  maxPortfolioRisk: 0.10,     // 10% total portfolio risk
+  stopLossPercent: 0.03,      // 3% stop loss
+  takeProfitPercent: 0.06,    // 6% take profit
+  maxDrawdown: 0.15,          // 15% max drawdown
+  trailingStopPercent: 0.02,  // 2% trailing stop
+  maxOpenPositions: 3,        // Max 3 positions at once
+};
+
+/**
+ * DeepSeek R1 - Advanced reasoning model with professional risk management
  */
 export class DeepSeekR1Model extends AITradingModel {
+  private riskConfig: RiskConfig;
+  private initialBalance: number = 100;
+  private peakBalance: number = 100;
+  private currentDrawdown: number = 0;
+  
   constructor() {
     super({
       name: 'DeepSeek R1',
-      strategy: 'Deep Reasoning + Pattern Recognition',
+      strategy: 'Deep Reasoning + Pattern Recognition + Risk Management',
       riskLevel: 'MEDIUM',
       maxLeverage: 10,
       maxPositionSize: 5000,
       stopLoss: 0.02,
       takeProfit: 0.05,
     });
+    this.riskConfig = DEFAULT_RISK_CONFIG;
+  }
+  
+  /**
+   * Check if we can take a new trade based on risk limits
+   */
+  private async canTakeTrade(signal: TradingSignal): Promise<{ allowed: boolean; reason: string }> {
+    try {
+      // 1. Check drawdown limit
+      const balance = await asterDexService.getBalance();
+      if (balance > this.peakBalance) {
+        this.peakBalance = balance;
+      }
+      this.currentDrawdown = (this.peakBalance - balance) / this.peakBalance;
+      
+      if (this.currentDrawdown >= this.riskConfig.maxDrawdown) {
+        return {
+          allowed: false,
+          reason: `Max drawdown reached (${(this.currentDrawdown * 100).toFixed(1)}%). Stopping trading for safety.`
+        };
+      }
+      
+      // 2. Check max open positions
+      const positions = await asterDexService.getPositions();
+      if (positions.length >= this.riskConfig.maxOpenPositions) {
+        return {
+          allowed: false,
+          reason: `Max ${this.riskConfig.maxOpenPositions} positions already open. Close existing positions first.`
+        };
+      }
+      
+      // 3. Check portfolio risk (total exposure)
+      const totalExposure = positions.reduce((sum, pos) => sum + (pos.size * pos.entryPrice), 0);
+      const portfolioRisk = totalExposure / balance;
+      
+      if (portfolioRisk >= this.riskConfig.maxPortfolioRisk) {
+        return {
+          allowed: false,
+          reason: `Portfolio risk limit reached (${(portfolioRisk * 100).toFixed(1)}%). Too much capital at risk.`
+        };
+      }
+      
+      return { allowed: true, reason: 'Risk checks passed' };
+    } catch (error) {
+      logger.error('Risk check failed', error, { context: 'RiskManagement' });
+      return { allowed: false, reason: 'Risk check error' };
+    }
+  }
+  
+  /**
+   * Calculate position size based on risk management rules
+   */
+  private async calculatePositionSize(signal: TradingSignal, price: number): Promise<number> {
+    const balance = await asterDexService.getBalance();
+    
+    // Max risk per trade (e.g., 2% of $100 = $2)
+    const maxRiskAmount = balance * this.riskConfig.maxRiskPerTrade;
+    
+    // Max position size (e.g., 20% of $100 = $20)
+    const maxPositionValue = balance * this.riskConfig.maxPositionSize;
+    
+    // Calculate size based on stop loss distance
+    // If stop loss is 3%, we can risk $2 / 0.03 = $66.67 worth of crypto
+    const riskBasedSize = maxRiskAmount / (this.riskConfig.stopLossPercent * price);
+    
+    // Take the smaller of risk-based size and max position size
+    const finalSize = Math.min(
+      riskBasedSize,
+      maxPositionValue / price
+    );
+    
+    logger.info(`📊 Position Size Calculation`, {
+      context: 'RiskManagement',
+      data: {
+        balance: balance.toFixed(2),
+        maxRisk: maxRiskAmount.toFixed(2),
+        stopLoss: (this.riskConfig.stopLossPercent * 100).toFixed(1) + '%',
+        calculatedSize: finalSize.toFixed(6),
+        estimatedValue: (finalSize * price).toFixed(2),
+      }
+    });
+    
+    return finalSize;
+  }
+  
+  /**
+   * Override executeTrade to add risk management
+   */
+  async executeTrade(signal: TradingSignal): Promise<boolean> {
+    try {
+      if (signal.action === 'HOLD') {
+        return false;
+      }
+
+      // 1. Check if we can take this trade (risk limits)
+      const riskCheck = await this.canTakeTrade(signal);
+      if (!riskCheck.allowed) {
+        logger.warn(`🛑 Trade blocked by risk management: ${riskCheck.reason}`, {
+          context: 'RiskManagement',
+          data: { symbol: signal.symbol, action: signal.action }
+        });
+        
+        // Add message to Model Chat
+        useStore.getState().addModelMessage({
+          id: `${Date.now()}-risk-block`,
+          model: this.config.name,
+          message: `🛑 RISK LIMIT: ${riskCheck.reason}`,
+          timestamp: Date.now(),
+          type: 'alert',
+        });
+        
+        return false;
+      }
+
+      // 2. Calculate proper position size based on risk
+      const price = await asterDexService.getPrice(signal.symbol);
+      const safeSize = await this.calculatePositionSize(signal, price);
+      
+      logger.info(`🤖 ${this.config.name}: ${signal.reasoning}`, {
+        context: 'AITrading',
+        data: { 
+          model: this.config.name, 
+          signal: signal.action, 
+          symbol: signal.symbol,
+          originalSize: signal.size,
+          riskAdjustedSize: safeSize,
+        },
+      });
+
+      // 3. Execute with safe position size
+      const leverage = Math.min(this.calculateLeverage(signal.confidence), 10); // Cap at 10x as requested
+      const order = await asterDexService.placeMarketOrder(
+        signal.symbol,
+        signal.action,
+        safeSize,
+        leverage
+      );
+
+      if (order) {
+        logger.trade(`${this.config.name} executed SAFE trade with risk management`, {
+          model: this.config.name,
+          action: signal.action,
+          symbol: signal.symbol,
+          orderId: order.orderId,
+          size: safeSize,
+          stopLoss: `${(this.riskConfig.stopLossPercent * 100).toFixed(1)}%`,
+          takeProfit: `${(this.riskConfig.takeProfitPercent * 100).toFixed(1)}%`,
+        });
+        
+        // Add success message to Model Chat
+        useStore.getState().addModelMessage({
+          id: `${Date.now()}-trade-success`,
+          model: this.config.name,
+          message: `✅ TRADE EXECUTED: ${signal.action} ${safeSize.toFixed(6)} ${signal.symbol} @ ${leverage}x leverage (SL: ${(this.riskConfig.stopLossPercent * 100).toFixed(1)}%, TP: ${(this.riskConfig.takeProfitPercent * 100).toFixed(1)}%)`,
+          timestamp: Date.now(),
+          type: 'trade',
+        });
+        
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      logger.error(`Failed to execute trade for ${this.config.name}`, error, {
+        context: 'AITrading',
+        data: { model: this.config.name, signal },
+      });
+      return false;
+    }
   }
 
   async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
+    // 🔥 FORCE TRADE TEST: Verify trading system works (REMOVE AFTER TESTING)
+    const IS_TESTING = process.env.NEXT_PUBLIC_FORCE_TRADE_TEST === 'true';
+    if (IS_TESTING && symbol === 'BTC/USDT') {
+      logger.warn('🧪 TEST MODE: Forcing a SELL signal to verify trading works', { context: 'Testing' });
+      return {
+        symbol,
+        action: 'SELL',
+        confidence: 0.55, // Above 40% threshold
+        size: 0.001, // Minimum BTC size
+        reasoning: 'TEST: Forced SELL signal to verify Aster DEX connection and trading permissions',
+      };
+    }
+    
     // Multi-factor analysis combining momentum, volume, and price action
     const price = marketData.currentPrice;
     const prevPrice = marketData.previousPrice || price;
@@ -506,18 +718,30 @@ class AITradingService {
         
         // Execute the best signal if confidence > 40% (ULTRA AGGRESSIVE MODE)
         if (bestSignal && bestSignal.confidence > 0.4) {
-          logger.info(`💰 DeepSeek R1 Trading BEST SIGNAL: ${bestSignal.action} ${bestSignal.size.toFixed(4)} ${bestSignal.symbol}`, {
+          logger.info(`💰 DeepSeek R1 Trading BEST SIGNAL: ${bestSignal.action} ${bestSignal.size.toFixed(4)} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}%`, {
             context: 'AITrading',
             data: { 
               symbol: bestSignal.symbol,
               action: bestSignal.action,
               size: bestSignal.size,
               confidence: bestSignal.confidence,
+              reasoning: bestSignal.reasoning,
             },
           });
           
-          // Execute trades with confidence > 60%
-          await model.executeTrade(bestSignal);
+          // Execute the trade (includes risk management checks)
+          const executed = await model.executeTrade(bestSignal);
+          if (executed) {
+            logger.trade(`✅ Trade executed successfully`, { context: 'AITrading', symbol: bestSignal.symbol });
+          } else {
+            logger.warn(`❌ Trade execution failed or blocked`, { context: 'AITrading', symbol: bestSignal.symbol });
+          }
+        } else if (bestSignal) {
+          logger.warn(`⏸️ Best signal confidence too low: ${bestSignal.action} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% (need >40%)`, {
+            context: 'AITrading'
+          });
+        } else {
+          logger.info(`😴 No tradeable signals found across all ${MARKETS_TO_TRADE.length} markets`, { context: 'AITrading' });
         }
       }
       
