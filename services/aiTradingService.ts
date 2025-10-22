@@ -249,6 +249,109 @@ export class NeuralNetV2Model extends AITradingModel {
 }
 
 /**
+ * DeepSeek R1 - Advanced reasoning model
+ */
+export class DeepSeekR1Model extends AITradingModel {
+  constructor() {
+    super({
+      name: 'DeepSeek R1',
+      strategy: 'Deep Reasoning + Pattern Recognition',
+      riskLevel: 'MEDIUM',
+      maxLeverage: 10,
+      maxPositionSize: 5000,
+      stopLoss: 0.02,
+      takeProfit: 0.05,
+    });
+  }
+
+  async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
+    // Multi-factor analysis combining momentum, volume, and price action
+    const price = marketData.currentPrice;
+    const prevPrice = marketData.previousPrice || price;
+    const ma = marketData.movingAverage || price;
+    const volume = marketData.volume || 1;
+    const avgVolume = marketData.averageVolume || 1;
+    const priceChange = marketData.priceChange || 0;
+
+    // Calculate indicators
+    const momentum = (price - prevPrice) / prevPrice;
+    const trendDeviation = (price - ma) / ma;
+    const volumeRatio = volume / avgVolume;
+    
+    // Multi-step reasoning process
+    let bullishSignals = 0;
+    let bearishSignals = 0;
+    const reasons: string[] = [];
+
+    // 1. Momentum Analysis
+    if (momentum > 0.005) {
+      bullishSignals++;
+      reasons.push(`Bullish momentum: ${(momentum * 100).toFixed(2)}%`);
+    } else if (momentum < -0.005) {
+      bearishSignals++;
+      reasons.push(`Bearish momentum: ${(momentum * 100).toFixed(2)}%`);
+    }
+
+    // 2. Trend Analysis
+    if (trendDeviation > 0.01) {
+      bullishSignals++;
+      reasons.push('Price above moving average (uptrend)');
+    } else if (trendDeviation < -0.01) {
+      bearishSignals++;
+      reasons.push('Price below moving average (downtrend)');
+    }
+
+    // 3. Volume Confirmation
+    if (volumeRatio > 1.2) {
+      if (priceChange > 0) {
+        bullishSignals++;
+        reasons.push('High volume supporting upward move');
+      } else {
+        bearishSignals++;
+        reasons.push('High volume supporting downward move');
+      }
+    }
+
+    // 4. Pattern Recognition
+    const volatility = Math.abs(priceChange);
+    if (volatility > 2 && volumeRatio > 1.5) {
+      reasons.push(`High volatility detected: ${volatility.toFixed(2)}%`);
+    }
+
+    // Decision logic with confidence calculation
+    const totalSignals = bullishSignals + bearishSignals;
+    
+    if (bullishSignals >= 2 && bullishSignals > bearishSignals) {
+      const confidence = Math.min((bullishSignals / 3) * 0.9, 0.95);
+      return {
+        symbol,
+        action: 'BUY',
+        confidence,
+        size: 0.1 * confidence, // Size scales with confidence
+        reasoning: `BULLISH SIGNAL (${bullishSignals}/3 indicators): ${reasons.join('. ')}`,
+      };
+    } else if (bearishSignals >= 2 && bearishSignals > bullishSignals) {
+      const confidence = Math.min((bearishSignals / 3) * 0.9, 0.95);
+      return {
+        symbol,
+        action: 'SELL',
+        confidence,
+        size: 0.1 * confidence,
+        reasoning: `BEARISH SIGNAL (${bearishSignals}/3 indicators): ${reasons.join('. ')}`,
+      };
+    }
+
+    return {
+      symbol,
+      action: 'HOLD',
+      confidence: 0,
+      size: 0,
+      reasoning: `NEUTRAL (${bullishSignals} bullish, ${bearishSignals} bearish signals). ${reasons.length > 0 ? reasons.join('. ') : 'Waiting for clearer market direction.'}`,
+    };
+  }
+}
+
+/**
  * Trading service to manage all AI models
  */
 class AITradingService {
@@ -261,11 +364,11 @@ class AITradingService {
   }
 
   private initializeModels() {
-    // Start with just one model (AlphaTrader) with $100 initial capital
+    // Start with just one model (DeepSeek R1) with $100 initial capital
     this.models = [
-      new AlphaTraderModel(),
+      new DeepSeekR1Model(),
     ];
-    logger.info('✅ Initialized 1 AI model with $100 starting capital', { context: 'AITrading' });
+    logger.info('✅ Initialized DeepSeek R1 with $100 starting capital', { context: 'AITrading' });
   }
 
   async start() {
@@ -280,8 +383,8 @@ class AITradingService {
     // Initialize Aster DEX connection
     await asterDexService.initialize();
 
-    // Allocate initial $100 capital to AlphaTrader by buying BTC
-    const modelName = 'AlphaTrader'; // Hardcode since config is protected
+    // Allocate initial $100 capital to DeepSeek R1 by buying BTC
+    const modelName = 'DeepSeek R1'; // Hardcode since config is protected
     const initialCapital = 100;
     const symbol = 'BTC/USDT';
     
@@ -316,7 +419,7 @@ class AITradingService {
 
   private async runTradingCycle() {
     try {
-      // AlphaTrader focuses on BTC/USDT
+      // DeepSeek R1 focuses on BTC/USDT
       const symbol = 'BTC/USDT';
 
       for (const model of this.models) {
