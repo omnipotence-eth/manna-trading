@@ -11,6 +11,9 @@ const API_SECRET = process.env.ASTER_SECRET_KEY;
  * Fetches account information from Aster DEX (authenticated)
  */
 export async function GET(req: NextRequest) {
+  // Allow internal server-side calls (no auth required for internal)
+  // Vercel deployment protection check is handled by request origin
+  
   if (!API_KEY || !API_SECRET) {
     logger.error('Aster API credentials not configured', undefined, { context: 'AsterAPI' });
     return NextResponse.json(
