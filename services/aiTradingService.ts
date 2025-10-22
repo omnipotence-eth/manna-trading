@@ -417,6 +417,18 @@ class AITradingService {
     logger.info('🛑 AI trading service stopped', { context: 'AITrading' });
   }
 
+  /**
+   * Run a single trading cycle (for server-side cron jobs)
+   */
+  async runSingleCycle() {
+    if (!this.isRunning) {
+      // Initialize if not already running
+      await asterDexService.initialize();
+      this.isRunning = true;
+    }
+    await this.runTradingCycle();
+  }
+
   private async runTradingCycle() {
     try {
       // DeepSeek R1 focuses on BTC/USDT
