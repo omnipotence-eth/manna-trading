@@ -26,6 +26,7 @@ export default function Dashboard() {
   const trades = useStore((state) => state.trades);
 
   useEffect(() => {
+    console.log('🚀 Dashboard useEffect STARTED');
     // Initialize state with $100 starting capital (matching AI model)
     const INITIAL_CAPITAL = 100;
     setTotalValue(INITIAL_CAPITAL);
@@ -35,6 +36,7 @@ export default function Dashboard() {
     let firstMessageReceived = false;
     let isMounted = true; // Track component mount status
     
+    console.log('📡 About to initialize Aster DEX and start API calls...');
     // Initialize Aster DEX service for WebSocket connection only
     asterDexService.initialize().then(() => {
       if (isMounted) {
@@ -47,33 +49,45 @@ export default function Dashboard() {
     const callTradingAPI = async () => {
       if (!isMounted) return;
       try {
+        logger.info('🔄 Calling /api/trading...', { context: 'Dashboard' });
         const response = await fetch('/api/trading');
+        logger.info(`📡 API response status: ${response.status}`, { context: 'Dashboard' });
         const data = await response.json();
+        logger.info('📦 API response data:', { context: 'Dashboard', data });
         if (data.success) {
           logger.info('✅ Trading cycle completed', { context: 'Dashboard', data });
           
           // If there's analysis data, show it in console AND store it for MODEL CHAT
           if (data.analysis) {
+            logger.info('📨 Adding message to Model Chat', { context: 'Dashboard', data: { symbol: data.analysis.symbol, action: data.analysis.action } });
             logger.info(`🤖 DeepSeek R1: ${data.analysis.action} (${(data.analysis.confidence * 100).toFixed(1)}%)`, {
               context: 'Dashboard',
               data: { reasoning: data.analysis.reasoning }
             });
             
-            // Add to MODEL CHAT via store
+            // Add detailed analysis to MODEL CHAT with symbol info
+            const symbol = data.analysis.symbol || 'BTC/USDT';
+            const action = data.analysis.action;
+            const confidence = (data.analysis.confidence * 100).toFixed(1);
+            
             useStore.getState().addModelMessage({
               id: `${Date.now()}-analysis`,
               model: 'DeepSeek R1',
-              message: data.analysis.reasoning,
+              message: `[${symbol}] ${action} Signal (${confidence}% confidence) - ${data.analysis.reasoning}`,
               timestamp: Date.now(),
-              type: data.analysis.action === 'HOLD' ? 'analysis' : 'alert',
+              type: action === 'HOLD' ? 'analysis' : 'alert',
             });
             
-            // If it's a trade signal, add trade message
-            if (data.analysis.action !== 'HOLD' && data.analysis.confidence > 0.6) {
+            // Debug: Check if message was added
+            const currentMessages = useStore.getState().modelMessages;
+            logger.info(`📊 Model Chat now has ${currentMessages.length} messages`, { context: 'Dashboard' });
+            
+            // If it's a trade signal, add execution message
+            if (action !== 'HOLD' && data.analysis.confidence > 0.6) {
               useStore.getState().addModelMessage({
                 id: `${Date.now()}-trade`,
                 model: 'DeepSeek R1',
-                message: `Executing ${data.analysis.action} ${data.analysis.size.toFixed(4)} ${data.analysis.symbol || 'BTC/USDT'} @ ${(data.analysis.confidence * 100).toFixed(1)}% confidence`,
+                message: `✅ Executing ${action} ${data.analysis.size.toFixed(4)} ${symbol} @ ${confidence}% confidence`,
                 timestamp: Date.now(),
                 type: 'trade',
               });
@@ -87,6 +101,16 @@ export default function Dashboard() {
       }
     };
 
+    // Add a test message on mount to verify Model Chat works
+    useStore.getState().addModelMessage({
+      id: `${Date.now()}-test`,
+      model: 'DeepSeek R1',
+      message: '🟢 System initialized. Starting market analysis...',
+      timestamp: Date.now(),
+      type: 'analysis',
+    });
+    logger.info('✅ Added test message to Model Chat', { context: 'Dashboard' });
+    
     // Start trading cycles
     callTradingAPI(); // Initial call
     const tradingInterval = setInterval(callTradingAPI, 10000); // Every 10 seconds
@@ -244,14 +268,51 @@ export default function Dashboard() {
           animate={{ opacity: 1, y: 0 }}
           className="glass-effect p-6 rounded-lg"
         >
-          <div className="mb-4">
-            <h2 className="text-sm text-green-500/60 mb-2">TOTAL ACCOUNT VALUE</h2>
-            <div className="text-4xl font-bold terminal-text">
-              ${totalValue.toFixed(2)}
+          <div className="mb-4 flex items-start justify-between">
+            <div className="flex-1">
+              <h2 className="text-sm text-green-500/60 mb-2">TOTAL ACCOUNT VALUE</h2>
+              <div className="text-4xl font-bold terminal-text">
+                ${totalValue.toFixed(2)}
+              </div>
+              <button className="text-xs text-neon-blue mt-2 hover:underline">
+                DETAILED VIEW
+              </button>
             </div>
-            <button className="text-xs text-neon-blue mt-2 hover:underline">
-              DETAILED VIEW
-            </button>
+            
+            {/* Bot Wallet Address */}
+            <div className="ml-4">
+              <div className="text-xs text-green-500/60 mb-2">BOT WALLET</div>
+              <div 
+                onClick={() => {
+                  const address = '0x3E48e3A840690DdE27Ba12555eE203cf1577ae7E';
+                  navigator.clipboard.writeText(address);
+                  const btn = document.getElementById('wallet-copy-btn');
+                  if (btn) {
+                    const originalText = btn.textContent;
+                    btn.textContent = '✓ COPIED!';
+                    btn.classList.add('text-neon-green');
+                    setTimeout(() => {
+                      btn.textContent = originalText;
+                      btn.classList.remove('text-neon-green');
+                    }, 2000);
+                  }
+                }}
+                className="flex items-center gap-2 p-2 bg-green-500/5 border border-green-500/30 hover:border-neon-green transition-all cursor-pointer group rounded"
+              >
+                <div className="font-mono text-xs text-green-500">
+                  0x3E48...ae7E
+                </div>
+                <button 
+                  id="wallet-copy-btn"
+                  className="text-xs text-neon-blue hover:text-neon-green transition-all whitespace-nowrap"
+                >
+                  📋
+                </button>
+              </div>
+              <div className="text-[10px] text-green-500/40 mt-1 font-mono text-right">
+                Click to copy
+              </div>
+            </div>
           </div>
 
           <TradingChart />
@@ -339,8 +400,8 @@ export default function Dashboard() {
             
             {/* Info panel */}
             <div className="p-3 border border-green-500/20 bg-black/40 text-xs text-green-500/70">
-              <div className="mb-1">🤖 <span className="font-bold">DeepSeek R1</span> uses advanced reasoning to analyze market patterns, sentiment, and technical indicators with multi-step logic.</div>
-              <div className="mt-2 text-neon-blue">Real-time data from Aster DEX</div>
+              <div className="mb-1">🤖 <span className="font-bold">DeepSeek R1</span> analyzes BTC, ETH, SOL, ASTER, and ZEC markets using advanced reasoning. Picks the best opportunity with highest confidence.</div>
+              <div className="mt-2 text-neon-blue">Real-time multi-market analysis via Aster DEX</div>
             </div>
           </div>
         </motion.div>

@@ -14,14 +14,14 @@ interface AIModel {
 
 export default function Models() {
   const [models] = useState<AIModel[]>([
-    {
-      name: 'DeepSeek R1',
-      description: 'Advanced reasoning model that analyzes market patterns, sentiment, and technical indicators with deep multi-step logic. Optimized for volatile crypto markets with adaptive risk management.',
-      strategy: 'Deep Reasoning + Pattern Recognition',
-      status: 'active',
-      performance: 0,
-      trades: 0,
-    },
+           {
+             name: 'DeepSeek R1',
+             description: 'Advanced reasoning model that analyzes BTC, ETH, SOL, ASTER, and ZEC markets. Uses deep multi-step logic to identify the best trading opportunities across multiple pairs with adaptive risk management.',
+             strategy: 'Deep Reasoning + Multi-Market Analysis',
+             status: 'active',
+             performance: 0,
+             trades: 0,
+           },
   ]);
 
   return (

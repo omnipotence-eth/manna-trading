@@ -431,15 +431,17 @@ class AITradingService {
 
   private async runTradingCycle(): Promise<TradingSignal | null> {
     try {
-      // DeepSeek R1 analyzes multiple pairs: BTC/USDT and ASTER/USDT
-      const symbols = ['BTC/USDT', 'ASTER/USDT'];
+      // DeepSeek R1 analyzes multiple pairs on Aster DEX
+      const symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'ASTER/USDT', 'ZEC/USDT'];
       let bestSignal: TradingSignal | null = null;
       let highestConfidence = 0;
+
+      let lastSignal: TradingSignal | null = null;
 
       for (const model of this.models) {
         // Analyze each symbol and pick the best signal
         for (const symbol of symbols) {
-          // Get real market data from Aster DEX
+          // Get real market data from Binance/Aster DEX
           const currentPrice = await asterDexService.getPrice(symbol);
           
           // Skip if price is 0 (market not available)
@@ -479,6 +481,9 @@ class AITradingService {
             },
           });
           
+          // Keep track of the last signal (even if HOLD)
+          lastSignal = signal;
+          
           // Track the best signal across all symbols
           if (signal.action !== 'HOLD' && signal.confidence > highestConfidence) {
             highestConfidence = signal.confidence;
@@ -501,10 +506,10 @@ class AITradingService {
           // Execute trades with confidence > 60%
           await model.executeTrade(bestSignal);
         }
-        
-        // Return the best signal for API response (or last analyzed if none good)
-        return bestSignal;
       }
+      
+      // Return the best signal, or the last analyzed signal if all were HOLD
+      return bestSignal || lastSignal;
     } catch (error) {
       logger.error('Error in trading cycle', error, { context: 'AITrading' });
     }

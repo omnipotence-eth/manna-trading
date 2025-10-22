@@ -55,20 +55,19 @@ class AsterDexService {
   private shouldStayConnected: boolean = false;
 
   constructor() {
-    // Use Binance Futures public API (Aster DEX compatible fallback)
-    // This ensures we get REAL data even if Aster DEX API is unavailable
-    this.baseUrl = 'https://fapi.binance.com/fapi/v1';
-    this.WS_BASE_URL = 'wss://fstream.binance.com/stream';
+    // Use Aster DEX's own API endpoints (Binance-compatible API)
+    this.baseUrl = 'https://fapi.asterdex.com/fapi/v1';
+    this.WS_BASE_URL = 'wss://fstream.asterdex.com/stream';
     
     // Load API credentials from environment variables
     if (typeof window !== 'undefined') {
       this.apiKey = process.env.NEXT_PUBLIC_ASTER_API_KEY || null;
-      logger.info('🔄 Using Binance Public API (Aster DEX compatible)', {
+      logger.info('🔄 Using Aster DEX API directly', {
         context: 'AsterDex',
         data: { 
           baseUrl: this.baseUrl,
           wsUrl: this.WS_BASE_URL,
-          note: 'Real market data, no authentication required'
+          note: 'Real Aster DEX market data - no geo-restrictions'
         },
       });
     }
