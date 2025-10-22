@@ -598,12 +598,21 @@ class AsterDexService {
   ): Promise<AsterOrder | null> {
     this.validateOrderParams(symbol, side, size, leverage);
     try {
-      const response = await fetch('/api/asterdex/order', {
+      const response = await fetch('/api/aster/order', {
         method: 'POST',
-        body: JSON.stringify({ symbol, side, type: 'MARKET', size, leverage }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ symbol, side, type: 'MARKET', quantity: size, leverage }),
       });
+      
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Order failed: ${error}`);
+      }
+      
       const data = await response.json();
-      logger.trade('Placed real market order', { context: 'AsterDex', data });
+      logger.trade('✅ REAL MARKET ORDER PLACED', { context: 'AsterDex', data: { symbol, side, size, orderId: data.orderId } });
       return data as AsterOrder;
     } catch (error) {
       logger.error(ERROR_MESSAGES.ORDER_EXECUTION_FAILED, error, { context: 'AsterDex' });
@@ -625,12 +634,21 @@ class AsterDexService {
     this.validateOrderParams(symbol, side, size, leverage);
     this.validatePrice(price);
     try {
-      const response = await fetch('/api/asterdex/order', {
+      const response = await fetch('/api/aster/order', {
         method: 'POST',
-        body: JSON.stringify({ symbol, side, type: 'LIMIT', size, price, leverage, hidden }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ symbol, side, type: 'LIMIT', quantity: size, price, leverage, hidden }),
       });
+      
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Order failed: ${error}`);
+      }
+      
       const data = await response.json();
-      logger.trade('Placed real limit order', { context: 'AsterDex', data });
+      logger.trade('✅ REAL LIMIT ORDER PLACED', { context: 'AsterDex', data: { symbol, side, size, price, orderId: data.orderId } });
       return data as AsterOrder;
     } catch (error) {
       logger.error(ERROR_MESSAGES.ORDER_EXECUTION_FAILED, error, { context: 'AsterDex' });
@@ -639,12 +657,37 @@ class AsterDexService {
   }
 
   /**
-   * Get open positions (requires authentication - using empty array for now)
+   * Get open positions (REAL - authenticated via server-side API)
    */
   async getPositions(): Promise<AsterPosition[]> {
-    // TODO: Implement real API call when authentication is set up
-    logger.debug('Getting positions (simulated)', { context: 'AsterDex' });
-    return []; // No positions initially
+    try {
+      const response = await fetch('/api/aster/positions');
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Transform Aster API response to our format
+      const positions: AsterPosition[] = data.map((pos: any) => ({
+        symbol: pos.symbol.replace('USDT', '/USDT'),
+        side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
+        size: Math.abs(parseFloat(pos.positionAmt)),
+        entryPrice: parseFloat(pos.entryPrice),
+        leverage: parseInt(pos.leverage),
+        unrealizedPnl: parseFloat(pos.unRealizedProfit),
+      }));
+      
+      logger.info(`📊 REAL Aster Positions: ${positions.length} open`, {
+        context: 'AsterDex',
+        data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) },
+      });
+      
+      return positions;
+    } catch (error) {
+      logger.error('Failed to get real positions', error, { context: 'AsterDex' });
+      return []; // Fallback to empty
+    }
   }
 
   /**
@@ -686,13 +729,28 @@ class AsterDexService {
   }
 
   /**
-   * Get account balance (requires authentication - using simulated value for now)
+   * Get account balance (REAL - authenticated via server-side API)
    */
   async getBalance(): Promise<number> {
-    // TODO: Implement real API call when authentication is set up
-    // For now, return initial capital
-    logger.debug('Getting balance (simulated)', { context: 'AsterDex' });
-    return 100; // Initial capital
+    try {
+      const response = await fetch('/api/aster/account');
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const balance = parseFloat(data.totalWalletBalance || 0);
+      
+      logger.info(`💰 REAL Aster Balance: $${balance.toFixed(2)}`, {
+        context: 'AsterDex',
+        data: { balance, availableBalance: data.availableBalance },
+      });
+      
+      return balance;
+    } catch (error) {
+      logger.error('Failed to get real balance', error, { context: 'AsterDex' });
+      return 100; // Fallback to initial capital
+    }
   }
 
   /**
