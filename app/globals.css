@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #000000;
+  --foreground: #00ff41;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: 'Courier New', monospace;
+  overflow-x: hidden;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .terminal-text {
+    font-family: 'Courier New', monospace;
+    text-shadow: 0 0 5px rgba(0, 255, 65, 0.5);
+  }
+  
+  .neon-border {
+    border: 1px solid #00ff41;
+    box-shadow: 0 0 5px rgba(0, 255, 65, 0.3);
+  }
+  
+  .glass-effect {
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 255, 65, 0.2);
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #000;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #00ff41;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #00d4ff;
+}
+
+/* Loading animation */
+@keyframes terminal-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cursor-blink::after {
+  content: '█';
+  animation: terminal-cursor 1s infinite;
+}
+

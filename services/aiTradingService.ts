@@ -1,0 +1,385 @@
+import { asterDexService } from './asterDexService';
+import { logger } from '@/lib/logger';
+import { TRADING_CONSTANTS, SUPPORTED_SYMBOLS } from '@/constants';
+import type { MarketData } from '@/types/trading';
+import { useStore } from '@/store/useStore';
+
+export interface TradingSignal {
+  symbol: string;
+  action: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number;
+  size: number;
+  reasoning: string;
+}
+
+export interface AIModelConfig {
+  name: string;
+  strategy: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  maxLeverage: number;
+  maxPositionSize: number;
+  stopLoss: number;
+  takeProfit: number;
+}
+
+/**
+ * Base class for AI trading models
+ */
+export abstract class AITradingModel {
+  protected config: AIModelConfig;
+  protected balance: number = 100; // Starting with $100
+  protected positions: Map<string, any> = new Map();
+
+  constructor(config: AIModelConfig) {
+    this.config = config;
+  }
+
+  /**
+   * Analyze market and generate trading signal
+   */
+  abstract analyze(symbol: string, marketData: MarketData): Promise<TradingSignal>;
+
+  /**
+   * Execute trading signal
+   */
+  async executeTrade(signal: TradingSignal): Promise<boolean> {
+    try {
+      if (signal.action === 'HOLD') {
+        return false;
+      }
+
+      logger.info(`🤖 ${this.config.name}: ${signal.reasoning}`, {
+        context: 'AITrading',
+        data: { model: this.config.name, signal: signal.action, symbol: signal.symbol },
+      });
+
+      const leverage = this.calculateLeverage(signal.confidence);
+      const order = await asterDexService.placeMarketOrder(
+        signal.symbol,
+        signal.action,
+        signal.size,
+        leverage
+      );
+
+      if (order) {
+        logger.trade(`${this.config.name} executed trade`, {
+          model: this.config.name,
+          action: signal.action,
+          symbol: signal.symbol,
+          orderId: order.orderId,
+        });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      logger.error(`Failed to execute trade for ${this.config.name}`, error, {
+        context: 'AITrading',
+        data: { model: this.config.name, signal },
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Calculate leverage based on confidence
+   */
+  protected calculateLeverage(confidence: number): number {
+    const baseLeverage = this.config.maxLeverage * confidence;
+    return Math.min(baseLeverage, this.config.maxLeverage);
+  }
+
+  /**
+   * Update model state
+   */
+  async update() {
+    // Override in subclass to implement learning/adaptation
+  }
+}
+
+/**
+ * Momentum-based trading model
+ */
+export class AlphaTraderModel extends AITradingModel {
+  constructor() {
+    super({
+      name: 'AlphaTrader',
+      strategy: 'Momentum + Trend Following',
+      riskLevel: 'MEDIUM',
+      maxLeverage: 10,
+      maxPositionSize: 5000,
+      stopLoss: 0.02,
+      takeProfit: 0.05,
+    });
+  }
+
+  async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
+    // Simplified momentum analysis
+    const price = marketData.currentPrice;
+    const prevPrice = marketData.previousPrice || price;
+    const momentum = (price - prevPrice) / prevPrice;
+
+    if (momentum > 0.01) {
+      return {
+        symbol,
+        action: 'BUY',
+        confidence: Math.min(momentum * 50, 1),
+        size: 0.1,
+        reasoning: `Strong upward momentum detected. Price change: ${(momentum * 100).toFixed(2)}%`,
+      };
+    } else if (momentum < -0.01) {
+      return {
+        symbol,
+        action: 'SELL',
+        confidence: Math.min(Math.abs(momentum) * 50, 1),
+        size: 0.1,
+        reasoning: `Strong downward momentum detected. Price change: ${(momentum * 100).toFixed(2)}%`,
+      };
+    }
+
+    return {
+      symbol,
+      action: 'HOLD',
+      confidence: 0,
+      size: 0,
+      reasoning: 'Momentum insufficient for trade entry',
+    };
+  }
+}
+
+/**
+ * Statistical arbitrage model
+ */
+export class QuantumAIModel extends AITradingModel {
+  constructor() {
+    super({
+      name: 'QuantumAI',
+      strategy: 'Statistical Arbitrage',
+      riskLevel: 'LOW',
+      maxLeverage: 5,
+      maxPositionSize: 3000,
+      stopLoss: 0.015,
+      takeProfit: 0.03,
+    });
+  }
+
+  async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
+    // Simplified mean reversion analysis
+    const price = marketData.currentPrice;
+    const ma = marketData.movingAverage || price;
+    const deviation = (price - ma) / ma;
+
+    if (deviation < -0.02) {
+      return {
+        symbol,
+        action: 'BUY',
+        confidence: Math.min(Math.abs(deviation) * 30, 1),
+        size: 0.15,
+        reasoning: `Price below moving average. Mean reversion opportunity detected.`,
+      };
+    } else if (deviation > 0.02) {
+      return {
+        symbol,
+        action: 'SELL',
+        confidence: Math.min(deviation * 30, 1),
+        size: 0.15,
+        reasoning: `Price above moving average. Mean reversion to downside expected.`,
+      };
+    }
+
+    return {
+      symbol,
+      action: 'HOLD',
+      confidence: 0,
+      size: 0,
+      reasoning: 'Price within expected range',
+    };
+  }
+}
+
+/**
+ * Deep learning model
+ */
+export class NeuralNetV2Model extends AITradingModel {
+  constructor() {
+    super({
+      name: 'NeuralNet-V2',
+      strategy: 'Deep Learning + Pattern Recognition',
+      riskLevel: 'MEDIUM',
+      maxLeverage: 8,
+      maxPositionSize: 4000,
+      stopLoss: 0.025,
+      takeProfit: 0.06,
+    });
+  }
+
+  async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
+    // Simplified pattern recognition
+    const volume = marketData.volume || 1;
+    const avgVolume = marketData.averageVolume || 1;
+    const volumeRatio = volume / avgVolume;
+    const priceChange = marketData.priceChange || 0;
+
+    if (volumeRatio > 1.5 && priceChange > 0) {
+      return {
+        symbol,
+        action: 'BUY',
+        confidence: Math.min(volumeRatio * 0.3, 1),
+        size: 0.2,
+        reasoning: `Volume spike with positive price action. Pattern indicates continuation.`,
+      };
+    } else if (volumeRatio > 1.5 && priceChange < 0) {
+      return {
+        symbol,
+        action: 'SELL',
+        confidence: Math.min(volumeRatio * 0.3, 1),
+        size: 0.2,
+        reasoning: `Volume spike with negative price action. Pattern indicates further decline.`,
+      };
+    }
+
+    return {
+      symbol,
+      action: 'HOLD',
+      confidence: 0,
+      size: 0,
+      reasoning: 'No significant pattern detected',
+    };
+  }
+}
+
+/**
+ * Trading service to manage all AI models
+ */
+class AITradingService {
+  private models: AITradingModel[] = [];
+  private isRunning: boolean = false;
+  private intervalId: NodeJS.Timeout | null = null;
+
+  constructor() {
+    this.initializeModels();
+  }
+
+  private initializeModels() {
+    // Start with just one model (AlphaTrader) with $100 initial capital
+    this.models = [
+      new AlphaTraderModel(),
+    ];
+    logger.info('✅ Initialized 1 AI model with $100 starting capital', { context: 'AITrading' });
+  }
+
+  async start() {
+    if (this.isRunning) {
+      logger.warn('Trading service already running', { context: 'AITrading' });
+      return;
+    }
+
+    logger.info('🚀 Starting AI trading service with $100 initial capital...', { context: 'AITrading' });
+    this.isRunning = true;
+
+    // Initialize Aster DEX connection
+    await asterDexService.initialize();
+
+    // Allocate initial $100 capital to AlphaTrader by buying BTC
+    const modelName = this.models[0].config.name;
+    const initialCapital = 100;
+    const symbol = 'BTC/USDT';
+    
+    try {
+      const allocated = await asterDexService.allocateInitialCapital(modelName, initialCapital, symbol);
+      if (allocated) {
+        logger.info(`✅ ${modelName} allocated $${initialCapital} to ${symbol}`, { context: 'AITrading' });
+      } else {
+        logger.warn(`⚠️ Initial allocation failed for ${modelName}, will trade with available balance`, { context: 'AITrading' });
+      }
+    } catch (error) {
+      logger.error('Failed to allocate initial capital', error, { context: 'AITrading' });
+    }
+
+    // Start trading loop
+    this.intervalId = setInterval(() => {
+      this.runTradingCycle();
+    }, TRADING_CONSTANTS.TRADE_UPDATE_INTERVAL);
+
+    logger.info('✅ AI trading service started', { context: 'AITrading' });
+  }
+
+  async stop() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    this.isRunning = false;
+    asterDexService.disconnect();
+    logger.info('🛑 AI trading service stopped', { context: 'AITrading' });
+  }
+
+  private async runTradingCycle() {
+    try {
+      // AlphaTrader focuses on BTC/USDT
+      const symbol = 'BTC/USDT';
+
+      for (const model of this.models) {
+        // Get real market data from Aster DEX
+        const currentPrice = await asterDexService.getPrice(symbol);
+        
+        // Fetch real 24h ticker data for additional metrics
+        const tickerData = await asterDexService.getTicker(symbol);
+        
+        const marketData: MarketData = {
+          currentPrice: currentPrice,
+          previousPrice: tickerData?.previousPrice || currentPrice,
+          movingAverage: tickerData?.movingAverage || currentPrice,
+          volume: tickerData?.volume || 0,
+          averageVolume: tickerData?.averageVolume || 0,
+          priceChange: tickerData?.priceChangePercent || 0,
+        };
+
+        logger.debug(`📊 Market data for ${symbol}`, {
+          context: 'AITrading',
+          data: { price: currentPrice, change: marketData.priceChange },
+        });
+
+        // Analyze and execute if signal is strong
+        const signal = await model.analyze(symbol, marketData);
+        
+        // Post analysis message to store
+        if (typeof window !== 'undefined') {
+          useStore.getState().addModelMessage({
+            id: Date.now().toString(),
+            model: model.config.name,
+            message: signal.reasoning,
+            timestamp: Date.now(),
+            type: signal.action === 'HOLD' ? 'analysis' : 'alert',
+          });
+        }
+        
+        if (signal.action !== 'HOLD' && signal.confidence > 0.6) {
+          // Post trade decision message
+          if (typeof window !== 'undefined') {
+            useStore.getState().addModelMessage({
+              id: `${Date.now()}-trade`,
+              model: model.config.name,
+              message: `Executing ${signal.action} ${signal.size.toFixed(4)} ${symbol} @ confidence ${(signal.confidence * 100).toFixed(1)}%`,
+              timestamp: Date.now(),
+              type: 'trade',
+            });
+          }
+          
+          // Execute trades with confidence > 60%
+          await model.executeTrade(signal);
+        }
+      }
+    } catch (error) {
+      logger.error('Error in trading cycle', error, { context: 'AITrading' });
+    }
+  }
+
+  getModels() {
+    return this.models;
+  }
+}
+
+export const aiTradingService = new AITradingService();
+export default aiTradingService;
+
