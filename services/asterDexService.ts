@@ -739,11 +739,35 @@ class AsterDexService {
       }
       
       const data = await response.json();
-      const balance = parseFloat(data.totalWalletBalance || 0);
+      
+      // Try multiple balance fields (Aster DEX API variations)
+      let balance = parseFloat(data.totalWalletBalance || 0);
+      
+      // If totalWalletBalance is 0, check assets array for USDT
+      if (balance === 0 && data.assets && Array.isArray(data.assets)) {
+        const usdtAsset = data.assets.find((asset: any) => asset.asset === 'USDT');
+        if (usdtAsset) {
+          balance = parseFloat(usdtAsset.walletBalance || usdtAsset.availableBalance || 0);
+          logger.info('💰 Found balance in assets array', {
+            context: 'AsterDex',
+            data: { asset: usdtAsset },
+          });
+        }
+      }
+      
+      // If still 0, try availableBalance
+      if (balance === 0 && data.availableBalance) {
+        balance = parseFloat(data.availableBalance);
+      }
       
       logger.info(`💰 REAL Aster Balance: $${balance.toFixed(2)}`, {
         context: 'AsterDex',
-        data: { balance, availableBalance: data.availableBalance },
+        data: { 
+          balance, 
+          totalWalletBalance: data.totalWalletBalance,
+          availableBalance: data.availableBalance,
+          assetsCount: data.assets?.length || 0,
+        },
       });
       
       return balance;

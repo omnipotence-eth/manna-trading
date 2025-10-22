@@ -52,12 +52,32 @@ export default function Dashboard() {
         if (data.success) {
           logger.info('✅ Trading cycle completed', { context: 'Dashboard', data });
           
-          // If there's analysis data, show it
+          // If there's analysis data, show it in console AND store it for MODEL CHAT
           if (data.analysis) {
             logger.info(`🤖 DeepSeek R1: ${data.analysis.action} (${(data.analysis.confidence * 100).toFixed(1)}%)`, {
               context: 'Dashboard',
               data: { reasoning: data.analysis.reasoning }
             });
+            
+            // Add to MODEL CHAT via store
+            useStore.getState().addModelMessage({
+              id: `${Date.now()}-analysis`,
+              model: 'DeepSeek R1',
+              message: data.analysis.reasoning,
+              timestamp: Date.now(),
+              type: data.analysis.action === 'HOLD' ? 'analysis' : 'alert',
+            });
+            
+            // If it's a trade signal, add trade message
+            if (data.analysis.action !== 'HOLD' && data.analysis.confidence > 0.6) {
+              useStore.getState().addModelMessage({
+                id: `${Date.now()}-trade`,
+                model: 'DeepSeek R1',
+                message: `Executing ${data.analysis.action} ${data.analysis.size.toFixed(4)} BTC/USDT @ ${(data.analysis.confidence * 100).toFixed(1)}% confidence`,
+                timestamp: Date.now(),
+                type: 'trade',
+              });
+            }
           }
         } else {
           logger.error('❌ Trading cycle failed', data.error, { context: 'Dashboard' });
