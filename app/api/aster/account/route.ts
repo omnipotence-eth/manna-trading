@@ -47,7 +47,18 @@ export async function GET(req: NextRequest) {
     const data = await response.json();
     logger.info('Successfully fetched Aster account data', {
       context: 'AsterAPI',
-      data: { balance: data.totalWalletBalance },
+      data: { 
+        totalWalletBalance: data.totalWalletBalance,
+        availableBalance: data.availableBalance,
+        totalUnrealizedProfit: data.totalUnrealizedProfit,
+        assets: data.assets?.length || 0,
+      },
+    });
+    
+    // Log full response for debugging
+    logger.debug('Full Aster account response', {
+      context: 'AsterAPI',
+      data: { fullData: JSON.stringify(data).substring(0, 500) },
     });
 
     return NextResponse.json(data);
