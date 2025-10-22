@@ -249,13 +249,13 @@ export default function Dashboard() {
           <h3 className="text-lg font-bold mb-4 terminal-text">AI MODEL</h3>
           
           <div className="space-y-3">
-            {/* Show AlphaTrader with real stats or initial state */}
+            {/* Show DeepSeek R1 with real stats or initial state */}
             {(() => {
-              const alphaStats = modelStats.find(m => m.name === 'AlphaTrader');
-              const modelTrades = trades.filter(t => t.model === 'AlphaTrader').length;
-              const pnl = alphaStats?.pnl || 0;
-              const winRate = alphaStats?.winRate || 0;
-              const totalTrades = alphaStats?.trades || modelTrades || 0;
+              const deepseekStats = modelStats.find(m => m.name === 'DeepSeek R1');
+              const modelTrades = trades.filter(t => t.model === 'DeepSeek R1').length;
+              const pnl = deepseekStats?.pnl || 0;
+              const winRate = deepseekStats?.winRate || 0;
+              const totalTrades = deepseekStats?.trades || modelTrades || 0;
               const pnlPercent = pnl > 0 ? `+${pnl.toFixed(2)}%` : `${pnl.toFixed(2)}%`;
               
               return (
@@ -263,11 +263,11 @@ export default function Dashboard() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-neon-blue font-bold text-xl">●</span>
-                      <span className="text-green-500 font-bold text-lg">AlphaTrader</span>
+                      <span className="text-green-500 font-bold text-lg">DeepSeek R1</span>
                       <span className="text-xs text-neon-green px-2 py-1 bg-neon-green/20 rounded">ACTIVE</span>
                     </div>
                     <div className="text-xs text-green-500/80 space-y-1">
-                      <div>Strategy: Momentum + Trend</div>
+                      <div>Strategy: Deep Reasoning + Patterns</div>
                       <div>Capital: $100 USDT</div>
                       <div>Trades: {totalTrades} • Win Rate: {winRate.toFixed(1)}%</div>
                     </div>
@@ -284,7 +284,7 @@ export default function Dashboard() {
             
             {/* Info panel */}
             <div className="p-3 border border-green-500/20 bg-black/40 text-xs text-green-500/70">
-              <div className="mb-1">🤖 <span className="font-bold">AlphaTrader</span> analyzes BTC/USDT momentum patterns and executes trades when confidence exceeds 60%.</div>
+              <div className="mb-1">🤖 <span className="font-bold">DeepSeek R1</span> uses advanced reasoning to analyze market patterns, sentiment, and technical indicators with multi-step logic.</div>
               <div className="mt-2 text-neon-blue">Real-time data from Aster DEX</div>
             </div>
           </div>
