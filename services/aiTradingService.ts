@@ -347,16 +347,18 @@ export class DeepSeekR1Model extends AITradingModel {
   private async calculatePositionSize(signal: TradingSignal, price: number): Promise<number> {
     const balance = await asterDexService.getBalance();
     
-    // Define minimum order sizes per market (Aster DEX requirements)
-    const MIN_ORDER_SIZES: Record<string, number> = {
-      'BTC/USDT': 0.001,   // ~$107
-      'ETH/USDT': 0.01,    // ~$38
-      'SOL/USDT': 0.1,     // ~$18
-      'ASTER/USDT': 10,    // ~$10
-      'ZEC/USDT': 0.05,    // ~$13
+    // Define minimum order sizes and precision per market (Aster DEX requirements)
+    const MARKET_CONFIG: Record<string, { minSize: number; precision: number }> = {
+      'BTC/USDT': { minSize: 0.001, precision: 3 },   // 0.001 BTC min
+      'ETH/USDT': { minSize: 0.01, precision: 2 },    // 0.01 ETH min
+      'SOL/USDT': { minSize: 0.1, precision: 1 },     // 0.1 SOL min
+      'ASTER/USDT': { minSize: 10, precision: 0 },    // 10 ASTER min (whole numbers)
+      'ZEC/USDT': { minSize: 0.05, precision: 2 },    // 0.05 ZEC min
     };
     
-    const minSize = MIN_ORDER_SIZES[signal.symbol] || 0.001;
+    const config = MARKET_CONFIG[signal.symbol] || { minSize: 0.001, precision: 3 };
+    const minSize = config.minSize;
+    const precision = config.precision;
     
     // Max risk per trade (e.g., 5% of $101 = $5.05)
     const maxRiskAmount = balance * this.riskConfig.maxRiskPerTrade;
@@ -382,6 +384,9 @@ export class DeepSeekR1Model extends AITradingModel {
       finalSize = minSize; // Use minimum size (will be checked against balance)
     }
     
+    // Round to correct precision (CRITICAL for Aster DEX)
+    finalSize = Math.floor(finalSize * Math.pow(10, precision)) / Math.pow(10, precision);
+    
     // Verify we can afford this position
     const positionValue = finalSize * price;
     if (positionValue > balance) {
@@ -397,10 +402,11 @@ export class DeepSeekR1Model extends AITradingModel {
         balance: balance.toFixed(2),
         maxRisk: maxRiskAmount.toFixed(2),
         stopLoss: (this.riskConfig.stopLossPercent * 100).toFixed(1) + '%',
-        minOrderSize: minSize.toFixed(6),
-        calculatedSize: finalSize.toFixed(6),
+        minOrderSize: minSize.toFixed(precision),
+        calculatedSize: finalSize.toFixed(precision),
         estimatedValue: (finalSize * price).toFixed(2),
         meetsMinimum: finalSize >= minSize ? '✅' : '❌',
+        precision: precision,
       }
     });
     
