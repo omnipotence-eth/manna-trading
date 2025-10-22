@@ -458,28 +458,26 @@ class AITradingService {
         // Analyze and execute if signal is strong
         const signal = await model.analyze(symbol, marketData);
         
-        // Post analysis message to store
-        if (typeof window !== 'undefined') {
-          useStore.getState().addModelMessage({
-            id: Date.now().toString(),
-            model: 'AlphaTrader',
-            message: signal.reasoning,
-            timestamp: Date.now(),
-            type: signal.action === 'HOLD' ? 'analysis' : 'alert',
-          });
-        }
+        // Log analysis (works on both client and server)
+        logger.info(`🤖 DeepSeek R1 Analysis: ${signal.action}`, {
+          context: 'AITrading',
+          data: { 
+            action: signal.action, 
+            confidence: signal.confidence,
+            reasoning: signal.reasoning 
+          },
+        });
         
         if (signal.action !== 'HOLD' && signal.confidence > 0.6) {
-          // Post trade decision message
-          if (typeof window !== 'undefined') {
-            useStore.getState().addModelMessage({
-              id: `${Date.now()}-trade`,
-              model: 'AlphaTrader',
-              message: `Executing ${signal.action} ${signal.size.toFixed(4)} ${symbol} @ confidence ${(signal.confidence * 100).toFixed(1)}%`,
-              timestamp: Date.now(),
-              type: 'trade',
-            });
-          }
+          // Log trade decision
+          logger.info(`💰 DeepSeek R1 Trading: ${signal.action} ${signal.size.toFixed(4)} ${symbol}`, {
+            context: 'AITrading',
+            data: { 
+              action: signal.action,
+              size: signal.size,
+              confidence: signal.confidence,
+            },
+          });
           
           // Execute trades with confidence > 60%
           await model.executeTrade(signal);

@@ -9,15 +9,20 @@ let isInitialized = false;
 
 export async function GET(request: NextRequest) {
   try {
+    logger.info('📡 Trading API called', { context: 'TradingAPI' });
+    
     // Initialize the trading service once
     if (!isInitialized) {
+      logger.info('🔄 Initializing AI trading service...', { context: 'TradingAPI' });
       await aiTradingService.start();
       isInitialized = true;
-      logger.info('🚀 Server-side AI trading service initialized', { context: 'TradingAPI' });
+      logger.info('✅ AI trading service initialized', { context: 'TradingAPI' });
     }
 
     // Run a single trading cycle
+    logger.info('🔍 Running DeepSeek R1 analysis cycle...', { context: 'TradingAPI' });
     await aiTradingService.runSingleCycle();
+    logger.info('✅ Analysis cycle completed', { context: 'TradingAPI' });
 
     return NextResponse.json({
       success: true,
@@ -25,7 +30,7 @@ export async function GET(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    logger.error('Failed to run trading cycle', error, { context: 'TradingAPI' });
+    logger.error('❌ Failed to run trading cycle', error, { context: 'TradingAPI' });
     return NextResponse.json(
       {
         success: false,
