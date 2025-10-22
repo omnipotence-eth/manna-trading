@@ -46,10 +46,19 @@ export default function Dashboard() {
       if (!isMounted) return; // Ignore data if unmounted
       
       const wsData = (data.data || {}) as any;
-      logger.info('📊 WebSocket data received', { 
-        context: 'Dashboard',
-        data: { type: data.type, symbol: wsData.symbol || 'unknown', price: wsData.price || 0 },
-      });
+      
+      // Debug: Log ALL received data to verify what's coming in
+      if (wsData.symbol) {
+        logger.debug('📊 WebSocket data received', { 
+          context: 'Dashboard',
+          data: { 
+            type: data.type, 
+            symbol: wsData.symbol, 
+            price: wsData.price || 0,
+            change: wsData.priceChangePercent || 0,
+          },
+        });
+      }
       
       // Mark as connected on first message
       if (!firstMessageReceived) {
@@ -61,26 +70,29 @@ export default function Dashboard() {
       // Update UI based on real-time data from TRADE events (most frequent)
       if (data.type === 'trade' && wsData.price && wsData.symbol) {
         const currentPrice = wsData.price;
-        const symbol = wsData.symbol;
+        const wsSymbol = wsData.symbol; // e.g., 'btcusdt' or 'BTCUSDT'
         
-        logger.info(`💰 LIVE PRICE UPDATE: ${symbol} = $${currentPrice.toLocaleString()}`, { 
+        logger.info(`💰 LIVE PRICE UPDATE: ${wsSymbol} = $${currentPrice.toLocaleString()}`, { 
           context: 'Dashboard',
-          data: { symbol, price: currentPrice, quantity: wsData.quantity },
+          data: { symbol: wsSymbol, price: currentPrice, quantity: wsData.quantity },
         });
 
-        // Update store with live price for other components
-        updateLivePrice(symbol, {
-          symbol: symbol.replace('USDT', '/USDT'),
+        // Store using uppercase format (BTCUSDT) - matches PriceTicker lookup
+        const storeKey = wsSymbol.toUpperCase();
+        updateLivePrice(storeKey, {
+          symbol: storeKey.replace('USDT', '/USDT'),
           price: currentPrice,
           lastUpdate: Date.now(),
         });
+        
+        logger.debug(`✅ Stored price: ${storeKey} = $${currentPrice}`, { context: 'Dashboard' });
       }
 
       // Also handle ticker data (24hr statistics)
       if (data.type === 'ticker' && wsData.price && wsData.symbol) {
-        const symbol = wsData.symbol;
+        const wsSymbol = wsData.symbol; // e.g., 'btcusdt' or 'BTCUSDT'
         
-        logger.info(`📊 24HR TICKER: ${symbol} = $${wsData.price.toLocaleString()}`, {
+        logger.info(`📊 24HR TICKER: ${wsSymbol} = $${wsData.price.toLocaleString()}`, {
           context: 'Dashboard',
           data: { 
             price: wsData.price,
@@ -89,13 +101,16 @@ export default function Dashboard() {
           },
         });
 
-        // Update store with ticker data (includes price change)
-        updateLivePrice(symbol, {
-          symbol: symbol.replace('USDT', '/USDT'),
+        // Store using uppercase format (BTCUSDT) - matches PriceTicker lookup
+        const storeKey = wsSymbol.toUpperCase();
+        updateLivePrice(storeKey, {
+          symbol: storeKey.replace('USDT', '/USDT'),
           price: wsData.price,
           change: wsData.priceChangePercent,
           lastUpdate: Date.now(),
         });
+        
+        logger.debug(`✅ Stored ticker: ${storeKey} = $${wsData.price} (${wsData.priceChangePercent}%)`, { context: 'Dashboard' });
       }
 
       // Handle order book updates

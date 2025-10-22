@@ -24,6 +24,11 @@ export default function PriceTicker() {
                      livePrices[wsSymbol.toLowerCase()] || 
                      livePrices[wsSymbol.toUpperCase()];
     
+    // Debug: Log when data is missing
+    if (!liveData && typeof window !== 'undefined') {
+      console.log(`⚠️ No price data for ${wsSymbol}. Available keys:`, Object.keys(livePrices));
+    }
+    
     return {
       symbol: baseSymbol,
       price: liveData?.price || 0,
