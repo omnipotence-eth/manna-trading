@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/trading",
-      "schedule": "* * * * *"
+      "schedule": "0 * * * *"
     }
   ]
 }

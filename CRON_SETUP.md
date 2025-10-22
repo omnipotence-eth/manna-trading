@@ -53,20 +53,28 @@ You should see logs like:
 
 ## Cron Schedule
 
-The cron job is configured to run **every minute** (`* * * * *`). 
+The cron job is configured to run **every hour** (`0 * * * *`) due to Vercel's Hobby (free) plan limitations.
 
-If you want to change the frequency:
-- Every 30 seconds: Not supported by Vercel (minimum is 1 minute)
+**Vercel Free Tier Limitation**: The free tier only allows cron jobs that run **once per day or less frequently**. To run more frequently (every minute, every 5 minutes, etc.), you need to upgrade to **Vercel Pro** ($20/month).
+
+### Alternative: Client-Side Polling (Current Setup)
+
+Since the free tier doesn't support frequent cron jobs, the bot continues to run via **client-side polling**:
+- The dashboard calls `/api/trading` every 10 seconds when you have the browser open
+- The hourly cron job serves as a **backup** to ensure at least 1 analysis per hour runs even when the browser is closed
+
+### If You Upgrade to Vercel Pro
+
+Edit `vercel.json` to change the schedule:
+- Every minute: `* * * * *`
 - Every 5 minutes: `*/5 * * * *`
 - Every 10 minutes: `*/10 * * * *`
-- Every hour: `0 * * * *`
-
-Edit `vercel.json` to change the schedule.
+- Every hour: `0 * * * *` (current setting)
 
 ## Important Notes
 
 ### Vercel Free Tier Limits
-- **2 cron jobs maximum** (you're using 1)
+- **Daily cron jobs only** (can run once per day maximum)
 - **10 second execution timeout** per cron job
 - **100 GB bandwidth** per month
 
