@@ -184,6 +184,11 @@ export default function Dashboard() {
         const positions = await asterDexService.getPositions();
         const balance = await asterDexService.getBalance();
         
+        logger.info(`🔍 Fetched from Aster: Balance=$${balance.toFixed(2)}, Positions=${positions.length}`, {
+          context: 'Dashboard',
+          data: { balance, positionCount: positions.length },
+        });
+        
         // Calculate total value: REAL WALLET BALANCE + unrealized P&L from positions
         const unrealizedPnL = positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
         const totalAccountValue = balance + unrealizedPnL;
@@ -191,9 +196,9 @@ export default function Dashboard() {
         if (isMounted) {
           setTotalValue(totalAccountValue);
           setAccountValue(totalAccountValue); // Sync to store for TradingChart
-          logger.info(`💰 REAL WALLET BALANCE: $${balance.toFixed(2)} + P&L: $${unrealizedPnL.toFixed(2)} = TOTAL: $${totalAccountValue.toFixed(2)}`, {
+          logger.info(`💰 DISPLAYED VALUE: $${totalAccountValue.toFixed(2)} (Balance: $${balance.toFixed(2)} + P&L: $${unrealizedPnL.toFixed(2)})`, {
             context: 'Dashboard',
-            data: { balance, unrealizedPnL, positions: positions.length, totalValue: totalAccountValue },
+            data: { balance, unrealizedPnL, positions: positions.length, totalValue: totalAccountValue, displayedValue: totalAccountValue },
           });
         }
       } catch (error) {
