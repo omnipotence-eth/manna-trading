@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { useStore } from '@/store/useStore';
+import { useEffect, useState } from 'react';
 import { SUPPORTED_SYMBOLS } from '@/constants';
 
 interface CryptoPrice {
@@ -11,30 +11,45 @@ interface CryptoPrice {
 }
 
 export default function PriceTicker() {
-  // Get live prices from store (updated by WebSocket)
-  const livePrices = useStore((state) => state.livePrices);
+  const [prices, setPrices] = useState<CryptoPrice[]>([]);
 
-  // Map SUPPORTED_SYMBOLS to display format with real data
-  const prices: CryptoPrice[] = SUPPORTED_SYMBOLS.map((fullSymbol) => {
-    const baseSymbol = fullSymbol.split('/')[0]; // 'BTC/USDT' -> 'BTC'
-    const wsSymbol = fullSymbol.replace('/', ''); // 'BTC/USDT' -> 'BTCUSDT'
-    
-    // Try multiple key formats to ensure we find the data
-    const liveData = livePrices[wsSymbol] || 
-                     livePrices[wsSymbol.toLowerCase()] || 
-                     livePrices[wsSymbol.toUpperCase()];
-    
-    // Debug: Log when data is missing
-    if (!liveData && typeof window !== 'undefined') {
-      console.log(`⚠️ No price data for ${wsSymbol}. Available keys:`, Object.keys(livePrices));
-    }
-    
-    return {
-      symbol: baseSymbol,
-      price: liveData?.price || 0,
-      change: liveData?.change || 0,
+  useEffect(() => {
+    // Fetch prices from our API (which uses CoinGecko - no geo-restrictions)
+    const fetchPrices = async () => {
+      try {
+        const response = await fetch('/api/prices');
+        if (!response.ok) throw new Error('Failed to fetch');
+        
+        const data = await response.json();
+        
+        // Convert to display format
+        const priceArray: CryptoPrice[] = SUPPORTED_SYMBOLS.map((fullSymbol) => {
+          const baseSymbol = fullSymbol.split('/')[0]; // 'BTC/USDT' -> 'BTC'
+          const wsSymbol = fullSymbol.replace('/', ''); // 'BTC/USDT' -> 'BTCUSDT'
+          
+          const priceData = data[wsSymbol];
+          
+          return {
+            symbol: baseSymbol,
+            price: priceData?.price || 0,
+            change: priceData?.change || 0,
+          };
+        });
+        
+        setPrices(priceArray);
+      } catch (error) {
+        console.error('Failed to fetch prices:', error);
+      }
     };
-  });
+
+    // Fetch immediately
+    fetchPrices();
+    
+    // Then fetch every 10 seconds
+    const interval = setInterval(fetchPrices, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="border-b border-green-500/30 bg-black/80 overflow-hidden">
