@@ -741,7 +741,7 @@ class AITradingService {
             context: 'AITrading'
           });
         } else {
-          logger.info(`😴 No tradeable signals found across all ${MARKETS_TO_TRADE.length} markets`, { context: 'AITrading' });
+          logger.info(`😴 No tradeable signals found across all 5 markets`, { context: 'AITrading' });
         }
       }
       
