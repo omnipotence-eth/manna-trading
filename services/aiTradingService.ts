@@ -337,11 +337,11 @@ export class DeepSeekR1Model extends AITradingModel {
       
       // 4. Check existing position on this symbol
       const positions = await asterDexService.getPositions();
-      const existingPosition = positions.find(p => p.symbol === signal.symbol.replace('/', ''));
+      const existingPosition = positions.find(p => p.symbol === signal.symbol);
       
       if (existingPosition) {
         // Check if we're trying to trade in the SAME direction (prevent stacking)
-        const currentSide = existingPosition.positionAmt > 0 ? 'BUY' : 'SELL';
+        const currentSide = existingPosition.side === 'LONG' ? 'BUY' : 'SELL';
         if (currentSide === signal.action) {
           return {
             allowed: false,
@@ -364,7 +364,7 @@ export class DeepSeekR1Model extends AITradingModel {
       }
       
       // 6. Check portfolio risk (total exposure)
-      const totalExposure = positions.reduce((sum, pos) => sum + Math.abs(pos.positionAmt * pos.entryPrice), 0);
+      const totalExposure = positions.reduce((sum, pos) => sum + (pos.size * pos.entryPrice), 0);
       const portfolioRisk = totalExposure / balance;
       
       if (portfolioRisk >= this.riskConfig.maxPortfolioRisk && !existingPosition) {
@@ -516,10 +516,10 @@ export class DeepSeekR1Model extends AITradingModel {
 
       // 3. Check if we need to close an existing opposite position
       const positions = await asterDexService.getPositions();
-      const existingPosition = positions.find(p => p.symbol === signal.symbol.replace('/', ''));
+      const existingPosition = positions.find(p => p.symbol === signal.symbol);
       
       if (existingPosition) {
-        const currentSide = existingPosition.positionAmt > 0 ? 'BUY' : 'SELL';
+        const currentSide = existingPosition.side === 'LONG' ? 'BUY' : 'SELL';
         const oppositeSide = currentSide === 'BUY' ? 'SELL' : 'BUY';
         
         // If signal is opposite to current position, CLOSE the existing position
@@ -530,7 +530,7 @@ export class DeepSeekR1Model extends AITradingModel {
           });
           
           // Close position by trading in opposite direction with same size
-          const closeSize = Math.abs(existingPosition.positionAmt);
+          const closeSize = existingPosition.size;
           const closeOrder = await asterDexService.placeMarketOrder(
             signal.symbol,
             oppositeSide,
