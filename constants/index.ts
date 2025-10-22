@@ -83,9 +83,11 @@ export const ERROR_MESSAGES = {
   INVALID_SIDE: 'Side must be BUY or SELL',
   CONNECTION_FAILED: 'Failed to connect to Aster DEX',
   ORDER_FAILED: 'Failed to place order',
+  ORDER_EXECUTION_FAILED: 'Failed to execute order',
   POSITION_CLOSE_FAILED: 'Failed to close position',
   INSUFFICIENT_BALANCE: 'Insufficient balance',
   MARKET_CLOSED: 'Market is currently closed',
+  API_FETCH_ERROR: 'Failed to fetch data from API',
 } as const;
 
 export const API_ENDPOINTS = {

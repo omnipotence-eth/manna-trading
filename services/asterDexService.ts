@@ -516,7 +516,7 @@ class AsterDexService {
       logger.info('Fetched real markets', { context: 'AsterDex', data: data.length });
       return data as AsterMarket[];
     } catch (error) {
-      logger.error(ERROR_MESSAGES.API_FETCH_ERROR, error, { context: 'AsterDex' });
+      logger.error('Failed to fetch markets', error, { context: 'AsterDex' });
       return []; // Fallback to empty
     }
   }
