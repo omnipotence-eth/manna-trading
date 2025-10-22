@@ -281,6 +281,8 @@ export class DeepSeekR1Model extends AITradingModel {
   private initialBalance: number = 100;
   private peakBalance: number = 100;
   private currentDrawdown: number = 0;
+  private lastTradeTime: Map<string, number> = new Map(); // Track last trade time per symbol
+  private readonly TRADE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown between trades on same asset
   
   constructor() {
     super({
@@ -300,8 +302,27 @@ export class DeepSeekR1Model extends AITradingModel {
    */
   private async canTakeTrade(signal: TradingSignal): Promise<{ allowed: boolean; reason: string }> {
     try {
-      // 1. Check drawdown limit
+      // 1. Check trade cooldown (prevent overtrading same asset)
+      const lastTrade = this.lastTradeTime.get(signal.symbol) || 0;
+      const timeSinceLastTrade = Date.now() - lastTrade;
+      if (timeSinceLastTrade < this.TRADE_COOLDOWN_MS) {
+        const minutesLeft = Math.ceil((this.TRADE_COOLDOWN_MS - timeSinceLastTrade) / 60000);
+        return {
+          allowed: false,
+          reason: `Cooldown active for ${signal.symbol}. Wait ${minutesLeft} more minute(s).`
+        };
+      }
+      
+      // 2. Check margin sufficiency BEFORE attempting trade
       const balance = await asterDexService.getBalance();
+      if (balance < 10) { // Need at least $10 to trade
+        return {
+          allowed: false,
+          reason: `Insufficient margin ($${balance.toFixed(2)}). Need at least $10 to trade.`
+        };
+      }
+      
+      // 3. Check drawdown limit
       if (balance > this.peakBalance) {
         this.peakBalance = balance;
       }
@@ -314,20 +335,39 @@ export class DeepSeekR1Model extends AITradingModel {
         };
       }
       
-      // 2. Check max open positions
+      // 4. Check existing position on this symbol
       const positions = await asterDexService.getPositions();
-      if (positions.length >= this.riskConfig.maxOpenPositions) {
+      const existingPosition = positions.find(p => p.symbol === signal.symbol.replace('/', ''));
+      
+      if (existingPosition) {
+        // Check if we're trying to trade in the SAME direction (prevent stacking)
+        const currentSide = existingPosition.positionAmt > 0 ? 'BUY' : 'SELL';
+        if (currentSide === signal.action) {
+          return {
+            allowed: false,
+            reason: `Already have a ${currentSide} position on ${signal.symbol}. No stacking allowed.`
+          };
+        }
+        
+        // If trading OPPOSITE direction, we'll close the existing position first
+        logger.info(`🔄 Signal reversal detected on ${signal.symbol}: Closing ${currentSide}, opening ${signal.action}`, {
+          context: 'RiskManagement',
+        });
+      }
+      
+      // 5. Check max open positions
+      if (positions.length >= this.riskConfig.maxOpenPositions && !existingPosition) {
         return {
           allowed: false,
           reason: `Max ${this.riskConfig.maxOpenPositions} positions already open. Close existing positions first.`
         };
       }
       
-      // 3. Check portfolio risk (total exposure)
-      const totalExposure = positions.reduce((sum, pos) => sum + (pos.size * pos.entryPrice), 0);
+      // 6. Check portfolio risk (total exposure)
+      const totalExposure = positions.reduce((sum, pos) => sum + Math.abs(pos.positionAmt * pos.entryPrice), 0);
       const portfolioRisk = totalExposure / balance;
       
-      if (portfolioRisk >= this.riskConfig.maxPortfolioRisk) {
+      if (portfolioRisk >= this.riskConfig.maxPortfolioRisk && !existingPosition) {
         return {
           allowed: false,
           reason: `Portfolio risk limit reached (${(portfolioRisk * 100).toFixed(1)}%). Too much capital at risk.`
@@ -474,7 +514,48 @@ export class DeepSeekR1Model extends AITradingModel {
         },
       });
 
-      // 3. Execute with safe position size
+      // 3. Check if we need to close an existing opposite position
+      const positions = await asterDexService.getPositions();
+      const existingPosition = positions.find(p => p.symbol === signal.symbol.replace('/', ''));
+      
+      if (existingPosition) {
+        const currentSide = existingPosition.positionAmt > 0 ? 'BUY' : 'SELL';
+        const oppositeSide = currentSide === 'BUY' ? 'SELL' : 'BUY';
+        
+        // If signal is opposite to current position, CLOSE the existing position
+        if (signal.action === oppositeSide) {
+          logger.info(`🔄 Closing existing ${currentSide} position before opening ${signal.action}`, {
+            context: 'RiskManagement',
+            data: { symbol: signal.symbol, oldSide: currentSide, newSide: signal.action }
+          });
+          
+          // Close position by trading in opposite direction with same size
+          const closeSize = Math.abs(existingPosition.positionAmt);
+          const closeOrder = await asterDexService.placeMarketOrder(
+            signal.symbol,
+            oppositeSide,
+            closeSize,
+            1 // Use 1x leverage to close
+          );
+          
+          if (closeOrder) {
+            logger.trade(`✅ Closed ${currentSide} position on ${signal.symbol}`, {
+              context: 'RiskManagement',
+              data: { symbol: signal.symbol, side: currentSide, size: closeSize }
+            });
+            
+            useStore.getState().addModelMessage({
+              id: `${Date.now()}-close-position`,
+              model: this.config.name,
+              message: `🔄 CLOSED: ${currentSide} position on ${signal.symbol} (${closeSize.toFixed(6)}) due to signal reversal`,
+              timestamp: Date.now(),
+              type: 'trade',
+            });
+          }
+        }
+      }
+      
+      // 4. Execute NEW position with safe position size
       const leverage = Math.min(this.calculateLeverage(signal.confidence), 10); // Cap at 10x as requested
       const order = await asterDexService.placeMarketOrder(
         signal.symbol,
@@ -484,6 +565,9 @@ export class DeepSeekR1Model extends AITradingModel {
       );
 
       if (order) {
+        // Update last trade time for cooldown tracking
+        this.lastTradeTime.set(signal.symbol, Date.now());
+        
         logger.trade(`${this.config.name} executed SAFE trade with risk management`, {
           model: this.config.name,
           action: signal.action,
