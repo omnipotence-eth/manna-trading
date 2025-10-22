@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Header from '@/components/Header';
 import PriceTicker from '@/components/PriceTicker';
 import Dashboard from '@/components/Dashboard';
-import Leaderboard from '@/components/Leaderboard';
+import TradeJournal from '@/components/TradeJournal';
 import Models from '@/components/Models';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import DebugPanel from '@/components/DebugPanel';
@@ -22,9 +22,9 @@ export default function Home() {
           <ErrorBoundary>
             {activeView === 'live' && <Dashboard />}
           </ErrorBoundary>
-          <ErrorBoundary>
-            {activeView === 'leaderboard' && <Leaderboard />}
-          </ErrorBoundary>
+              <ErrorBoundary>
+                {activeView === 'leaderboard' && <TradeJournal />}
+              </ErrorBoundary>
           <ErrorBoundary>
             {activeView === 'models' && <Models />}
           </ErrorBoundary>

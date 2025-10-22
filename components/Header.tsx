@@ -29,7 +29,7 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
           <nav className="flex gap-2">
             {[
               { id: 'live' as const, label: 'LIVE' },
-              { id: 'leaderboard' as const, label: 'LEADERBOARD' },
+              { id: 'leaderboard' as const, label: 'JOURNAL' },
               { id: 'models' as const, label: 'MODELS' },
             ].map((item) => (
               <motion.button
