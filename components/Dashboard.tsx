@@ -45,9 +45,10 @@ export default function Dashboard() {
     asterDexService.connectWebSocket((data) => {
       if (!isMounted) return; // Ignore data if unmounted
       
+      const wsData = (data.data || {}) as any;
       logger.info('📊 WebSocket data received', { 
         context: 'Dashboard',
-        data: { type: data.type, symbol: data.data?.symbol || 'unknown', price: data.data?.price || 0 },
+        data: { type: data.type, symbol: wsData.symbol || 'unknown', price: wsData.price || 0 },
       });
       
       // Mark as connected on first message
@@ -58,13 +59,13 @@ export default function Dashboard() {
       }
 
       // Update UI based on real-time data from TRADE events (most frequent)
-      if (data.type === 'trade' && data.data?.price && data.data?.symbol) {
-        const currentPrice = data.data.price;
-        const symbol = data.data.symbol;
+      if (data.type === 'trade' && wsData.price && wsData.symbol) {
+        const currentPrice = wsData.price;
+        const symbol = wsData.symbol;
         
         logger.info(`💰 LIVE PRICE UPDATE: ${symbol} = $${currentPrice.toLocaleString()}`, { 
           context: 'Dashboard',
-          data: { symbol, price: currentPrice, quantity: data.data.quantity },
+          data: { symbol, price: currentPrice, quantity: wsData.quantity },
         });
 
         // Update store with live price for other components
@@ -76,23 +77,23 @@ export default function Dashboard() {
       }
 
       // Also handle ticker data (24hr statistics)
-      if (data.type === 'ticker' && data.data?.price && data.data?.symbol) {
-        const symbol = data.data.symbol;
+      if (data.type === 'ticker' && wsData.price && wsData.symbol) {
+        const symbol = wsData.symbol;
         
-        logger.info(`📊 24HR TICKER: ${symbol} = $${data.data.price.toLocaleString()}`, {
+        logger.info(`📊 24HR TICKER: ${symbol} = $${wsData.price.toLocaleString()}`, {
           context: 'Dashboard',
           data: { 
-            price: data.data.price,
-            change: data.data.priceChangePercent,
-            volume: data.data.volume 
+            price: wsData.price,
+            change: wsData.priceChangePercent,
+            volume: wsData.volume 
           },
         });
 
         // Update store with ticker data (includes price change)
         updateLivePrice(symbol, {
           symbol: symbol.replace('USDT', '/USDT'),
-          price: data.data.price,
-          change: data.data.priceChangePercent,
+          price: wsData.price,
+          change: wsData.priceChangePercent,
           lastUpdate: Date.now(),
         });
       }
@@ -101,7 +102,7 @@ export default function Dashboard() {
       if (data.type === 'orderUpdate') {
         logger.debug('📖 Order book update', {
           context: 'Dashboard',
-          data: { symbol: data.data?.symbol },
+          data: { symbol: wsData.symbol },
         });
       }
     });

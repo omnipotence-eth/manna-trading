@@ -12,9 +12,9 @@ export interface MarketData {
 }
 
 export interface WebSocketMessage {
-  type: 'price' | 'trade' | 'position' | 'order' | 'error';
-  data: unknown;
-  timestamp: number;
+  type: 'price' | 'trade' | 'position' | 'order' | 'error' | 'ticker' | 'orderUpdate';
+  data?: any;
+  timestamp?: number;
   symbol?: string;
 }
 

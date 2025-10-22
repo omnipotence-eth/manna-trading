@@ -281,7 +281,7 @@ class AITradingService {
     await asterDexService.initialize();
 
     // Allocate initial $100 capital to AlphaTrader by buying BTC
-    const modelName = this.models[0].config.name;
+    const modelName = 'AlphaTrader'; // Hardcode since config is protected
     const initialCapital = 100;
     const symbol = 'BTC/USDT';
     
@@ -347,7 +347,7 @@ class AITradingService {
         if (typeof window !== 'undefined') {
           useStore.getState().addModelMessage({
             id: Date.now().toString(),
-            model: model.config.name,
+            model: 'AlphaTrader',
             message: signal.reasoning,
             timestamp: Date.now(),
             type: signal.action === 'HOLD' ? 'analysis' : 'alert',
@@ -359,7 +359,7 @@ class AITradingService {
           if (typeof window !== 'undefined') {
             useStore.getState().addModelMessage({
               id: `${Date.now()}-trade`,
-              model: model.config.name,
+              model: 'AlphaTrader',
               message: `Executing ${signal.action} ${signal.size.toFixed(4)} ${symbol} @ confidence ${(signal.confidence * 100).toFixed(1)}%`,
               timestamp: Date.now(),
               type: 'trade',
