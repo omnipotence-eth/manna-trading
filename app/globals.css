@@ -36,23 +36,50 @@ body {
   }
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling - smooth and easy on the eyes */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #000;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 10px;
+  margin: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #00ff41;
-  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(0, 255, 65, 0.3), rgba(0, 255, 65, 0.6));
+  border-radius: 10px;
+  border: 2px solid rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #00d4ff;
+  background: linear-gradient(180deg, rgba(0, 212, 255, 0.5), rgba(0, 255, 65, 0.8));
+  border-color: rgba(0, 255, 65, 0.3);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: rgba(0, 255, 65, 0.9);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 65, 0.4) rgba(0, 0, 0, 0.3);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom smooth scroll for panels */
+.overflow-y-auto,
+.overflow-x-auto {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Loading animation */
