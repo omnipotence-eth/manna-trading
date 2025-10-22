@@ -51,6 +51,14 @@ export default function Dashboard() {
         const data = await response.json();
         if (data.success) {
           logger.info('✅ Trading cycle completed', { context: 'Dashboard', data });
+          
+          // If there's analysis data, show it
+          if (data.analysis) {
+            logger.info(`🤖 DeepSeek R1: ${data.analysis.action} (${(data.analysis.confidence * 100).toFixed(1)}%)`, {
+              context: 'Dashboard',
+              data: { reasoning: data.analysis.reasoning }
+            });
+          }
         } else {
           logger.error('❌ Trading cycle failed', data.error, { context: 'Dashboard' });
         }
