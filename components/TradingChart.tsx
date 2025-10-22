@@ -10,10 +10,11 @@ export default function TradingChart() {
   const accountValue = useStore((state) => state.accountValue);
 
   useEffect(() => {
-    // Initialize with starting capital
+    // Initialize with real account value (or 0 if not yet loaded)
+    const initialValue = accountValue || 0;
     const initialData = Array.from({ length: 20 }, (_, i) => ({
       time: new Date(Date.now() - (19 - i) * 5000).toLocaleTimeString(),
-      value: 100, // Starting with $100
+      value: initialValue,
     }));
     setData(initialData);
     
@@ -26,7 +27,7 @@ export default function TradingChart() {
     return () => {
       clearTimeout(loadingTimeout);
     };
-  }, []);
+  }, [accountValue]); // Re-initialize when account value loads
 
   // Update chart when account value changes (real data from Dashboard)
   useEffect(() => {
