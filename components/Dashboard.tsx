@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [latency, setLatency] = useState(15);
   const updateLivePrice = useStore((state) => state.updateLivePrice);
   const setAccountValue = useStore((state) => state.setAccountValue);
+  const setConnected = useStore((state) => state.setConnected);
   
   // Get real model stats and trades from store
   const modelStats = useStore((state) => state.modelStats);
@@ -64,6 +65,7 @@ export default function Dashboard() {
       if (!firstMessageReceived) {
         firstMessageReceived = true;
         setIsConnecting(false);
+        setConnected(true); // Update global connection state
         logger.info('✅ FIRST DATA RECEIVED - UI NOW LIVE!', { context: 'Dashboard' });
       }
 
@@ -167,6 +169,7 @@ export default function Dashboard() {
     // Cleanup all timers and connections
     return () => {
       isMounted = false; // Mark as unmounted
+      setConnected(false); // Mark as disconnected
       clearTimeout(connectionTimeout);
       clearInterval(valueInterval);
       clearInterval(latencyInterval);

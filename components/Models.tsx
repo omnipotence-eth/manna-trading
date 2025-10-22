@@ -15,50 +15,10 @@ interface AIModel {
 export default function Models() {
   const [models] = useState<AIModel[]>([
     {
-      name: 'AlphaTrader',
-      description: 'Advanced momentum-based trading system using multi-timeframe analysis',
-      strategy: 'Momentum + Trend Following',
+      name: 'DeepSeek R1',
+      description: 'Advanced reasoning model that analyzes market patterns, sentiment, and technical indicators with deep multi-step logic. Optimized for volatile crypto markets with adaptive risk management.',
+      strategy: 'Deep Reasoning + Pattern Recognition',
       status: 'active',
-      performance: 45.8,
-      trades: 234,
-    },
-    {
-      name: 'QuantumAI',
-      description: 'Statistical arbitrage model exploiting market inefficiencies',
-      strategy: 'Statistical Arbitrage',
-      status: 'active',
-      performance: 38.2,
-      trades: 189,
-    },
-    {
-      name: 'NeuralNet-V2',
-      description: 'Deep learning model trained on historical price data and order flow',
-      strategy: 'Deep Learning + Pattern Recognition',
-      status: 'active',
-      performance: 32.5,
-      trades: 312,
-    },
-    {
-      name: 'DeepMarket',
-      description: 'Market making algorithm providing liquidity while capturing spreads',
-      strategy: 'Market Making',
-      status: 'active',
-      performance: 28.9,
-      trades: 156,
-    },
-    {
-      name: 'CryptoSage',
-      description: 'Sentiment analysis model incorporating social media and news data',
-      strategy: 'Sentiment Analysis',
-      status: 'active',
-      performance: 24.3,
-      trades: 278,
-    },
-    {
-      name: 'HFT-Bot',
-      description: 'High-frequency trading bot optimized for low-latency execution',
-      strategy: 'High-Frequency Trading',
-      status: 'training',
       performance: 0,
       trades: 0,
     },
@@ -72,7 +32,7 @@ export default function Models() {
       >
         <h1 className="text-3xl font-bold terminal-text mb-2">AI MODELS</h1>
         <p className="text-green-500/60 text-sm">
-          Autonomous trading algorithms competing on Aster DEX
+          Currently running: DeepSeek R1 with $100 starting capital • Trading on Aster DEX
         </p>
       </motion.div>
 
@@ -152,18 +112,18 @@ export default function Models() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="glass-effect p-8 rounded-lg text-center"
+        className="glass-effect p-8 rounded-lg"
       >
-        <h2 className="text-2xl font-bold terminal-text mb-4">
-          DEPLOY YOUR OWN MODEL
+        <h2 className="text-2xl font-bold terminal-text mb-4 text-center">
+          MORE MODELS COMING SOON
         </h2>
-            <p className="text-green-500/80 mb-6 max-w-2xl mx-auto">
-              Have a trading algorithm? Join the arena and compete with the best AI models.
-              Get access to Aster DEX&apos;s advanced trading infrastructure with up to 1001x leverage.
-            </p>
-        <button className="px-8 py-3 border border-neon-blue text-neon-blue hover:bg-neon-blue/10 transition-all font-bold">
-          JOIN THE WAITLIST
-        </button>
+        <p className="text-green-500/80 mb-6 max-w-2xl mx-auto text-center">
+          Additional AI trading models are in development and will be deployed after DeepSeek R1 completes its initial testing phase.
+          Future models include AlphaTrader, QuantumAI, NeuralNet-V2, and more.
+        </p>
+        <div className="text-sm text-green-500/60 text-center">
+          📋 <a href="/docs/AI_MODELS_REFERENCE.md" className="text-neon-blue hover:underline">View Full Model Documentation</a>
+        </div>
       </motion.div>
     </div>
   );
