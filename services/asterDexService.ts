@@ -54,6 +54,21 @@ class AsterDexService {
   private isConnecting: boolean = false;
   private shouldStayConnected: boolean = false;
 
+  /**
+   * Build absolute URL for server-side API calls
+   */
+  private getApiUrl(path: string): string {
+    // If running in browser, use relative URL
+    if (typeof window !== 'undefined') {
+      return path;
+    }
+    // If running on server (API routes), use absolute URL
+    const baseUrl = process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : 'http://localhost:3000';
+    return `${baseUrl}${path}`;
+  }
+
   constructor() {
     // Use Aster DEX's own API endpoints (Binance-compatible API)
     this.baseUrl = 'https://fapi.asterdex.com/fapi/v1';
@@ -597,7 +612,7 @@ class AsterDexService {
   ): Promise<AsterOrder | null> {
     this.validateOrderParams(symbol, side, size, leverage);
     try {
-      const response = await fetch('/api/aster/order', {
+      const response = await fetch(this.getApiUrl('/api/aster/order'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -633,7 +648,7 @@ class AsterDexService {
     this.validateOrderParams(symbol, side, size, leverage);
     this.validatePrice(price);
     try {
-      const response = await fetch('/api/aster/order', {
+      const response = await fetch(this.getApiUrl('/api/aster/order'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -660,7 +675,7 @@ class AsterDexService {
    */
   async getPositions(): Promise<AsterPosition[]> {
     try {
-      const response = await fetch('/api/aster/positions');
+      const response = await fetch(this.getApiUrl('/api/aster/positions'));
       if (!response.ok) {
         throw new Error(`API returned ${response.status}`);
       }
@@ -732,7 +747,7 @@ class AsterDexService {
    */
   async getBalance(): Promise<number> {
     try {
-      const response = await fetch('/api/aster/account');
+      const response = await fetch(this.getApiUrl('/api/aster/account'));
       if (!response.ok) {
         throw new Error(`API returned ${response.status}`);
       }
