@@ -47,7 +47,7 @@ export default function Dashboard() {
       
       logger.info('📊 WebSocket data received', { 
         context: 'Dashboard',
-        data: { type: data.type, symbol: data.data?.symbol, price: data.data?.price },
+        data: { type: data.type, symbol: data.data?.symbol || 'unknown', price: data.data?.price || 0 },
       });
       
       // Mark as connected on first message
