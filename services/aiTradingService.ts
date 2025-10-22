@@ -732,9 +732,9 @@ class AITradingService {
           // Execute the trade (includes risk management checks)
           const executed = await model.executeTrade(bestSignal);
           if (executed) {
-            logger.trade(`✅ Trade executed successfully`, { context: 'AITrading', symbol: bestSignal.symbol });
+            logger.trade(`✅ Trade executed successfully: ${bestSignal.symbol}`, { context: 'AITrading' });
           } else {
-            logger.warn(`❌ Trade execution failed or blocked`, { context: 'AITrading', symbol: bestSignal.symbol });
+            logger.warn(`❌ Trade execution failed or blocked: ${bestSignal.symbol}`, { context: 'AITrading' });
           }
         } else if (bestSignal) {
           logger.warn(`⏸️ Best signal confidence too low: ${bestSignal.action} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% (need >40%)`, {
