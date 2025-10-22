@@ -420,16 +420,16 @@ class AITradingService {
   /**
    * Run a single trading cycle (for server-side cron jobs)
    */
-  async runSingleCycle() {
+  async runSingleCycle(): Promise<TradingSignal | null> {
     if (!this.isRunning) {
       // Initialize if not already running
       await asterDexService.initialize();
       this.isRunning = true;
     }
-    await this.runTradingCycle();
+    return await this.runTradingCycle();
   }
 
-  private async runTradingCycle() {
+  private async runTradingCycle(): Promise<TradingSignal | null> {
     try {
       // DeepSeek R1 focuses on BTC/USDT
       const symbol = 'BTC/USDT';
@@ -482,10 +482,14 @@ class AITradingService {
           // Execute trades with confidence > 60%
           await model.executeTrade(signal);
         }
+        
+        // Return the signal for API response
+        return signal;
       }
     } catch (error) {
       logger.error('Error in trading cycle', error, { context: 'AITrading' });
     }
+    return null;
   }
 
   getModels() {

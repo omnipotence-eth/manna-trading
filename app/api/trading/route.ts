@@ -21,12 +21,18 @@ export async function GET(request: NextRequest) {
 
     // Run a single trading cycle
     logger.info('🔍 Running DeepSeek R1 analysis cycle...', { context: 'TradingAPI' });
-    await aiTradingService.runSingleCycle();
+    const analysis = await aiTradingService.runSingleCycle();
     logger.info('✅ Analysis cycle completed', { context: 'TradingAPI' });
 
     return NextResponse.json({
       success: true,
       message: 'Trading cycle completed',
+      analysis: analysis ? {
+        action: analysis.action,
+        confidence: analysis.confidence,
+        reasoning: analysis.reasoning,
+        size: analysis.size,
+      } : null,
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
