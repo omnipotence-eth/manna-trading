@@ -1,25 +1,70 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { useStore } from '@/store/useStore';
+import { useEffect, useState } from 'react';
+
+interface PriceData {
+  symbol: string;
+  price: number;
+  change?: number;
+  lastUpdate: number;
+}
 
 export default function LivePriceDisplay() {
-  // Read live prices from the store (updated by Dashboard's WebSocket)
-  const livePrices = useStore((state) => state.livePrices);
+  const [btcData, setBtcData] = useState<PriceData>({ 
+    symbol: 'BTC/USDT', 
+    price: 0, 
+    lastUpdate: Date.now() 
+  });
+  const [ethData, setEthData] = useState<PriceData>({ 
+    symbol: 'ETH/USDT', 
+    price: 0, 
+    lastUpdate: Date.now() 
+  });
 
-  // Create a display array for BTC and ETH
-  // Try multiple key formats to ensure we find the data
-  const getBTCData = () => {
-    return livePrices['BTCUSDT'] || livePrices['btcusdt'] || livePrices['BtcUsdt'] || 
-           { symbol: 'BTC/USDT', price: 0, lastUpdate: Date.now() };
-  };
+  useEffect(() => {
+    // Fetch prices from our CoinGecko API
+    const fetchPrices = async () => {
+      try {
+        const response = await fetch('/api/prices');
+        if (!response.ok) throw new Error('Failed to fetch');
+        
+        const data = await response.json();
+        
+        // Update BTC
+        if (data.BTCUSDT) {
+          setBtcData({
+            symbol: 'BTC/USDT',
+            price: data.BTCUSDT.price,
+            change: data.BTCUSDT.change,
+            lastUpdate: Date.now(),
+          });
+        }
+        
+        // Update ETH
+        if (data.ETHUSDT) {
+          setEthData({
+            symbol: 'ETH/USDT',
+            price: data.ETHUSDT.price,
+            change: data.ETHUSDT.change,
+            lastUpdate: Date.now(),
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch live prices:', error);
+      }
+    };
+
+    // Fetch immediately
+    fetchPrices();
+    
+    // Then fetch every 10 seconds
+    const interval = setInterval(fetchPrices, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
   
-  const getETHData = () => {
-    return livePrices['ETHUSDT'] || livePrices['ethusdt'] || livePrices['EthUsdt'] || 
-           { symbol: 'ETH/USDT', price: 0, lastUpdate: Date.now() };
-  };
-  
-  const displayPrices = [getBTCData(), getETHData()];
+  const displayPrices = [btcData, ethData];
 
   const formatPrice = (price: number) => {
     if (price === 0) return '---';
@@ -48,7 +93,7 @@ export default function LivePriceDisplay() {
       <div className="flex items-center gap-2 mb-3">
         <div className="w-2 h-2 bg-neon-green rounded-full animate-pulse"></div>
         <h3 className="text-sm font-bold text-green-500">LIVE MARKET PRICES</h3>
-        <span className="text-xs text-green-500/60">• REAL-TIME FROM ASTER DEX</span>
+        <span className="text-xs text-green-500/60">• REAL-TIME DATA</span>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -84,7 +129,7 @@ export default function LivePriceDisplay() {
 
       <div className="mt-3 pt-3 border-t border-green-500/20 text-xs text-green-500/60">
         <div className="flex items-center justify-between">
-          <span>📡 Streaming: btcusdt@trade, ethusdt@ticker</span>
+          <span>📡 Live prices from CoinGecko • Updates every 10s</span>
           <span className="text-neon-green">● LIVE</span>
         </div>
       </div>
