@@ -55,18 +55,27 @@ class AsterDexService {
   private shouldStayConnected: boolean = false;
 
   /**
-   * Build absolute URL for server-side API calls
+   * Build absolute URL for server-side API calls with protection bypass
    */
   private getApiUrl(path: string): string {
     // If running in browser, use relative URL
     if (typeof window !== 'undefined') {
       return path;
     }
-    // If running on server (API routes), use absolute URL
+    
+    // If running on server (API routes), use absolute URL with bypass token
     const baseUrl = process.env.VERCEL_URL 
       ? `https://${process.env.VERCEL_URL}` 
       : 'http://localhost:3000';
-    return `${baseUrl}${path}`;
+    
+    const url = new URL(path, baseUrl);
+    
+    // Add Vercel protection bypass token for server-side calls
+    if (process.env.VERCEL_PROTECTION_BYPASS) {
+      url.searchParams.set('x-vercel-protection-bypass', process.env.VERCEL_PROTECTION_BYPASS);
+    }
+    
+    return url.toString();
   }
 
   constructor() {
