@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
       success: true,
       message: 'Trading cycle completed',
       analysis: analysis ? {
+        symbol: analysis.symbol,
         action: analysis.action,
         confidence: analysis.confidence,
         reasoning: analysis.reasoning,

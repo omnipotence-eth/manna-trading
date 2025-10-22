@@ -73,7 +73,7 @@ export default function Dashboard() {
               useStore.getState().addModelMessage({
                 id: `${Date.now()}-trade`,
                 model: 'DeepSeek R1',
-                message: `Executing ${data.analysis.action} ${data.analysis.size.toFixed(4)} BTC/USDT @ ${(data.analysis.confidence * 100).toFixed(1)}% confidence`,
+                message: `Executing ${data.analysis.action} ${data.analysis.size.toFixed(4)} ${data.analysis.symbol || 'BTC/USDT'} @ ${(data.analysis.confidence * 100).toFixed(1)}% confidence`,
                 timestamp: Date.now(),
                 type: 'trade',
               });
