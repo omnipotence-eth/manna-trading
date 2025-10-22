@@ -431,60 +431,79 @@ class AITradingService {
 
   private async runTradingCycle(): Promise<TradingSignal | null> {
     try {
-      // DeepSeek R1 focuses on BTC/USDT
-      const symbol = 'BTC/USDT';
+      // DeepSeek R1 analyzes multiple pairs: BTC/USDT and ASTER/USDT
+      const symbols = ['BTC/USDT', 'ASTER/USDT'];
+      let bestSignal: TradingSignal | null = null;
+      let highestConfidence = 0;
 
       for (const model of this.models) {
-        // Get real market data from Aster DEX
-        const currentPrice = await asterDexService.getPrice(symbol);
-        
-        // Fetch real 24h ticker data for additional metrics
-        const tickerData = await asterDexService.getTicker(symbol);
-        
-        const marketData: MarketData = {
-          currentPrice: currentPrice,
-          previousPrice: tickerData?.previousPrice || currentPrice,
-          movingAverage: tickerData?.movingAverage || currentPrice,
-          volume: tickerData?.volume || 0,
-          averageVolume: tickerData?.averageVolume || 0,
-          priceChange: tickerData?.priceChangePercent || 0,
-        };
+        // Analyze each symbol and pick the best signal
+        for (const symbol of symbols) {
+          // Get real market data from Aster DEX
+          const currentPrice = await asterDexService.getPrice(symbol);
+          
+          // Skip if price is 0 (market not available)
+          if (currentPrice === 0) {
+            logger.warn(`⚠️ ${symbol} price is 0, skipping...`, { context: 'AITrading' });
+            continue;
+          }
+          
+          // Fetch real 24h ticker data for additional metrics
+          const tickerData = await asterDexService.getTicker(symbol);
+          
+          const marketData: MarketData = {
+            currentPrice: currentPrice,
+            previousPrice: tickerData?.previousPrice || currentPrice,
+            movingAverage: tickerData?.movingAverage || currentPrice,
+            volume: tickerData?.volume || 0,
+            averageVolume: tickerData?.averageVolume || 0,
+            priceChange: tickerData?.priceChangePercent || 0,
+          };
 
-        logger.debug(`📊 Market data for ${symbol}`, {
-          context: 'AITrading',
-          data: { price: currentPrice, change: marketData.priceChange },
-        });
+          logger.debug(`📊 Market data for ${symbol}`, {
+            context: 'AITrading',
+            data: { price: currentPrice, change: marketData.priceChange },
+          });
 
-        // Analyze and execute if signal is strong
-        const signal = await model.analyze(symbol, marketData);
-        
-        // Log analysis (works on both client and server)
-        logger.info(`🤖 DeepSeek R1 Analysis: ${signal.action}`, {
-          context: 'AITrading',
-          data: { 
-            action: signal.action, 
-            confidence: signal.confidence,
-            reasoning: signal.reasoning 
-          },
-        });
-        
-        if (signal.action !== 'HOLD' && signal.confidence > 0.6) {
-          // Log trade decision
-          logger.info(`💰 DeepSeek R1 Trading: ${signal.action} ${signal.size.toFixed(4)} ${symbol}`, {
+          // Analyze this symbol
+          const signal = await model.analyze(symbol, marketData);
+          
+          // Log analysis (works on both client and server)
+          logger.info(`🤖 DeepSeek R1 Analysis [${symbol}]: ${signal.action} (${(signal.confidence * 100).toFixed(1)}%)`, {
             context: 'AITrading',
             data: { 
-              action: signal.action,
-              size: signal.size,
+              symbol,
+              action: signal.action, 
               confidence: signal.confidence,
+              reasoning: signal.reasoning 
+            },
+          });
+          
+          // Track the best signal across all symbols
+          if (signal.action !== 'HOLD' && signal.confidence > highestConfidence) {
+            highestConfidence = signal.confidence;
+            bestSignal = signal;
+          }
+        }
+        
+        // Execute the best signal if confidence > 60%
+        if (bestSignal && bestSignal.confidence > 0.6) {
+          logger.info(`💰 DeepSeek R1 Trading BEST SIGNAL: ${bestSignal.action} ${bestSignal.size.toFixed(4)} ${bestSignal.symbol}`, {
+            context: 'AITrading',
+            data: { 
+              symbol: bestSignal.symbol,
+              action: bestSignal.action,
+              size: bestSignal.size,
+              confidence: bestSignal.confidence,
             },
           });
           
           // Execute trades with confidence > 60%
-          await model.executeTrade(signal);
+          await model.executeTrade(bestSignal);
         }
         
-        // Return the signal for API response
-        return signal;
+        // Return the best signal for API response (or last analyzed if none good)
+        return bestSignal;
       }
     } catch (error) {
       logger.error('Error in trading cycle', error, { context: 'AITrading' });
