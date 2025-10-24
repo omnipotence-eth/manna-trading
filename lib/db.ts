@@ -139,52 +139,40 @@ export async function getTrades(filters?: {
   offset?: number;
 }): Promise<Trade[]> {
   try {
-    let query = sql`
-      SELECT 
-        id,
-        timestamp,
-        model,
-        symbol,
-        side,
-        size,
-        entry_price as "entryPrice",
-        exit_price as "exitPrice",
-        pnl,
-        pnl_percent as "pnlPercent",
-        leverage,
-        entry_reason as "entryReason",
-        entry_confidence as "entryConfidence",
-        entry_signals as "entrySignals",
-        entry_market_regime as "entryMarketRegime",
-        entry_score as "entryScore",
-        exit_reason as "exitReason",
-        exit_timestamp as "exitTimestamp",
-        duration,
-        created_at as "createdAt"
-      FROM trades
-      WHERE 1=1
-    `;
-
-    // Apply filters
-    if (filters?.symbol) {
-      query = sql`${query} AND symbol = ${filters.symbol}`;
+    // Simple approach: fetch all and filter in memory (works for small datasets)
+    // For production with millions of rows, use parameterized queries
+    const limit = filters?.limit || 100;
+    
+    let result;
+    
+    if (filters?.symbol && filters?.model) {
+      result = await sql`
+        SELECT * FROM trades 
+        WHERE symbol = ${filters.symbol} AND model = ${filters.model}
+        ORDER BY timestamp DESC 
+        LIMIT ${limit}
+      `;
+    } else if (filters?.symbol) {
+      result = await sql`
+        SELECT * FROM trades 
+        WHERE symbol = ${filters.symbol}
+        ORDER BY timestamp DESC 
+        LIMIT ${limit}
+      `;
+    } else if (filters?.model) {
+      result = await sql`
+        SELECT * FROM trades 
+        WHERE model = ${filters.model}
+        ORDER BY timestamp DESC 
+        LIMIT ${limit}
+      `;
+    } else {
+      result = await sql`
+        SELECT * FROM trades 
+        ORDER BY timestamp DESC 
+        LIMIT ${limit}
+      `;
     }
-    if (filters?.model) {
-      query = sql`${query} AND model = ${filters.model}`;
-    }
-
-    // Order by timestamp descending (newest first)
-    query = sql`${query} ORDER BY timestamp DESC`;
-
-    // Apply limit and offset
-    if (filters?.limit) {
-      query = sql`${query} LIMIT ${filters.limit}`;
-    }
-    if (filters?.offset) {
-      query = sql`${query} OFFSET ${filters.offset}`;
-    }
-
-    const result = await query;
     
     // Transform rows to Trade objects
     const trades: Trade[] = result.rows.map((row: any) => ({
@@ -194,20 +182,20 @@ export async function getTrades(filters?: {
       symbol: row.symbol,
       side: row.side,
       size: parseFloat(row.size),
-      entryPrice: parseFloat(row.entryPrice),
-      exitPrice: parseFloat(row.exitPrice),
+      entryPrice: parseFloat(row.entry_price),
+      exitPrice: parseFloat(row.exit_price),
       pnl: parseFloat(row.pnl),
-      pnlPercent: parseFloat(row.pnlPercent),
+      pnlPercent: parseFloat(row.pnl_percent),
       leverage: parseInt(row.leverage),
-      entryReason: row.entryReason,
-      entryConfidence: parseFloat(row.entryConfidence),
-      entrySignals: row.entrySignals,
-      entryMarketRegime: row.entryMarketRegime,
-      entryScore: row.entryScore,
-      exitReason: row.exitReason,
-      exitTimestamp: row.exitTimestamp,
+      entryReason: row.entry_reason,
+      entryConfidence: parseFloat(row.entry_confidence),
+      entrySignals: row.entry_signals,
+      entryMarketRegime: row.entry_market_regime,
+      entryScore: row.entry_score,
+      exitReason: row.exit_reason,
+      exitTimestamp: row.exit_timestamp,
       duration: parseInt(row.duration),
-      createdAt: row.createdAt,
+      createdAt: row.created_at,
     }));
 
     return trades;
