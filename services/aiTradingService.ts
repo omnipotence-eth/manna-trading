@@ -1250,17 +1250,20 @@ class AITradingService {
               useStore.getState().addTrade(tradeEntry);
             }
             
-            // ALSO log to server-side trade history (DIRECT - works in serverless functions)
+            // ALSO log to database (PERMANENT storage in Postgres)
             try {
-              // Import trade history store directly (server-side)
-              const { tradeHistoryStore } = await import('@/lib/tradeHistory');
-              tradeHistoryStore.addTrade(tradeEntry);
-              logger.info(`✅ Trade logged to server history: ${position.symbol} | P&L: $${tradeEntry.pnl.toFixed(2)} (${tradeEntry.pnlPercent.toFixed(2)}%)`, { 
-                context: 'TradeJournal',
-                data: { symbol: position.symbol, pnl: tradeEntry.pnl, pnlPercent: tradeEntry.pnlPercent }
-              });
+              const { addTrade } = await import('@/lib/db');
+              const saved = await addTrade(tradeEntry);
+              if (saved) {
+                logger.info(`✅ Trade saved to Postgres database: ${position.symbol} | P&L: $${tradeEntry.pnl.toFixed(2)} (${tradeEntry.pnlPercent.toFixed(2)}%)`, { 
+                  context: 'TradeJournal',
+                  data: { symbol: position.symbol, pnl: tradeEntry.pnl, pnlPercent: tradeEntry.pnlPercent }
+                });
+              } else {
+                logger.warn(`⚠️ Failed to save trade to database: ${position.symbol}`, { context: 'TradeJournal' });
+              }
             } catch (error) {
-              logger.error('Failed to log trade to server history', error, { context: 'TradeJournal' });
+              logger.error('Failed to log trade to database', error, { context: 'TradeJournal' });
             }
             
             // Remove entry data from map

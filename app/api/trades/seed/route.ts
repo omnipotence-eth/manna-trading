@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { tradeHistoryStore } from '@/lib/tradeHistory';
+import { addTrade, initializeDatabase } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
 /**
  * SEED your closed SOL trade manually (since it closed before logging was fixed)
- * GET /api/trades/seed - Add the missing SOL trade
+ * GET /api/trades/seed - Add the missing SOL trade to Postgres database
  */
 export async function GET(request: NextRequest) {
   try {
+    // Ensure database is initialized
+    await initializeDatabase();
+
     // Your SOL/USDT trade that closed manually
     const solTrade = {
       id: `trade-manual-sol-${Date.now()}`,
@@ -31,21 +34,24 @@ export async function GET(request: NextRequest) {
       duration: 3600, // Estimate: 1 hour (60 minutes)
     };
 
-    tradeHistoryStore.addTrade(solTrade);
+    const saved = await addTrade(solTrade);
 
-    logger.info(`✅ Manually seeded SOL trade: ${solTrade.symbol}`, {
-      context: 'TradeSeed',
-      data: { pnl: solTrade.pnl, pnlPercent: solTrade.pnlPercent },
-    });
+    if (saved) {
+      logger.info(`✅ SOL trade saved to Postgres database: ${solTrade.symbol}`, {
+        context: 'TradeSeed',
+        data: { pnl: solTrade.pnl, pnlPercent: solTrade.pnlPercent },
+      });
+    }
 
     return NextResponse.json({
-      success: true,
-      message: 'SOL trade seeded successfully',
+      success: saved,
+      message: saved ? 'SOL trade seeded to Postgres database successfully! ✅' : 'Trade already exists or failed to save',
       trade: solTrade,
+      database: 'postgres',
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    logger.error('Failed to seed trade', error, { context: 'TradeSeed' });
+    logger.error('Failed to seed trade to database', error, { context: 'TradeSeed' });
     return NextResponse.json(
       {
         success: false,

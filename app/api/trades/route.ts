@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { tradeHistoryStore } from '@/lib/tradeHistory';
+import { getTrades, getTradeStats, addTrade, initializeDatabase } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
 /**
- * GET /api/trades - Fetch trade history
+ * GET /api/trades - Fetch trade history from Postgres database
  * Query params:
  *   - symbol: Filter by symbol (optional)
  *   - model: Filter by model (optional)
@@ -11,27 +11,33 @@ import { logger } from '@/lib/logger';
  */
 export async function GET(request: NextRequest) {
   try {
+    // Ensure database is initialized
+    await initializeDatabase();
+
     const { searchParams } = new URL(request.url);
     const symbol = searchParams.get('symbol') || undefined;
     const model = searchParams.get('model') || undefined;
-    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined;
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 100;
 
-    const trades = tradeHistoryStore.getFilteredTrades({
+    const trades = await getTrades({
       symbol,
       model,
       limit,
     });
 
-    const stats = tradeHistoryStore.getStats();
+    const stats = await getTradeStats();
+
+    logger.info(`📊 Fetched ${trades.length} trades from database`, { context: 'TradesAPI' });
 
     return NextResponse.json({
       success: true,
       trades,
       stats,
+      source: 'postgres', // Indicate this is from database
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    logger.error('Failed to fetch trades', error, { context: 'TradesAPI' });
+    logger.error('Failed to fetch trades from database', error, { context: 'TradesAPI' });
     return NextResponse.json(
       {
         success: false,
@@ -43,11 +49,14 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST /api/trades - Add a new trade to history
+ * POST /api/trades - Add a new trade to Postgres database
  * Body: Trade object
  */
 export async function POST(request: NextRequest) {
   try {
+    // Ensure database is initialized
+    await initializeDatabase();
+
     const trade = await request.json();
 
     // Validate required fields
@@ -61,20 +70,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    tradeHistoryStore.addTrade(trade);
+    const saved = await addTrade(trade);
 
-    logger.info(`📝 Trade logged: ${trade.symbol} ${trade.side} | P&L: $${trade.pnl?.toFixed(2)}`, {
-      context: 'TradesAPI',
-      data: { symbol: trade.symbol, side: trade.side, pnl: trade.pnl },
-    });
+    if (saved) {
+      logger.info(`📝 Trade saved to database: ${trade.symbol} ${trade.side} | P&L: $${trade.pnl?.toFixed(2)}`, {
+        context: 'TradesAPI',
+        data: { symbol: trade.symbol, side: trade.side, pnl: trade.pnl },
+      });
+    }
 
     return NextResponse.json({
-      success: true,
-      message: 'Trade added to history',
+      success: saved,
+      message: saved ? 'Trade saved to database' : 'Failed to save trade',
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    logger.error('Failed to add trade', error, { context: 'TradesAPI' });
+    logger.error('Failed to save trade to database', error, { context: 'TradesAPI' });
     return NextResponse.json(
       {
         success: false,
