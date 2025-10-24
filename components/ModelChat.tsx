@@ -210,10 +210,10 @@ export default function ModelChat() {
                 <div className="text-left bg-neon-blue/5 border border-neon-blue/30 rounded p-2.5">
                   <div className="text-xs text-neon-blue font-bold mb-1.5">💡 Try asking:</div>
                   <ul className="text-xs text-green-500/70 space-y-1">
-                    <li>• "What's your market outlook?"</li>
-                    <li>• "Why that trade?"</li>
-                    <li>• "What signals do you see?"</li>
-                    <li>• "Explain your strategy"</li>
+                    <li>• &quot;What&apos;s your market outlook?&quot;</li>
+                    <li>• &quot;Why that trade?&quot;</li>
+                    <li>• &quot;What signals do you see?&quot;</li>
+                    <li>• &quot;Explain your strategy&quot;</li>
                   </ul>
                 </div>
               </div>

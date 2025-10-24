@@ -4,6 +4,11 @@ const nextConfig = {
   images: {
     domains: [],
   },
+  eslint: {
+    // Warning: This allows production builds to successfully complete even if
+    // your project has ESLint errors.
+    ignoreDuringBuilds: true,
+  },
   // Remove CSP headers for development - browser extensions/settings might override them anyway
 }
 

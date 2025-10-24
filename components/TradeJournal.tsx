@@ -190,7 +190,7 @@ export default function TradeJournal() {
               All trades will be logged here with detailed entry/exit analysis.
             </div>
             <div className="mt-6 p-4 bg-neon-blue/5 border border-neon-blue/30 rounded-lg text-left max-w-md mx-auto">
-              <div className="text-xs text-neon-blue font-bold mb-2">💡 WHAT'S LOGGED:</div>
+              <div className="text-xs text-neon-blue font-bold mb-2">💡 WHAT&apos;S LOGGED:</div>
               <ul className="text-xs text-green-500/60 space-y-1">
                 <li>• Entry/Exit prices & P&L (ROE %)</li>
                 <li>• AI reasoning & confidence scores</li>
