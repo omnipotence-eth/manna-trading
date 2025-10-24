@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@tremor/react": "^3.18.7",
+    "@vercel/postgres": "^0.10.0",
     "ethers": "^6.13.2",
     "framer-motion": "^11.18.2",
     "lightweight-charts": "^5.0.9",
