@@ -78,10 +78,10 @@ export const tradeHistoryStore = {
         filtered = filtered.filter(t => t.model === filter.model);
       }
       if (filter.minPnL !== undefined) {
-        filtered = filtered.filter(t => t.pnl >= filter.minPnL);
+        filtered = filtered.filter(t => t.pnl >= filter.minPnL!);
       }
       if (filter.maxPnL !== undefined) {
-        filtered = filtered.filter(t => t.pnl <= filter.maxPnL);
+        filtered = filtered.filter(t => t.pnl <= filter.maxPnL!);
       }
       if (filter.limit) {
         filtered = filtered.slice(0, filter.limit);
