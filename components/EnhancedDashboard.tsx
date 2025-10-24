@@ -329,10 +329,10 @@ export default function EnhancedDashboard() {
 
     initializeData();
 
-    // Set up intervals - Use individual API calls since they work correctly
-    const accountInterval = setInterval(updateAccountValue, 2000); // Every 2s - account value
-    const positionsInterval = setInterval(updatePositions, 2000); // Every 2s - positions
-    const tradesInterval = setInterval(updateTrades, 10000); // Every 10s (check for new trades)
+    // Set up intervals - ULTRA FAST updates for real-time trading
+    const accountInterval = setInterval(updateAccountValue, 1000); // Every 1s - account value
+    const positionsInterval = setInterval(updatePositions, 1000); // Every 1s - positions  
+    const tradesInterval = setInterval(updateTrades, 5000); // Every 5s (check for new trades)
     const tradingInterval = setInterval(callTradingAPI, 60000); // Every 60s (AI analysis - keep at 1 min)
     
     // DISABLED: Optimized service has incorrect account value calculation
