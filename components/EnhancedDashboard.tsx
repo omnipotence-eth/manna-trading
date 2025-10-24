@@ -42,6 +42,40 @@ export default function EnhancedDashboard() {
     console.log('🔍 accountValue:', accountValue);
     console.log('🔍 positions.length:', positions.length);
 
+    // OPTIMIZED: Fetch all data in one call for maximum speed
+    const updateOptimizedData = async () => {
+      if (!isMounted) return;
+      try {
+        console.log('🚀 Fetching optimized data...');
+        const startTime = Date.now();
+        const response = await fetch('/api/optimized-data');
+        const responseTime = Date.now() - startTime;
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ Optimized data fetched in ${responseTime}ms:`, data);
+          
+          if (isMounted && data.success) {
+            const { accountValue, positions, totalPnL, unrealizedPnL } = data.data;
+            
+            // Update account value
+            setAccountValue(accountValue);
+            
+            // Update positions
+            positions?.forEach((position: any) => {
+              updatePosition(position);
+            });
+            
+            console.log(`📊 Updated: Account=${accountValue}, Positions=${positions.length}, PnL=${unrealizedPnL}`);
+          }
+        } else {
+          console.error('❌ Failed to fetch optimized data:', response.status);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching optimized data:', error);
+      }
+    };
+
     // Fetch account value and positions
     const updateAccountValue = async () => {
       if (!isMounted) return;
@@ -291,14 +325,18 @@ export default function EnhancedDashboard() {
 
     initializeData();
 
-    // Set up intervals - FASTER UPDATES for real-time feel
-    const accountInterval = setInterval(updateAccountValue, 5000); // Every 5s (12x faster)
-    const positionsInterval = setInterval(updatePositions, 5000); // Every 5s (12x faster)
+    // Set up intervals - OPTIMIZED for maximum speed and accuracy
+    const optimizedInterval = setInterval(updateOptimizedData, 2000); // Every 2s - ULTRA FAST
     const tradesInterval = setInterval(updateTrades, 10000); // Every 10s (check for new trades)
     const tradingInterval = setInterval(callTradingAPI, 60000); // Every 60s (AI analysis - keep at 1 min)
+    
+    // Fallback intervals (slower, for redundancy)
+    const accountInterval = setInterval(updateAccountValue, 10000); // Every 10s fallback
+    const positionsInterval = setInterval(updatePositions, 10000); // Every 10s fallback
 
     return () => {
       isMounted = false;
+      clearInterval(optimizedInterval);
       clearInterval(accountInterval);
       clearInterval(positionsInterval);
       clearInterval(tradesInterval);
