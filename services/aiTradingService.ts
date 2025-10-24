@@ -1250,20 +1250,17 @@ class AITradingService {
               useStore.getState().addTrade(tradeEntry);
             }
             
-            // ALSO log to server-side trade history (persists across sessions)
+            // ALSO log to server-side trade history (DIRECT - works in serverless functions)
             try {
-              const response = await fetch('/api/trades', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(tradeEntry),
+              // Import trade history store directly (server-side)
+              const { tradeHistoryStore } = await import('@/lib/tradeHistory');
+              tradeHistoryStore.addTrade(tradeEntry);
+              logger.info(`✅ Trade logged to server history: ${position.symbol} | P&L: $${tradeEntry.pnl.toFixed(2)} (${tradeEntry.pnlPercent.toFixed(2)}%)`, { 
+                context: 'TradeJournal',
+                data: { symbol: position.symbol, pnl: tradeEntry.pnl, pnlPercent: tradeEntry.pnlPercent }
               });
-              if (response.ok) {
-                logger.info(`✅ Trade logged to server: ${position.symbol}`, { context: 'TradeJournal' });
-              } else {
-                logger.warn(`⚠️ Failed to log trade to server (${response.status})`, { context: 'TradeJournal' });
-              }
             } catch (error) {
-              logger.error('Failed to log trade to server', error, { context: 'TradeJournal' });
+              logger.error('Failed to log trade to server history', error, { context: 'TradeJournal' });
             }
             
             // Remove entry data from map
