@@ -162,7 +162,8 @@ class OptimizedDataService {
       const response = await fetch('/api/aster/account');
       if (response.ok) {
         const data = await response.json();
-        return data.totalAccountValue || 0;
+        // Use the correct field name from the API response
+        return data.balance || data.accountEquity || 0;
       }
     } catch (error) {
       logger.debug('Direct account API failed, using service', { context: 'OptimizedData' });
@@ -181,7 +182,8 @@ class OptimizedDataService {
       const response = await fetch('/api/aster/positions');
       if (response.ok) {
         const data = await response.json();
-        return data.positions || [];
+        // API returns array directly, not wrapped in positions field
+        return Array.isArray(data) ? data : [];
       }
     } catch (error) {
       logger.debug('Direct positions API failed, using service', { context: 'OptimizedData' });
