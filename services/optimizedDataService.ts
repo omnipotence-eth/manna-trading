@@ -247,7 +247,7 @@ class OptimizedDataService {
         
         logger.debug('Positions from API', { 
           context: 'OptimizedData', 
-          data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
+          data: { count: positions.length, positions: positions.map((p: any) => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
         });
         return positions;
       }
