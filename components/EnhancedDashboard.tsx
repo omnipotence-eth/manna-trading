@@ -291,15 +291,17 @@ export default function EnhancedDashboard() {
 
     initializeData();
 
-    // Set up intervals (ultra-conservative for rate limiting)
-    const accountInterval = setInterval(updateAccountValue, 60000); // Every 60s
-    const positionsInterval = setInterval(updatePositions, 60000); // Every 60s
-    const tradingInterval = setInterval(callTradingAPI, 60000); // Every 60s
+    // Set up intervals - FASTER UPDATES for real-time feel
+    const accountInterval = setInterval(updateAccountValue, 5000); // Every 5s (12x faster)
+    const positionsInterval = setInterval(updatePositions, 5000); // Every 5s (12x faster)
+    const tradesInterval = setInterval(updateTrades, 10000); // Every 10s (check for new trades)
+    const tradingInterval = setInterval(callTradingAPI, 60000); // Every 60s (AI analysis - keep at 1 min)
 
     return () => {
       isMounted = false;
       clearInterval(accountInterval);
       clearInterval(positionsInterval);
+      clearInterval(tradesInterval);
       clearInterval(tradingInterval);
       console.log('🛑 EnhancedDashboard unmounted - cleaned up intervals');
     };
@@ -317,83 +319,8 @@ export default function EnhancedDashboard() {
   // Popular symbols
   const symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
 
-  // Manual trade trigger for testing
-  const [isManualTrading, setIsManualTrading] = useState(false);
-  const handleManualTrade = async () => {
-    setIsManualTrading(true);
-    try {
-      console.log('🎯 Manual trade trigger activated');
-      const response = await fetch('/api/trading');
-      if (response.ok) {
-        const data = await response.json();
-        console.log('✅ Manual trade response:', data);
-        useStore.getState().addModelMessage({
-          id: `manual-${Date.now()}`,
-          model: 'System',
-          message: '🎯 Manual analysis triggered successfully!',
-          timestamp: Date.now(),
-          type: 'alert',
-        });
-        // Refresh data after trade
-        setTimeout(async () => {
-          await fetch('/api/aster/positions').then(r => r.json()).then(data => {
-            if (Array.isArray(data)) {
-              data.forEach((pos: any) => {
-                const positionAmt = parseFloat(pos.positionAmt || 0);
-                if (positionAmt !== 0) {
-                  updatePosition({
-                    id: pos.symbol,
-                    symbol: pos.symbol.replace('USDT', '/USDT'),
-                    side: positionAmt > 0 ? 'LONG' : 'SHORT',
-                    size: Math.abs(positionAmt),
-                    entryPrice: parseFloat(pos.entryPrice),
-                    currentPrice: parseFloat(pos.markPrice || pos.entryPrice),
-                    pnl: parseFloat(pos.unRealizedProfit || 0),
-                    pnlPercent: 0,
-                    model: 'DeepSeek R1',
-                    leverage: parseInt(pos.leverage || 5),
-                  });
-                }
-              });
-            }
-          });
-        }, 2000);
-      }
-    } catch (error) {
-      console.error('❌ Manual trade failed:', error);
-      useStore.getState().addModelMessage({
-        id: `manual-error-${Date.now()}`,
-        model: 'System',
-        message: '❌ Manual trigger failed - check console',
-        timestamp: Date.now(),
-        type: 'alert',
-      });
-    } finally {
-      setTimeout(() => setIsManualTrading(false), 3000);
-    }
-  };
-
   return (
     <div className="w-full space-y-8">
-      {/* Manual Trade Trigger Button */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex justify-end"
-      >
-        <button
-          onClick={handleManualTrade}
-          disabled={isManualTrading}
-          className={`px-6 py-3 border-2 font-bold transition-all ${
-            isManualTrading
-              ? 'border-green-500/30 text-green-500/30 cursor-not-allowed'
-              : 'border-neon-green text-neon-green hover:bg-neon-green/10 hover:shadow-[0_0_20px_rgba(16,185,129,0.5)]'
-          }`}
-        >
-          {isManualTrading ? '⏳ ANALYZING...' : '🎯 FORCE TRADE ANALYSIS NOW'}
-        </button>
-      </motion.div>
-
       {/* Header Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Account Value Card */}
