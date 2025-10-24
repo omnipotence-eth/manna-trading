@@ -48,7 +48,7 @@ export default function PriceTicker() {
           
           // Update store for each price
           if (priceData && priceData.price > 0) {
-            updateLivePrice(wsSymbol, priceData.price, priceData.change);
+            updateLivePrice(wsSymbol, { price: priceData.price, change: priceData.change });
           }
           
           return {
