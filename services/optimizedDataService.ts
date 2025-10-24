@@ -183,17 +183,46 @@ class OptimizedDataService {
    */
   private async getAccountValueFast(): Promise<number> {
     try {
-      // Use the service directly to get the correct account value calculation
-      // This ensures we use the same logic as asterDexService.getBalance()
-      const accountValue = await asterDexService.getBalance();
-      logger.debug('Account value from service', { 
-        context: 'OptimizedData', 
-        data: { accountValue }
-      });
-      return accountValue;
+      // Use direct API call to get the correct account value
+      const response = await fetch('/api/aster/account');
+      if (response.ok) {
+        const data = await response.json();
+        // Use the same calculation as asterDexService.getBalance()
+        const totalMarginBalance = parseFloat(data.totalMarginBalance || 0);
+        const totalWalletBalance = parseFloat(data.totalWalletBalance || 0);
+        const totalUnrealizedProfit = parseFloat(data.totalUnrealizedProfit || 0);
+        const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
+        
+        let balance = totalMarginBalance;
+        
+        if (balance <= 0 || isNaN(balance)) {
+          balance = totalPositionInitialMargin + (totalUnrealizedProfit || 0);
+          if (balance <= 0) {
+            balance = 100; // Ultimate fallback
+          }
+        }
+        
+        logger.debug('Account value from API', { 
+          context: 'OptimizedData', 
+          data: { 
+            totalMarginBalance, 
+            totalWalletBalance, 
+            totalUnrealizedProfit, 
+            final: balance 
+          }
+        });
+        return balance;
+      }
     } catch (error) {
-      logger.error('Failed to get account value', error, { context: 'OptimizedData' });
-      return 0;
+      logger.error('Failed to get account value from API', error, { context: 'OptimizedData' });
+    }
+    
+    // Fallback to service
+    try {
+      return await asterDexService.getBalance();
+    } catch (error) {
+      logger.error('Failed to get account value from service', error, { context: 'OptimizedData' });
+      return 100; // Default fallback
     }
   }
   
@@ -202,16 +231,35 @@ class OptimizedDataService {
    */
   private async getPositionsFast(): Promise<any[]> {
     try {
-      // Use the service directly to get the correct positions data
-      // This ensures we use the same logic as asterDexService.getPositions()
-      const positions = await asterDexService.getPositions();
-      logger.debug('Positions from service', { 
-        context: 'OptimizedData', 
-        data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
-      });
-      return positions;
+      // Use direct API call to get positions data
+      const response = await fetch('/api/aster/positions');
+      if (response.ok) {
+        const data = await response.json();
+        // Transform Aster API response to our format (same as asterDexService.getPositions())
+        const positions = data.map((pos: any) => ({
+          symbol: pos.symbol.replace('USDT', '/USDT'),
+          side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
+          size: Math.abs(parseFloat(pos.positionAmt)),
+          entryPrice: parseFloat(pos.entryPrice),
+          leverage: parseInt(pos.leverage),
+          unrealizedPnl: parseFloat(pos.unRealizedProfit),
+        }));
+        
+        logger.debug('Positions from API', { 
+          context: 'OptimizedData', 
+          data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
+        });
+        return positions;
+      }
     } catch (error) {
-      logger.error('Failed to get positions', error, { context: 'OptimizedData' });
+      logger.error('Failed to get positions from API', error, { context: 'OptimizedData' });
+    }
+    
+    // Fallback to service
+    try {
+      return await asterDexService.getPositions();
+    } catch (error) {
+      logger.error('Failed to get positions from service', error, { context: 'OptimizedData' });
       return [];
     }
   }
