@@ -187,28 +187,17 @@ class OptimizedDataService {
       const response = await fetch('/api/aster/account');
       if (response.ok) {
         const data = await response.json();
-        // Use the same calculation as asterDexService.getBalance()
-        const totalMarginBalance = parseFloat(data.totalMarginBalance || 0);
-        const totalWalletBalance = parseFloat(data.totalWalletBalance || 0);
-        const totalUnrealizedProfit = parseFloat(data.totalUnrealizedProfit || 0);
-        const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
-        
-        let balance = totalMarginBalance;
-        
-        if (balance <= 0 || isNaN(balance)) {
-          balance = totalPositionInitialMargin + (totalUnrealizedProfit || 0);
-          if (balance <= 0) {
-            balance = 100; // Ultimate fallback
-          }
-        }
+        // Use the pre-calculated balance field from the API (this is the correct ~$59.87 value)
+        const balance = parseFloat(data.balance || 0);
         
         logger.debug('Account value from API', { 
           context: 'OptimizedData', 
           data: { 
-            totalMarginBalance, 
-            totalWalletBalance, 
-            totalUnrealizedProfit, 
-            final: balance 
+            balance: balance,
+            accountEquity: data.accountEquity,
+            totalMarginBalance: data.totalMarginBalance,
+            totalWalletBalance: data.totalWalletBalance,
+            totalUnrealizedProfit: data.totalUnrealizedProfit
           }
         });
         return balance;
