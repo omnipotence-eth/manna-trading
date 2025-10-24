@@ -94,25 +94,52 @@ class OptimizedDataService {
         cacheHit: false
       };
       
+      // Log the raw data for debugging
+      logger.debug('Raw optimized data', {
+        context: 'OptimizedData',
+        data: {
+          accountValue: data.accountValue,
+          positionsCount: data.positions.length,
+          positions: data.positions.map(p => ({ symbol: p.symbol, positionAmt: p.positionAmt, unRealizedProfit: p.unRealizedProfit }))
+        }
+      });
+      
       // Calculate P&L from positions and format them for the dashboard
       if (data.positions.length > 0) {
-        data.unrealizedPnL = data.positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
+        // Use the correct field names from Aster DEX API
+        data.unrealizedPnL = data.positions.reduce((sum, pos) => sum + (pos.unRealizedProfit || 0), 0);
         data.totalPnL = data.unrealizedPnL;
         
-        // Format positions for dashboard compatibility
-        data.positions = data.positions.map((pos: any) => {
+        // Format positions for dashboard compatibility with real-time prices
+        data.positions = await Promise.all(data.positions.map(async (pos: any) => {
           const positionAmt = parseFloat(pos.positionAmt || 0);
           if (positionAmt === 0) return null; // Skip empty positions
           
           const side = positionAmt > 0 ? 'LONG' : 'SHORT';
           const symbol = pos.symbol;
           const entryPrice = parseFloat(pos.entryPrice || 0);
-          const currentPrice = parseFloat(pos.markPrice || pos.entryPrice || 0);
           const pnl = parseFloat(pos.unRealizedProfit || 0);
           const size = Math.abs(positionAmt);
           const leverage = parseFloat(pos.leverage || 1);
           
-          // Calculate P&L percentage
+          // Get real-time price for accurate P&L calculation
+          let currentPrice = parseFloat(pos.markPrice || pos.entryPrice || 0);
+          try {
+            // Try to get current price from prices API
+            const priceResponse = await fetch('/api/prices');
+            if (priceResponse.ok) {
+              const priceData = await priceResponse.json();
+              const priceKey = symbol.replace('USDT', 'USDT');
+              if (priceData[priceKey]) {
+                currentPrice = parseFloat(priceData[priceKey].price || currentPrice);
+              }
+            }
+          } catch (error) {
+            // Fallback to markPrice if price fetch fails
+            currentPrice = parseFloat(pos.markPrice || pos.entryPrice || 0);
+          }
+          
+          // Calculate P&L percentage using real-time price
           const marginUsed = size * entryPrice / leverage;
           const pnlPercent = marginUsed !== 0 ? (pnl / marginUsed) * 100 : 0;
           
@@ -128,7 +155,10 @@ class OptimizedDataService {
             leverage: leverage,
             model: 'DeepSeek R1',
           };
-        }).filter(Boolean); // Remove null entries
+        }));
+        
+        // Filter out null entries
+        data.positions = data.positions.filter(Boolean);
       }
       
       // Cache the result
