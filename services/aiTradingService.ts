@@ -1177,14 +1177,8 @@ class AITradingService {
             context: 'PositionMonitor',
           });
         }
-        // Trailing stop: Lock in profits at 5% ROE+
-        else if (pnlPercent >= 5) {
-          // If we're up 5% ROE+, exit if we drop below 3% ROE
-          if (pnlPercent >= 5 && pnlPercent < 3) {
-            shouldClose = true;
-            reason = `Trailing stop triggered - ROE profit pulled back to ${pnlPercent.toFixed(2)}% from 5%+ peak. Entry: $${entryPrice.toFixed(2)}, Exit: $${currentPrice.toFixed(2)}. Protecting gains as momentum weakened. Volume: ${volumeRatio.toFixed(2)}x average.`;
-          }
-        }
+        // Note: Trailing stop removed - let it hit take profit at 8% or stop loss at -2.5%
+        // This prevents premature exits and maximizes profit potential
         // Check for positions that have been open too long with losses (prevent holding losers)
         else if (pnlPercent < -1 && pnlPercent > -3) {
           // If losing more than 1% ROE but less than stop loss, consider market conditions
