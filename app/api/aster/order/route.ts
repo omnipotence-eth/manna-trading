@@ -126,7 +126,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Build cancel parameters
-    const cancelParams = {
+    const cancelParams: any = {
       symbol: symbol.replace('/', ''),
       orderId: orderId,
     };
