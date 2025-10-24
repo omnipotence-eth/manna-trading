@@ -329,17 +329,19 @@ export default function EnhancedDashboard() {
 
     initializeData();
 
-    // Set up intervals - OPTIMIZED for maximum speed and accuracy
-    const optimizedInterval = setInterval(updateOptimizedData, 1000); // Every 1s - ULTRA FAST
+    // Set up intervals - Use individual API calls since they work correctly
+    const accountInterval = setInterval(updateAccountValue, 2000); // Every 2s - account value
+    const positionsInterval = setInterval(updatePositions, 2000); // Every 2s - positions
     const tradesInterval = setInterval(updateTrades, 10000); // Every 10s (check for new trades)
     const tradingInterval = setInterval(callTradingAPI, 60000); // Every 60s (AI analysis - keep at 1 min)
     
-    // REMOVED: Redundant fallback intervals that were causing conflicts
-    // The optimized service now handles all account value and positions data
+    // DISABLED: Optimized service has incorrect account value calculation
+    // Using individual API calls instead since they return correct values
 
     return () => {
       isMounted = false;
-      clearInterval(optimizedInterval);
+      clearInterval(accountInterval);
+      clearInterval(positionsInterval);
       clearInterval(tradesInterval);
       clearInterval(tradingInterval);
       console.log('🛑 EnhancedDashboard unmounted - cleaned up intervals');
