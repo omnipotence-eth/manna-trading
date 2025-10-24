@@ -275,6 +275,9 @@ const DEFAULT_RISK_CONFIG: RiskConfig = {
   maxOpenPositions: 3,        // Max 3 positions at once
 };
 
+// Global entry data map (shared between model and service for trade journaling)
+const globalEntryDataMap: Map<string, any> = new Map();
+
 /**
  * DeepSeek R1 - Advanced reasoning model with professional risk management
  */
@@ -285,7 +288,7 @@ export class DeepSeekR1Model extends AITradingModel {
   private currentDrawdown: number = 0;
   private lastTradeTime: Map<string, number> = new Map(); // Track last trade time per symbol
   private readonly TRADE_COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes cooldown (faster re-entry on opportunities)
-  private entryDataMap: Map<string, any> = new Map(); // Store entry data for trade journal
+  private entryDataMap: Map<string, any> = globalEntryDataMap; // Use global map for trade journal
   
   constructor() {
     super({
@@ -1005,6 +1008,7 @@ class AITradingService {
   private models: AITradingModel[] = [];
   private isRunning: boolean = false;
   private intervalId: NodeJS.Timeout | null = null;
+  private entryDataMap: Map<string, any> = globalEntryDataMap; // Use global map for trade journal
 
   constructor() {
     this.initializeModels();
