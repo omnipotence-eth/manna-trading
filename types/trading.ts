@@ -9,6 +9,12 @@ export interface MarketData {
   volume: number;
   averageVolume: number;
   priceChange: number;
+  // Enhanced data for advanced analysis
+  highPrice?: number;
+  lowPrice?: number;
+  openPrice?: number;
+  trades?: number;
+  quoteVolume?: number;
 }
 
 export interface WebSocketMessage {

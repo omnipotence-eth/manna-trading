@@ -7,11 +7,55 @@
   --foreground: #00ff41;
 }
 
+/* Light mode variables */
+.light {
+  --background: #ffffff;
+  --foreground: #1a1a1a;
+  --glass-bg: rgba(255, 255, 255, 0.8);
+  --border-color: rgba(0, 100, 255, 0.3);
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --neon-green: #00aa33;
+  --neon-blue: #0088ff;
+}
+
+/* Dark mode variables */
+.dark {
+  --background: #000000;
+  --foreground: #00ff41;
+  --glass-bg: rgba(0, 0, 0, 0.7);
+  --border-color: rgba(0, 255, 65, 0.2);
+  --text-primary: #00ff41;
+  --text-secondary: rgba(0, 255, 65, 0.6);
+  --neon-green: #00ff41;
+  --neon-blue: #00d4ff;
+}
+
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: 'Courier New', monospace;
   overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Light mode specific styles */
+.light body {
+  background: #f5f5f5;
+}
+
+.light .glass-effect {
+  background: var(--glass-bg);
+  border-color: var(--border-color);
+}
+
+.light .terminal-text {
+  color: var(--text-primary);
+  text-shadow: none;
+}
+
+.light main {
+  background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
 }
 
 @layer utilities {

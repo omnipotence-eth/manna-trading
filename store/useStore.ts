@@ -11,6 +11,17 @@ interface Trade {
   exitPrice: number;
   pnl: number;
   pnlPercent: number;
+  leverage: number;
+  // Entry analysis
+  entryReason: string;
+  entryConfidence: number;
+  entrySignals: string[];
+  entryMarketRegime: string;
+  entryScore: string;
+  // Exit analysis
+  exitReason: string;
+  exitTimestamp: string;
+  duration: number; // in seconds
 }
 
 interface Position {
@@ -23,6 +34,14 @@ interface Position {
   pnl: number;
   pnlPercent: number;
   model: string;
+  leverage: number;
+  // Entry analysis (for trade journal later)
+  entryReason?: string;
+  entryConfidence?: number;
+  entrySignals?: string[];
+  entryMarketRegime?: string;
+  entryScore?: string;
+  entryTimestamp?: number;
 }
 
 interface ModelStats {
