@@ -35,9 +35,9 @@ class OptimizedDataService {
   private isUpdating: boolean = false;
   private lastUpdateTime: number = 0;
   
-  // Rate limiting
-  private readonly MIN_UPDATE_INTERVAL = 2000; // 2 seconds minimum between updates
-  private readonly CACHE_TTL = 5000; // 5 seconds cache TTL for real-time data
+  // Rate limiting - OPTIMIZED for real-time trading
+  private readonly MIN_UPDATE_INTERVAL = 1000; // 1 second minimum between updates
+  private readonly CACHE_TTL = 2000; // 2 seconds cache TTL for real-time data
   
   /**
    * Get all account data in a single optimized call
@@ -106,37 +106,35 @@ class OptimizedDataService {
       
       // Calculate P&L from positions and format them for the dashboard
       if (data.positions.length > 0) {
-        // Use the correct field names from Aster DEX API
-        data.unrealizedPnL = data.positions.reduce((sum, pos) => sum + (pos.unRealizedProfit || 0), 0);
+        // Use the correct field names from Aster DEX service (already formatted)
+        data.unrealizedPnL = data.positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
         data.totalPnL = data.unrealizedPnL;
         
         // Format positions for dashboard compatibility with real-time prices
         data.positions = await Promise.all(data.positions.map(async (pos: any) => {
-          const positionAmt = parseFloat(pos.positionAmt || 0);
-          if (positionAmt === 0) return null; // Skip empty positions
-          
-          const side = positionAmt > 0 ? 'LONG' : 'SHORT';
+          // pos is already formatted by asterDexService.getPositions()
           const symbol = pos.symbol;
-          const entryPrice = parseFloat(pos.entryPrice || 0);
-          const pnl = parseFloat(pos.unRealizedProfit || 0);
-          const size = Math.abs(positionAmt);
-          const leverage = parseFloat(pos.leverage || 1);
+          const side = pos.side;
+          const size = pos.size;
+          const entryPrice = pos.entryPrice;
+          const pnl = pos.unrealizedPnl;
+          const leverage = pos.leverage;
           
           // Get real-time price for accurate P&L calculation
-          let currentPrice = parseFloat(pos.markPrice || pos.entryPrice || 0);
+          let currentPrice = entryPrice; // Default to entry price
           try {
             // Try to get current price from prices API
             const priceResponse = await fetch('/api/prices');
             if (priceResponse.ok) {
               const priceData = await priceResponse.json();
-              const priceKey = symbol.replace('USDT', 'USDT');
+              const priceKey = symbol.replace('/USDT', 'USDT');
               if (priceData[priceKey]) {
                 currentPrice = parseFloat(priceData[priceKey].price || currentPrice);
               }
             }
           } catch (error) {
-            // Fallback to markPrice if price fetch fails
-            currentPrice = parseFloat(pos.markPrice || pos.entryPrice || 0);
+            // Fallback to entry price if price fetch fails
+            currentPrice = entryPrice;
           }
           
           // Calculate P&L percentage using real-time price
@@ -156,9 +154,6 @@ class OptimizedDataService {
             model: 'DeepSeek R1',
           };
         }));
-        
-        // Filter out null entries
-        data.positions = data.positions.filter(Boolean);
       }
       
       // Cache the result
@@ -188,24 +183,18 @@ class OptimizedDataService {
    */
   private async getAccountValueFast(): Promise<number> {
     try {
-      // Try direct API call first
-      const response = await fetch('/api/aster/account');
-      if (response.ok) {
-        const data = await response.json();
-        // Use the correct field name from the API response - it's 'balance' field
-        const accountValue = data.balance || data.accountEquity || 0;
-        logger.debug('Account value from API', { 
-          context: 'OptimizedData', 
-          data: { balance: data.balance, accountEquity: data.accountEquity, final: accountValue }
-        });
-        return accountValue;
-      }
+      // Use the service directly to get the correct account value calculation
+      // This ensures we use the same logic as asterDexService.getBalance()
+      const accountValue = await asterDexService.getBalance();
+      logger.debug('Account value from service', { 
+        context: 'OptimizedData', 
+        data: { accountValue }
+      });
+      return accountValue;
     } catch (error) {
-      logger.debug('Direct account API failed, using service', { context: 'OptimizedData' });
+      logger.error('Failed to get account value', error, { context: 'OptimizedData' });
+      return 0;
     }
-    
-    // Fallback to service
-    return await asterDexService.getBalance();
   }
   
   /**
@@ -213,24 +202,18 @@ class OptimizedDataService {
    */
   private async getPositionsFast(): Promise<any[]> {
     try {
-      // Try direct API call first
-      const response = await fetch('/api/aster/positions');
-      if (response.ok) {
-        const data = await response.json();
-        // API returns array directly, not wrapped in positions field
-        const positions = Array.isArray(data) ? data : [];
-        logger.debug('Positions from API', { 
-          context: 'OptimizedData', 
-          data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, positionAmt: p.positionAmt })) }
-        });
-        return positions;
-      }
+      // Use the service directly to get the correct positions data
+      // This ensures we use the same logic as asterDexService.getPositions()
+      const positions = await asterDexService.getPositions();
+      logger.debug('Positions from service', { 
+        context: 'OptimizedData', 
+        data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
+      });
+      return positions;
     } catch (error) {
-      logger.debug('Direct positions API failed, using service', { context: 'OptimizedData' });
+      logger.error('Failed to get positions', error, { context: 'OptimizedData' });
+      return [];
     }
-    
-    // Fallback to service
-    return await asterDexService.getPositions();
   }
   
   /**
