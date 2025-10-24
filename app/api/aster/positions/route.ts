@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildSignedQuery } from '@/lib/asterAuth';
 import { logger } from '@/lib/logger';
+import { withRateLimit } from '@/lib/rateLimiter';
 
 const ASTER_BASE_URL = process.env.ASTER_BASE_URL || 'https://fapi.asterdex.com';
 const API_KEY = process.env.ASTER_API_KEY;
@@ -20,41 +21,49 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Build signed query
-    const queryString = await buildSignedQuery({}, API_SECRET);
-    const url = `${ASTER_BASE_URL}/fapi/v1/positionRisk?${queryString}`;
+    // Apply rate limiting
+    return await withRateLimit(async () => {
+      // Build signed query with fresh timestamp (AFTER rate limiter)
+      const queryString = await buildSignedQuery({ timestamp: Date.now() }, API_SECRET);
+      const url = `${ASTER_BASE_URL}/fapi/v1/positionRisk?${queryString}`;
 
-    logger.debug('Fetching Aster positions', { context: 'AsterAPI', data: { url } });
+      logger.debug('Fetching Aster positions', { context: 'AsterAPI', data: { url } });
 
-    const response = await fetch(url, {
-      headers: {
-        'X-MBX-APIKEY': API_KEY,
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Aster API positions fetch failed', undefined, {
-        context: 'AsterAPI',
-        data: { status: response.status, error: errorText },
+      const response = await fetch(url, {
+        headers: {
+          'X-MBX-APIKEY': API_KEY,
+        },
       });
-      return NextResponse.json(
-        { error: `Aster API error: ${errorText}` },
-        { status: response.status }
-      );
-    }
 
-    const data = await response.json();
-    
-    // Filter only positions with non-zero size
-    const activePositions = data.filter((pos: any) => parseFloat(pos.positionAmt) !== 0);
-    
-    logger.info('Successfully fetched Aster positions', {
-      context: 'AsterAPI',
-      data: { totalPositions: data.length, activePositions: activePositions.length },
+      if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Aster API positions fetch failed', undefined, {
+          context: 'AsterAPI',
+          data: { 
+            status: response.status, 
+            error: errorText,
+            url: url.substring(0, 100) + '...',
+            timestamp: Date.now()
+          },
+        });
+        return NextResponse.json(
+          { error: `Aster API error: ${errorText}` },
+          { status: response.status }
+        );
+      }
+
+      const data = await response.json();
+      
+      // Filter only positions with non-zero size
+      const activePositions = data.filter((pos: any) => parseFloat(pos.positionAmt) !== 0);
+      
+      logger.info('Successfully fetched Aster positions', {
+        context: 'AsterAPI',
+        data: { totalPositions: data.length, activePositions: activePositions.length },
+      });
+
+      return NextResponse.json(activePositions);
     });
-
-    return NextResponse.json(activePositions);
   } catch (error: any) {
     logger.error('Failed to fetch Aster positions', error, { context: 'AsterAPI' });
     return NextResponse.json(

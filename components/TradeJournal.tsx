@@ -29,38 +29,8 @@ export default function TradeJournal() {
   // Get trades from store
   const trades = useStore((state) => state.trades);
 
-  // Transform trades into journal entries with reasoning
+  // Transform trades into journal entries with real analysis data
   const journalEntries: JournalEntry[] = trades.map((trade) => {
-    // Generate realistic entry reasons based on the trade
-    const entryReasons = [
-      `Strong momentum detected: ${trade.symbol} showing ${trade.side === 'LONG' ? 'bullish' : 'bearish'} trend`,
-      `Technical indicators aligned: RSI oversold, MACD crossover signal`,
-      `Volume spike confirmed breakout above resistance level`,
-      `Price action showing strong ${trade.side === 'LONG' ? 'support' : 'resistance'} at $${trade.entryPrice.toFixed(2)}`,
-      `Market sentiment shifted ${trade.side === 'LONG' ? 'positive' : 'negative'}, 60%+ confidence`,
-    ];
-
-    // Generate realistic exit reasons
-    const exitReasons = trade.pnl > 0 ? [
-      `Take profit target reached at $${trade.exitPrice.toFixed(2)}`,
-      `Momentum weakening, secured ${trade.pnlPercent.toFixed(2)}% profit`,
-      `Resistance level hit, closing position to lock gains`,
-      `Risk/reward ratio optimal for exit, preserving capital`,
-      `Technical signals reversed, profit taking recommended`,
-    ] : [
-      `Stop loss triggered at $${trade.exitPrice.toFixed(2)}`,
-      `Market conditions shifted, cutting losses early`,
-      `Trend reversal detected, exiting to preserve capital`,
-      `Risk management: -${Math.abs(trade.pnlPercent).toFixed(2)}% threshold reached`,
-      `False breakout identified, closing position`,
-    ];
-
-    const signals = [
-      `RSI: ${trade.side === 'LONG' ? 'Oversold' : 'Overbought'}`,
-      `MACD: ${trade.side === 'LONG' ? 'Bullish' : 'Bearish'} crossover`,
-      `Volume: ${Math.random() > 0.5 ? 'High' : 'Moderate'}`,
-    ];
-
     return {
       id: trade.id,
       timestamp: new Date(trade.timestamp).getTime(),
@@ -72,11 +42,11 @@ export default function TradeJournal() {
       size: trade.size,
       pnl: trade.pnl,
       pnlPercent: trade.pnlPercent,
-      entryReason: entryReasons[Math.floor(Math.random() * entryReasons.length)],
-      exitReason: exitReasons[Math.floor(Math.random() * exitReasons.length)],
-      signals,
-      confidence: 60 + Math.random() * 35, // 60-95%
-      duration: Math.floor(Math.random() * 120) + 5, // 5-125 minutes
+      entryReason: trade.entryReason || 'Position opened based on market analysis',
+      exitReason: trade.exitReason || 'Position closed automatically',
+      signals: trade.entrySignals || ['Price Action'],
+      confidence: trade.entryConfidence || 50,
+      duration: Math.floor(trade.duration / 60), // Convert seconds to minutes
     };
   });
 
@@ -212,10 +182,21 @@ export default function TradeJournal() {
       {/* Trade Journal Entries */}
       <div className="space-y-4 max-h-[800px] overflow-y-auto">
         {sortedEntries.length === 0 ? (
-          <div className="glass-effect p-12 rounded-lg text-center">
-            <div className="text-green-500/40 text-lg mb-2">No trades yet</div>
-            <div className="text-green-500/60 text-sm">
-              AlphaTrader will execute trades when market conditions align
+          <div className="glass-effect p-12 rounded-lg text-center border border-green-500/20">
+            <div className="text-6xl mb-4">📊</div>
+            <div className="text-green-500/40 text-xl mb-2 font-bold">No Trades Yet</div>
+            <div className="text-green-500/60 text-sm max-w-md mx-auto">
+              DeepSeek R1 is analyzing markets and will execute trades when high-confidence opportunities emerge. 
+              All trades will be logged here with detailed entry/exit analysis.
+            </div>
+            <div className="mt-6 p-4 bg-neon-blue/5 border border-neon-blue/30 rounded-lg text-left max-w-md mx-auto">
+              <div className="text-xs text-neon-blue font-bold mb-2">💡 WHAT'S LOGGED:</div>
+              <ul className="text-xs text-green-500/60 space-y-1">
+                <li>• Entry/Exit prices & P&L (ROE %)</li>
+                <li>• AI reasoning & confidence scores</li>
+                <li>• Market signals & regime analysis</li>
+                <li>• Trade duration & leverage used</li>
+              </ul>
             </div>
           </div>
         ) : (
@@ -263,22 +244,30 @@ export default function TradeJournal() {
               </div>
 
               {/* Trade Details */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 pb-4 border-b border-green-500/20">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4 pb-4 border-b border-green-500/20">
                 <div>
-                  <div className="text-xs text-green-500/60">ENTRY PRICE</div>
+                  <div className="text-xs text-green-500/60 uppercase">Entry Price</div>
                   <div className="text-sm font-bold text-green-500">${entry.entryPrice.toFixed(2)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-green-500/60">EXIT PRICE</div>
+                  <div className="text-xs text-green-500/60 uppercase">Exit Price</div>
                   <div className="text-sm font-bold text-green-500">${entry.exitPrice.toFixed(2)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-green-500/60">SIZE</div>
+                  <div className="text-xs text-green-500/60 uppercase">Size</div>
                   <div className="text-sm font-bold text-green-500">{entry.size.toFixed(4)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-green-500/60">CONFIDENCE</div>
+                  <div className="text-xs text-green-500/60 uppercase">Leverage</div>
+                  <div className="text-sm font-bold text-neon-blue">{trades.find(t => t.id === entry.id)?.leverage || 5}x</div>
+                </div>
+                <div>
+                  <div className="text-xs text-green-500/60 uppercase">Confidence</div>
                   <div className="text-sm font-bold text-neon-blue">{entry.confidence.toFixed(1)}%</div>
+                </div>
+                <div>
+                  <div className="text-xs text-green-500/60 uppercase">Regime</div>
+                  <div className="text-xs font-bold text-green-400">{trades.find(t => t.id === entry.id)?.entryMarketRegime || 'N/A'}</div>
                 </div>
               </div>
 
@@ -287,11 +276,14 @@ export default function TradeJournal() {
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-neon-green">🟢</span>
                   <span className="text-sm font-bold text-green-500">ENTRY REASONING</span>
+                  <span className="text-xs px-2 py-1 bg-neon-blue/10 text-neon-blue rounded border border-neon-blue/30 ml-auto">
+                    Conf: {entry.confidence.toFixed(1)}%
+                  </span>
                 </div>
-                <div className="text-sm text-green-500/80 bg-green-500/5 p-3 rounded border border-green-500/20">
+                <div className="text-sm text-green-500/80 bg-green-500/5 p-3 rounded border border-green-500/20 whitespace-pre-wrap">
                   {entry.entryReason}
                 </div>
-                <div className="flex gap-2 mt-2">
+                <div className="flex gap-2 mt-2 flex-wrap">
                   {entry.signals.map((signal, i) => (
                     <span key={i} className="text-xs px-2 py-1 bg-neon-blue/10 text-neon-blue rounded border border-neon-blue/30">
                       {signal}

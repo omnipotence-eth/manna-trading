@@ -1,141 +1,69 @@
-// lib/rateLimiter.ts
-
-import { logger } from './logger';
-
-interface RateLimitConfig {
-  maxRequests: number; // Maximum number of requests allowed
-  windowMs: number; // Time window in milliseconds
-  message?: string; // Custom error message
-}
+/**
+ * Simple in-memory rate limiter for API routes
+ */
 
 class RateLimiter {
-  private requests: Map<string, number[]> = new Map(); // Track requests per key
-  private config: RateLimitConfig;
+  private requests: number[] = [];
+  private readonly windowMs: number;
+  private readonly maxRequests: number;
 
-  constructor(config: RateLimitConfig) {
-    this.config = config;
-
-    // Cleanup old entries periodically
-    setInterval(() => {
-      this.cleanup();
-    }, this.config.windowMs);
+  constructor(windowMs: number = 60000, maxRequests: number = 100) {
+    this.windowMs = windowMs;
+    this.maxRequests = maxRequests;
   }
 
   /**
-   * Check if a request is allowed for a given key
-   * @param key - Unique identifier for the rate limit (e.g., user ID, IP address)
-   * @returns true if allowed, false if rate limit exceeded
+   * Check if request is allowed
    */
-  checkLimit(key: string): boolean {
+  async checkLimit(): Promise<boolean> {
     const now = Date.now();
-    const timestamps = this.requests.get(key) || [];
-
-    // Filter out timestamps outside the current window
-    const recentTimestamps = timestamps.filter(
-      (timestamp) => now - timestamp < this.config.windowMs
-    );
-
-    if (recentTimestamps.length >= this.config.maxRequests) {
-      logger.warn(`Rate limit exceeded for key: ${key}`, {
-        context: 'RateLimiter',
-        data: { key, count: recentTimestamps.length, limit: this.config.maxRequests },
-      });
-      return false; // Rate limit exceeded
+    
+    // Remove old requests outside the window
+    this.requests = this.requests.filter(time => now - time < this.windowMs);
+    
+    // Check if under limit
+    if (this.requests.length >= this.maxRequests) {
+      return false;
     }
-
-    // Add current timestamp and update the map
-    recentTimestamps.push(now);
-    this.requests.set(key, recentTimestamps);
-
-    return true; // Request allowed
+    
+    // Add this request
+    this.requests.push(now);
+    return true;
   }
 
   /**
-   * Get remaining requests for a key
+   * Wait until a slot is available
    */
-  getRemainingRequests(key: string): number {
-    const now = Date.now();
-    const timestamps = this.requests.get(key) || [];
-
-    const recentTimestamps = timestamps.filter(
-      (timestamp) => now - timestamp < this.config.windowMs
-    );
-
-    return Math.max(0, this.config.maxRequests - recentTimestamps.length);
-  }
-
-  /**
-   * Get reset time for a key (in milliseconds)
-   */
-  getResetTime(key: string): number {
-    const timestamps = this.requests.get(key) || [];
-
-    if (timestamps.length === 0) {
-      return 0;
-    }
-
-    const oldestTimestamp = Math.min(...timestamps);
-    return oldestTimestamp + this.config.windowMs;
-  }
-
-  /**
-   * Reset rate limit for a specific key
-   */
-  reset(key: string): void {
-    this.requests.delete(key);
-    logger.debug(`Rate limit reset for key: ${key}`, {
-      context: 'RateLimiter',
-      data: { key },
-    });
-  }
-
-  /**
-   * Reset all rate limits
-   */
-  resetAll(): void {
-    this.requests.clear();
-    logger.debug('All rate limits reset', { context: 'RateLimiter' });
-  }
-
-  /**
-   * Cleanup old entries
-   */
-  private cleanup(): void {
-    const now = Date.now();
-
-    for (const [key, timestamps] of this.requests.entries()) {
-      const recentTimestamps = timestamps.filter(
-        (timestamp) => now - timestamp < this.config.windowMs
-      );
-
-      if (recentTimestamps.length === 0) {
-        this.requests.delete(key);
-      } else {
-        this.requests.set(key, recentTimestamps);
+  async waitForSlot(): Promise<void> {
+    while (!(await this.checkLimit())) {
+      // Calculate wait time
+      const oldestRequest = this.requests[0];
+      const waitTime = this.windowMs - (Date.now() - oldestRequest) + 100; // Add 100ms buffer
+      
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, Math.min(waitTime, 1000)));
       }
     }
   }
+
+  /**
+   * Get current request count
+   */
+  getCurrentCount(): number {
+    const now = Date.now();
+    this.requests = this.requests.filter(time => now - time < this.windowMs);
+    return this.requests.length;
+  }
 }
 
-// Preset rate limiters for common use cases
-export const apiRateLimiter = new RateLimiter({
-  maxRequests: 100, // 100 requests
-  windowMs: 60 * 1000, // per minute
-  message: 'Too many API requests. Please try again later.',
-});
+// Global rate limiter instance (shared across all API routes)
+// Aster DEX allows much higher rates, but we keep it conservative for reliability
+export const globalRateLimiter = new RateLimiter(60000, 300); // 300 requests per minute (5 req/sec) - Conservative but responsive
 
-export const tradeRateLimiter = new RateLimiter({
-  maxRequests: 10, // 10 trades
-  windowMs: 10 * 1000, // per 10 seconds
-  message: 'Too many trade requests. Please slow down.',
-});
-
-export const orderRateLimiter = new RateLimiter({
-  maxRequests: 50, // 50 orders
-  windowMs: 60 * 1000, // per minute
-  message: 'Too many order requests. Please try again later.',
-});
-
-export { RateLimiter };
-export type { RateLimitConfig };
-
+/**
+ * Middleware to apply rate limiting to API routes
+ */
+export async function withRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+  await globalRateLimiter.waitForSlot();
+  return fn();
+}

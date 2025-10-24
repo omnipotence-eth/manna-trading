@@ -49,8 +49,9 @@ export async function buildSignedQuery(
   }
 
   // Add recvWindow if not present (max 60000ms)
+  // Using 60000ms (60 seconds) to handle rate limiter delays
   if (!params.recvWindow) {
-    params.recvWindow = 5000;
+    params.recvWindow = 60000;
   }
 
   // Build query string (sorted alphabetically for consistency)

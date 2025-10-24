@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { SUPPORTED_SYMBOLS } from '@/constants';
+import { useStore } from '@/store/useStore';
 
 interface CryptoPrice {
   symbol: string;
@@ -19,6 +20,8 @@ export default function PriceTicker() {
       change: 0,
     }))
   );
+  
+  const updateLivePrice = useStore((state) => state.updateLivePrice);
 
   useEffect(() => {
     // Fetch prices from our API (which uses CoinGecko - no geo-restrictions)
@@ -43,6 +46,11 @@ export default function PriceTicker() {
           
           console.log(`📊 ${baseSymbol}: $${priceData?.price || 0} (${priceData?.change || 0}%)`);
           
+          // Update store for each price
+          if (priceData && priceData.price > 0) {
+            updateLivePrice(wsSymbol, priceData.price, priceData.change);
+          }
+          
           return {
             symbol: baseSymbol,
             price: priceData?.price || 0,
@@ -51,7 +59,7 @@ export default function PriceTicker() {
         });
         
         setPrices(priceArray);
-        console.log('✅ Updated ticker with real prices');
+        console.log('✅ Updated ticker with real prices + store');
       } catch (error) {
         console.error('❌ Failed to fetch prices:', error);
       }

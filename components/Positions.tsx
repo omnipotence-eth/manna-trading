@@ -21,7 +21,7 @@ export default function Positions() {
 
       {positions.length === 0 ? (
         <div className="text-center py-8 text-green-500/60">
-          No open positions. AlphaTrader will open positions when opportunities arise.
+          No open positions. DeepSeek R1 will open positions when opportunities arise.
         </div>
       ) : (
         positions.map((position, index) => (

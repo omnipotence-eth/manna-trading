@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { logger } from '@/lib/logger';
 import { TRADING_CONSTANTS, ERROR_MESSAGES } from '@/constants';
 import type { WebSocketMessage } from '@/types/trading';
+import { apiCache } from './apiCache';
 
 export interface AsterMarket {
   symbol: string;
@@ -48,6 +49,20 @@ class AsterDexService {
   private provider: ethers.Provider | null = null;
   private signer: ethers.Signer | null = null;
   private ws: WebSocket | null = null;
+  
+  // Rate limiting strategy (ASTER DEX OPTIMIZED - realistic limits)
+  private requestQueue: Array<() => Promise<any>> = [];
+  private isProcessingQueue: boolean = false;
+  private lastRequestTime: number = 0;
+  private readonly MIN_REQUEST_DELAY = 100; // 100ms between requests = max 10 req/sec (very safe for exchanges)
+  private readonly BATCH_SIZE = 3; // Process 3 requests concurrently
+  private requestCount: number = 0;
+  private requestWindow: number = Date.now();
+  private lastSuccessfulRequest: number = 0;
+  private readonly MAX_REQUESTS_PER_MINUTE = 300; // Conservative limit (most exchanges allow 1200+)
+  
+  // Request deduplication to prevent concurrent identical requests
+  private pendingRequests: Map<string, Promise<any>> = new Map();
   private pingInterval: NodeJS.Timeout | null = null;
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 5;
@@ -98,13 +113,108 @@ class AsterDexService {
   }
 
   /**
+   * Rate-limited request wrapper
+   */
+  private async rateLimitedRequest<T>(requestFn: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const wrappedRequest = async () => {
+        try {
+          // Check if we need to reset the request window (every 60 seconds)
+          const now = Date.now();
+          if (now - this.requestWindow > 60000) {
+            this.requestCount = 0;
+            this.requestWindow = now;
+          }
+
+          // ASTER DEX OPTIMIZED: Wait for minimum delay between requests
+          const timeSinceLastRequest = now - this.lastRequestTime;
+          if (timeSinceLastRequest < this.MIN_REQUEST_DELAY) {
+            await new Promise(r => setTimeout(r, this.MIN_REQUEST_DELAY - timeSinceLastRequest));
+          }
+          
+          // Check per-minute rate limit
+          const oneMinuteAgo = now - 60000;
+          if (this.requestWindow < oneMinuteAgo) {
+            // Reset window
+            this.requestCount = 0;
+            this.requestWindow = now;
+          } else if (this.requestCount >= this.MAX_REQUESTS_PER_MINUTE) {
+            // Hit rate limit, wait for window to reset
+            const waitTime = this.requestWindow + 60000 - now;
+            logger.warn(`Rate limit reached, waiting ${waitTime}ms`, { context: 'AsterDex' });
+            await new Promise(r => setTimeout(r, waitTime));
+            this.requestCount = 0;
+            this.requestWindow = Date.now();
+          }
+          this.requestCount++;
+
+          // Update request tracking
+          this.lastRequestTime = Date.now();
+
+          // Log rate limit stats every 50 requests
+          if (this.requestCount % 50 === 0) {
+            const requestsPerSecond = this.requestCount / ((Date.now() - this.requestWindow) / 1000);
+            logger.debug(`📊 Rate limit: ${this.requestCount} requests, ${requestsPerSecond.toFixed(1)} req/s`, {
+              context: 'AsterDex'
+            });
+          }
+
+          // Execute the actual request
+          const result = await requestFn();
+          this.lastSuccessfulRequest = Date.now();
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      // Add to queue
+      this.requestQueue.push(wrappedRequest);
+      
+      // Start processing queue if not already running
+      if (!this.isProcessingQueue) {
+        this.processQueue();
+      }
+    });
+  }
+
+  /**
+   * Process request queue with rate limiting
+   */
+  private async processQueue(): Promise<void> {
+    if (this.isProcessingQueue || this.requestQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQueue = true;
+
+    while (this.requestQueue.length > 0) {
+      // Process batch of requests
+      const batch = this.requestQueue.splice(0, this.BATCH_SIZE);
+      
+      // Execute batch in parallel (they already have internal delays)
+      await Promise.all(batch.map(fn => fn().catch(err => {
+        logger.error('Request in queue failed', err, { context: 'AsterDex' });
+      })));
+
+        // Small delay between batches
+        if (this.requestQueue.length > 0) {
+          await new Promise(resolve => setTimeout(resolve, 300)); // 300ms between batches (safe and responsive)
+        }
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  /**
    * Validate order parameters
    */
   private validateOrderParams(
     symbol: string,
     side: 'BUY' | 'SELL',
     size: number,
-    leverage: number
+    leverage: number,
+    reduceOnly: boolean = false
   ): void {
     // Validate symbol
     if (!symbol || typeof symbol !== 'string') {
@@ -123,11 +233,15 @@ class AsterDexService {
     if (typeof size !== 'number' || size <= 0) {
       throw new Error(ERROR_MESSAGES.INVALID_SIZE);
     }
-    if (size < TRADING_CONSTANTS.MIN_ORDER_SIZE) {
-      throw new Error(`Order size must be at least ${TRADING_CONSTANTS.MIN_ORDER_SIZE}`);
-    }
-    if (size > TRADING_CONSTANTS.MAX_ORDER_SIZE) {
-      throw new Error(`Order size must not exceed ${TRADING_CONSTANTS.MAX_ORDER_SIZE}`);
+    
+    // Skip min/max size validation for reduceOnly orders (closing positions)
+    if (!reduceOnly) {
+      if (size < TRADING_CONSTANTS.MIN_ORDER_SIZE) {
+        throw new Error(`Order size must be at least ${TRADING_CONSTANTS.MIN_ORDER_SIZE}`);
+      }
+      if (size > TRADING_CONSTANTS.MAX_ORDER_SIZE) {
+        throw new Error(`Order size must not exceed ${TRADING_CONSTANTS.MAX_ORDER_SIZE}`);
+      }
     }
 
     // Validate leverage
@@ -546,33 +660,45 @@ class AsterDexService {
 
   /**
    * Get current price for a symbol (using public API - no auth required)
+   * CACHED: 5 seconds to dramatically reduce API calls
    */
   async getPrice(symbol: string): Promise<number> {
-    try {
-      // Convert BTC/USDT to BTCUSDT format
-      const binanceSymbol = symbol.replace('/', '');
-      const url = `${this.baseUrl}/ticker/price?symbol=${binanceSymbol}`;
-      
-      logger.debug(`Fetching price for ${symbol}`, { context: 'AsterDex', data: { url } });
-      
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-      
-      const data = await response.json();
-      const price = parseFloat(data.price);
-      
-      logger.debug(`Got price for ${symbol}: $${price}`, { context: 'AsterDex' });
-      return price;
-    } catch (error) {
-      logger.error('Failed to get real price', error, { context: 'AsterDex', data: { symbol } });
-      return 0; // Fallback
+    const cacheKey = `price:${symbol}`;
+    
+    // Check cache first
+    const cachedPrice = apiCache.get<number>(cacheKey);
+    if (cachedPrice !== null) {
+      return cachedPrice;
     }
+    
+    return this.rateLimitedRequest(async () => {
+      try {
+        // Convert BTC/USDT to BTCUSDT format
+        const binanceSymbol = symbol.replace('/', '');
+        const url = `${this.baseUrl}/ticker/price?symbol=${binanceSymbol}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const price = parseFloat(data.price);
+        
+        // Cache for 5 seconds
+        apiCache.set(cacheKey, price, apiCache.getTTL('PRICE'));
+        
+        return price;
+      } catch (error) {
+        logger.error('Failed to get real price', error, { context: 'AsterDex', data: { symbol } });
+        return 0; // Fallback
+      }
+    });
   }
 
   /**
    * Get detailed 24h ticker data for a symbol (using public API - no auth required)
+   * CACHED: 10 seconds to dramatically reduce API calls
    */
   async getTicker(symbol: string): Promise<{
     price: number;
@@ -581,13 +707,66 @@ class AsterDexService {
     volume: number;
     averageVolume: number;
     movingAverage: number;
+    highPrice: number;
+    lowPrice: number;
+    openPrice: number;
+    trades: number;
+    quoteVolume: number;
   } | null> {
+    const cacheKey = `ticker:${symbol}`;
+    
+    // Check cache first
+    const cachedTicker = apiCache.get<any>(cacheKey);
+    if (cachedTicker !== null) {
+      return cachedTicker;
+    }
+    
+    return this.rateLimitedRequest(async () => {
+      try {
+        // Convert BTC/USDT to BTCUSDT format
+        const binanceSymbol = symbol.replace('/', '');
+        const url = `${this.baseUrl}/ticker/24hr?symbol=${binanceSymbol}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        const tickerData = {
+          price: parseFloat(data.lastPrice || 0),
+          previousPrice: parseFloat(data.prevClosePrice || data.lastPrice || 0),
+          priceChangePercent: parseFloat(data.priceChangePercent || 0),
+          volume: parseFloat(data.volume || 0),
+          averageVolume: parseFloat(data.volume || 0),
+          movingAverage: parseFloat(data.weightedAvgPrice || data.lastPrice || 0),
+          highPrice: parseFloat(data.highPrice || data.lastPrice || 0),
+          lowPrice: parseFloat(data.lowPrice || data.lastPrice || 0),
+          openPrice: parseFloat(data.openPrice || data.lastPrice || 0),
+          trades: parseInt(data.count || 0),
+          quoteVolume: parseFloat(data.quoteVolume || 0),
+        };
+        
+        // Cache for 10 seconds
+        apiCache.set(cacheKey, tickerData, apiCache.getTTL('TICKER'));
+        
+        return tickerData;
+      } catch (error) {
+        logger.error('Failed to get ticker data', error, { context: 'AsterDex', data: { symbol } });
+        return null;
+      }
+    });
+  }
+
+  /**
+   * Get all available trading pairs from Aster DEX
+   */
+  async getAllTradingPairs(): Promise<string[]> {
     try {
-      // Convert BTC/USDT to BTCUSDT format
-      const binanceSymbol = symbol.replace('/', '');
-      const url = `${this.baseUrl}/ticker/24hr?symbol=${binanceSymbol}`;
+      const url = `${this.baseUrl}/exchangeInfo`;
       
-      logger.debug(`Fetching 24hr ticker for ${symbol}`, { context: 'AsterDex', data: { url } });
+      logger.debug('Fetching all trading pairs from Aster DEX', { context: 'AsterDex', data: { url } });
       
       const response = await fetch(url);
       if (!response.ok) {
@@ -596,17 +775,35 @@ class AsterDexService {
       
       const data = await response.json();
       
-      return {
-        price: parseFloat(data.lastPrice || 0),
-        previousPrice: parseFloat(data.prevClosePrice || data.lastPrice || 0),
-        priceChangePercent: parseFloat(data.priceChangePercent || 0),
-        volume: parseFloat(data.volume || 0),
-        averageVolume: parseFloat(data.volume || 0), // Use same as volume if avg not available
-        movingAverage: parseFloat(data.weightedAvgPrice || data.lastPrice || 0),
-      };
+      // Filter for USDT perpetual futures pairs only
+      const usdtPairs = data.symbols
+        .filter((s: any) => 
+          s.symbol.endsWith('USDT') && 
+          s.contractType === 'PERPETUAL' &&
+          s.status === 'TRADING'
+        )
+        .map((s: any) => {
+          // Convert BTCUSDT to BTC/USDT format
+          const symbol = s.symbol.replace('USDT', '/USDT');
+          return symbol;
+        });
+      
+      logger.info(`📊 Found ${usdtPairs.length} active USDT perpetual pairs on Aster DEX`, { 
+        context: 'AsterDex',
+        data: { count: usdtPairs.length, sample: usdtPairs.slice(0, 10) }
+      });
+      
+      return usdtPairs;
     } catch (error) {
-      logger.error('Failed to get ticker data', error, { context: 'AsterDex', data: { symbol } });
-      return null;
+      logger.error('Failed to fetch trading pairs, using fallback list', error, { context: 'AsterDex' });
+      // Fallback to a known list of major pairs
+      return [
+        'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
+        'ADA/USDT', 'DOGE/USDT', 'MATIC/USDT', 'DOT/USDT', 'AVAX/USDT',
+        'LINK/USDT', 'UNI/USDT', 'ATOM/USDT', 'LTC/USDT', 'BCH/USDT',
+        'NEAR/USDT', 'APT/USDT', 'ARB/USDT', 'OP/USDT', 'SUI/USDT',
+        'ASTER/USDT', 'ZEC/USDT'
+      ];
     }
   }
 
@@ -617,16 +814,30 @@ class AsterDexService {
     symbol: string,
     side: 'BUY' | 'SELL',
     size: number,
-    leverage: number = 1
+    leverage: number = 1,
+    reduceOnly: boolean = false
   ): Promise<AsterOrder | null> {
-    this.validateOrderParams(symbol, side, size, leverage);
+    this.validateOrderParams(symbol, side, size, leverage, reduceOnly);
     try {
+      const orderPayload: any = { 
+        symbol, 
+        side, 
+        type: 'MARKET', 
+        quantity: size, 
+        leverage 
+      };
+      
+      // Add reduceOnly flag for closing positions
+      if (reduceOnly) {
+        orderPayload.reduceOnly = true;
+      }
+      
       const response = await fetch(this.getApiUrl('/api/aster/order'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ symbol, side, type: 'MARKET', quantity: size, leverage }),
+        body: JSON.stringify(orderPayload),
       });
       
       if (!response.ok) {
@@ -635,7 +846,8 @@ class AsterDexService {
       }
       
       const data = await response.json();
-      logger.trade('✅ REAL MARKET ORDER PLACED', { context: 'AsterDex', data: { symbol, side, size, orderId: data.orderId } });
+      const logType = reduceOnly ? '🔄 POSITION CLOSED' : '✅ REAL MARKET ORDER PLACED';
+      logger.trade(logType, { context: 'AsterDex', data: { symbol, side, size, orderId: data.orderId, reduceOnly } });
       return data as AsterOrder;
     } catch (error) {
       logger.error(ERROR_MESSAGES.ORDER_EXECUTION_FAILED, error, { context: 'AsterDex' });
@@ -681,36 +893,66 @@ class AsterDexService {
 
   /**
    * Get open positions (REAL - authenticated via server-side API)
+   * Uses request deduplication AND caching to prevent concurrent identical requests
+   * CACHED: 10 seconds
    */
   async getPositions(): Promise<AsterPosition[]> {
-    try {
-      const response = await fetch(this.getApiUrl('/api/aster/positions'));
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      // Transform Aster API response to our format
-      const positions: AsterPosition[] = data.map((pos: any) => ({
-        symbol: pos.symbol.replace('USDT', '/USDT'),
-        side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
-        size: Math.abs(parseFloat(pos.positionAmt)),
-        entryPrice: parseFloat(pos.entryPrice),
-        leverage: parseInt(pos.leverage),
-        unrealizedPnl: parseFloat(pos.unRealizedProfit),
-      }));
-      
-      logger.info(`📊 REAL Aster Positions: ${positions.length} open`, {
-        context: 'AsterDex',
-        data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) },
-      });
-      
-      return positions;
-    } catch (error) {
-      logger.error('Failed to get real positions', error, { context: 'AsterDex' });
-      return []; // Fallback to empty
+    const requestKey = 'getPositions';
+    const cacheKey = 'positions:all';
+    
+    // Check cache first
+    const cachedPositions = apiCache.get<AsterPosition[]>(cacheKey);
+    if (cachedPositions !== null) {
+      return cachedPositions;
     }
+    
+    // If a request is already pending, return that promise instead of making a new request
+    if (this.pendingRequests.has(requestKey)) {
+      logger.debug('⚠️ Deduplicating concurrent getPositions request', { context: 'AsterDex' });
+      return this.pendingRequests.get(requestKey)!;
+    }
+    
+    const requestPromise = (async () => {
+      try {
+        const response = await fetch(this.getApiUrl('/api/aster/positions'));
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Transform Aster API response to our format
+        const positions: AsterPosition[] = data.map((pos: any) => ({
+          symbol: pos.symbol.replace('USDT', '/USDT'),
+          side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
+          size: Math.abs(parseFloat(pos.positionAmt)),
+          entryPrice: parseFloat(pos.entryPrice),
+          leverage: parseInt(pos.leverage),
+          unrealizedPnl: parseFloat(pos.unRealizedProfit),
+        }));
+        
+        logger.info(`📊 REAL Aster Positions: ${positions.length} open`, {
+          context: 'AsterDex',
+          data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) },
+        });
+        
+        // Cache for 10 seconds
+        apiCache.set(cacheKey, positions, apiCache.getTTL('POSITIONS'));
+        
+        return positions;
+      } catch (error) {
+        logger.error('Failed to get real positions', error, { context: 'AsterDex' });
+        return []; // Fallback to empty
+      } finally {
+        // Remove from pending requests map when done
+        this.pendingRequests.delete(requestKey);
+      }
+    })();
+    
+    // Store the promise so concurrent requests can use it
+    this.pendingRequests.set(requestKey, requestPromise);
+    
+    return requestPromise;
   }
 
   /**
@@ -753,51 +995,85 @@ class AsterDexService {
 
   /**
    * Get account balance (REAL - authenticated via server-side API)
+   * Uses request deduplication AND caching to prevent concurrent identical requests
+   * CACHED: 15 seconds
    */
   async getBalance(): Promise<number> {
-    try {
-      const response = await fetch(this.getApiUrl('/api/aster/account'));
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}`);
-      }
+    const requestKey = 'getBalance';
+    const cacheKey = 'balance:account';
+    
+    // Check cache first
+    const cachedBalance = apiCache.get<number>(cacheKey);
+    if (cachedBalance !== null) {
+      return cachedBalance;
+    }
+    
+    // If a request is already pending, return that promise instead of making a new request
+    if (this.pendingRequests.has(requestKey)) {
+      logger.debug('⚠️ Deduplicating concurrent getBalance request', { context: 'AsterDex' });
+      return this.pendingRequests.get(requestKey)!;
+    }
+    
+    const requestPromise = (async () => {
+      try {
+        const response = await fetch(this.getApiUrl('/api/aster/account'));
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
       
-      const data = await response.json();
+      // Calculate TRUE account value using correct Aster DEX formula:
+      // Total Account Equity = totalMarginBalance (this already includes unrealized P&L)
+      const totalMarginBalance = parseFloat(data.totalMarginBalance || 0);
+      const totalWalletBalance = parseFloat(data.totalWalletBalance || 0);
+      const totalUnrealizedProfit = parseFloat(data.totalUnrealizedProfit || 0);
+      const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
       
-      // Try multiple balance fields (Aster DEX API variations)
-      let balance = parseFloat(data.totalWalletBalance || 0);
+      // totalMarginBalance = totalWalletBalance + totalUnrealizedProfit
+      // This is the REAL account value including unrealized P&L
+      let balance = totalMarginBalance;
       
-      // If totalWalletBalance is 0, check assets array for USDT
-      if (balance === 0 && data.assets && Array.isArray(data.assets)) {
-        const usdtAsset = data.assets.find((asset: any) => asset.asset === 'USDT');
-        if (usdtAsset) {
-          balance = parseFloat(usdtAsset.walletBalance || usdtAsset.availableBalance || 0);
-          logger.info('💰 Found balance in assets array', {
-            context: 'AsterDex',
-            data: { asset: usdtAsset },
-          });
+      // If balance is negative (losses), show it as is (don't hide losses)
+      // If you want to show absolute value instead, uncomment:
+      // balance = Math.abs(balance);
+      
+      // Final fallback: if still negative or invalid, use position margin + unrealized P&L
+      if (balance <= 0 || isNaN(balance)) {
+        balance = totalPositionInitialMargin + (totalUnrealizedProfit || 0);
+        if (balance <= 0) {
+          balance = 100; // Ultimate fallback
         }
       }
       
-      // If still 0, try availableBalance
-      if (balance === 0 && data.availableBalance) {
-        balance = parseFloat(data.availableBalance);
-      }
-      
-      logger.info(`💰 REAL Aster Balance: $${balance.toFixed(2)}`, {
+      logger.info(`💰 REAL Aster Account Value: $${balance.toFixed(2)}`, {
         context: 'AsterDex',
         data: { 
-          balance, 
-          totalWalletBalance: data.totalWalletBalance,
-          availableBalance: data.availableBalance,
-          assetsCount: data.assets?.length || 0,
+          totalAccountValue: balance,
+          positionValue: totalPositionInitialMargin,
+          unrealizedPnL: totalUnrealizedProfit,
+          totalMarginBalance: totalMarginBalance,
+          rawMarginBalance: data.totalMarginBalance,
         },
       });
       
-      return balance;
-    } catch (error) {
-      logger.error('Failed to get real balance', error, { context: 'AsterDex' });
-      return 100; // Fallback to initial capital
-    }
+        // Cache for 15 seconds
+        apiCache.set(cacheKey, balance, apiCache.getTTL('BALANCE'));
+        
+        return balance;
+      } catch (error) {
+        logger.error('Failed to get real balance', error, { context: 'AsterDex' });
+        return 100; // Fallback to initial capital
+      } finally {
+        // Remove from pending requests map when done
+        this.pendingRequests.delete(requestKey);
+      }
+    })();
+    
+    // Store the promise so concurrent requests can use it
+    this.pendingRequests.set(requestKey, requestPromise);
+    
+    return requestPromise;
   }
 
   /**

@@ -49,7 +49,13 @@ export async function POST(req: NextRequest) {
       orderParams.leverage = body.leverage;
     }
 
-    // Build signed query
+    // Add reduceOnly flag for closing positions (Aster DEX API param)
+    if (body.reduceOnly === true) {
+      orderParams.reduceOnly = 'true';
+    }
+
+    // Build signed query with fresh timestamp
+    orderParams.timestamp = Date.now();
     const queryString = await buildSignedQuery(orderParams, API_SECRET);
     const url = `${ASTER_BASE_URL}/fapi/v1/order?${queryString}`;
 
@@ -125,7 +131,8 @@ export async function DELETE(req: NextRequest) {
       orderId: orderId,
     };
 
-    // Build signed query
+    // Build signed query with fresh timestamp
+    cancelParams.timestamp = Date.now();
     const queryString = await buildSignedQuery(cancelParams, API_SECRET);
     const url = `${ASTER_BASE_URL}/fapi/v1/order?${queryString}`;
 
