@@ -63,6 +63,30 @@ export default function EnhancedDashboard() {
       }
     };
 
+    const updateTrades = async () => {
+      if (!isMounted) return;
+      try {
+        console.log('📜 Fetching trade history from server...');
+        const response = await fetch('/api/trades');
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Trade history received:', data);
+          if (data.success && Array.isArray(data.trades)) {
+            console.log(`📊 Found ${data.trades.length} historical trades`);
+            // Load trades into store
+            data.trades.forEach((trade: any) => {
+              useStore.getState().addTrade(trade);
+            });
+            console.log(`✅ Loaded ${data.trades.length} trades into store`);
+          }
+        } else {
+          console.error('❌ Trades API returned', response.status);
+        }
+      } catch (error) {
+        console.error('❌ Failed to fetch trades:', error);
+      }
+    };
+
     const updatePositions = async () => {
       if (!isMounted) return;
       try {
@@ -240,6 +264,8 @@ export default function EnhancedDashboard() {
       try {
         await updateAccountValue();
         console.log('✅ Account value updated');
+        await updateTrades();
+        console.log('✅ Trade history loaded');
         await updatePositions();
         console.log('✅ Positions updated');
         await callTradingAPI();
@@ -291,8 +317,83 @@ export default function EnhancedDashboard() {
   // Popular symbols
   const symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT'];
 
+  // Manual trade trigger for testing
+  const [isManualTrading, setIsManualTrading] = useState(false);
+  const handleManualTrade = async () => {
+    setIsManualTrading(true);
+    try {
+      console.log('🎯 Manual trade trigger activated');
+      const response = await fetch('/api/trading');
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Manual trade response:', data);
+        useStore.getState().addModelMessage({
+          id: `manual-${Date.now()}`,
+          model: 'System',
+          message: '🎯 Manual analysis triggered successfully!',
+          timestamp: Date.now(),
+          type: 'alert',
+        });
+        // Refresh data after trade
+        setTimeout(async () => {
+          await fetch('/api/aster/positions').then(r => r.json()).then(data => {
+            if (Array.isArray(data)) {
+              data.forEach((pos: any) => {
+                const positionAmt = parseFloat(pos.positionAmt || 0);
+                if (positionAmt !== 0) {
+                  updatePosition({
+                    id: pos.symbol,
+                    symbol: pos.symbol.replace('USDT', '/USDT'),
+                    side: positionAmt > 0 ? 'LONG' : 'SHORT',
+                    size: Math.abs(positionAmt),
+                    entryPrice: parseFloat(pos.entryPrice),
+                    currentPrice: parseFloat(pos.markPrice || pos.entryPrice),
+                    pnl: parseFloat(pos.unRealizedProfit || 0),
+                    pnlPercent: 0,
+                    model: 'DeepSeek R1',
+                    leverage: parseInt(pos.leverage || 5),
+                  });
+                }
+              });
+            }
+          });
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('❌ Manual trade failed:', error);
+      useStore.getState().addModelMessage({
+        id: `manual-error-${Date.now()}`,
+        model: 'System',
+        message: '❌ Manual trigger failed - check console',
+        timestamp: Date.now(),
+        type: 'alert',
+      });
+    } finally {
+      setTimeout(() => setIsManualTrading(false), 3000);
+    }
+  };
+
   return (
     <div className="w-full space-y-8">
+      {/* Manual Trade Trigger Button */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex justify-end"
+      >
+        <button
+          onClick={handleManualTrade}
+          disabled={isManualTrading}
+          className={`px-6 py-3 border-2 font-bold transition-all ${
+            isManualTrading
+              ? 'border-green-500/30 text-green-500/30 cursor-not-allowed'
+              : 'border-neon-green text-neon-green hover:bg-neon-green/10 hover:shadow-[0_0_20px_rgba(16,185,129,0.5)]'
+          }`}
+        >
+          {isManualTrading ? '⏳ ANALYZING...' : '🎯 FORCE TRADE ANALYSIS NOW'}
+        </button>
+      </motion.div>
+
       {/* Header Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Account Value Card */}
