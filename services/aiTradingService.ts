@@ -1146,10 +1146,17 @@ class AITradingService {
         // ⚠️ ALL THRESHOLDS BELOW USE ROE (RETURN ON EQUITY) - ACCOUNTS FOR LEVERAGE ⚠️
         // This means if you're using 5x leverage and price drops 2%, ROE loss = 10%
         
+        // Get current market conditions for exit analysis
+        const tickerData = await asterDexService.getTicker(position.symbol);
+        const priceChange = tickerData?.priceChangePercent || 0;
+        const volume = tickerData?.volume || 0;
+        const avgVolume = tickerData?.averageVolume || 1;
+        const volumeRatio = volume / avgVolume;
+        
         // EMERGENCY: Close ANY position with > 10% ROE loss IMMEDIATELY
         if (pnlPercent <= -10) {
           shouldClose = true;
-          reason = `🚨 EMERGENCY STOP: Severe ROE loss (${pnlPercent.toFixed(2)}% on your margin)`;
+          reason = `🚨 EMERGENCY STOP: Severe ROE loss (${pnlPercent.toFixed(2)}%). Entry: $${entryPrice.toFixed(2)}, Current: $${currentPrice.toFixed(2)}. Market conditions deteriorated significantly - protecting capital.`;
           logger.error(`🚨🚨🚨 EMERGENCY STOP LOSS! ${position.symbol} ROE down ${pnlPercent.toFixed(2)}%!`, {
             context: 'PositionMonitor',
           });
@@ -1157,7 +1164,7 @@ class AITradingService {
         // Check Stop Loss (2.5% ROE loss - tighter risk control)
         else if (pnlPercent <= -2.5) {
           shouldClose = true;
-          reason = `Stop Loss triggered (${pnlPercent.toFixed(2)}% ROE loss)`;
+          reason = `Stop Loss triggered at ${pnlPercent.toFixed(2)}% ROE loss. Entry: $${entryPrice.toFixed(2)}, Exit: $${currentPrice.toFixed(2)}. Price moved ${pricePnlPercent.toFixed(2)}% against position with ${leverage}x leverage. Risk management protocol activated to preserve capital.`;
           logger.warn(`🚨 STOP LOSS TRIGGERED FOR ${position.symbol}! ${pnlPercent.toFixed(2)}% ROE loss`, {
             context: 'PositionMonitor',
           });
@@ -1165,7 +1172,7 @@ class AITradingService {
         // Check Take Profit (8% ROE gain - lock in wins)
         else if (pnlPercent >= 8) {
           shouldClose = true;
-          reason = `Take Profit triggered (${pnlPercent.toFixed(2)}% ROE gain)`;
+          reason = `✅ Take Profit triggered at +${pnlPercent.toFixed(2)}% ROE gain! Entry: $${entryPrice.toFixed(2)}, Exit: $${currentPrice.toFixed(2)}. Price moved ${pricePnlPercent.toFixed(2)}% favorably with ${leverage}x leverage. Target profit achieved - locking in gains. Market 24h: ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%.`;
           logger.info(`💰 TAKE PROFIT! ${position.symbol} ROE up ${pnlPercent.toFixed(2)}%!`, {
             context: 'PositionMonitor',
           });
@@ -1175,14 +1182,12 @@ class AITradingService {
           // If we're up 5% ROE+, exit if we drop below 3% ROE
           if (pnlPercent >= 5 && pnlPercent < 3) {
             shouldClose = true;
-            reason = `Trailing stop triggered (ROE profit pulled back to ${pnlPercent.toFixed(2)}% from 5%+ gain)`;
+            reason = `Trailing stop triggered - ROE profit pulled back to ${pnlPercent.toFixed(2)}% from 5%+ peak. Entry: $${entryPrice.toFixed(2)}, Exit: $${currentPrice.toFixed(2)}. Protecting gains as momentum weakened. Volume: ${volumeRatio.toFixed(2)}x average.`;
           }
         }
         // Check for positions that have been open too long with losses (prevent holding losers)
         else if (pnlPercent < -1 && pnlPercent > -3) {
           // If losing more than 1% ROE but less than stop loss, consider market conditions
-          const tickerData = await asterDexService.getTicker(position.symbol);
-          const priceChange = tickerData?.priceChangePercent || 0;
           
           // If position is LONG and market is falling, or SHORT and market is rising
           const isLongInDowntrend = position.side === 'LONG' && priceChange < -2;
@@ -1190,7 +1195,7 @@ class AITradingService {
           
           if (isLongInDowntrend || isShortInUptrend) {
             shouldClose = true;
-            reason = `Position moving against trend (${pnlPercent.toFixed(2)}% ROE loss, market ${priceChange > 0 ? 'up' : 'down'} ${Math.abs(priceChange).toFixed(2)}%)`;
+            reason = `Position moving against prevailing trend - ${pnlPercent.toFixed(2)}% ROE loss. Market ${priceChange > 0 ? 'uptrend' : 'downtrend'} of ${Math.abs(priceChange).toFixed(2)}% conflicts with ${position.side} position. Volume: ${volumeRatio.toFixed(2)}x. Cutting loss early to avoid deeper drawdown.`;
           }
         }
         
