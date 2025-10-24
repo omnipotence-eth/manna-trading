@@ -94,10 +94,41 @@ class OptimizedDataService {
         cacheHit: false
       };
       
-      // Calculate P&L from positions
+      // Calculate P&L from positions and format them for the dashboard
       if (data.positions.length > 0) {
         data.unrealizedPnL = data.positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
         data.totalPnL = data.unrealizedPnL;
+        
+        // Format positions for dashboard compatibility
+        data.positions = data.positions.map((pos: any) => {
+          const positionAmt = parseFloat(pos.positionAmt || 0);
+          if (positionAmt === 0) return null; // Skip empty positions
+          
+          const side = positionAmt > 0 ? 'LONG' : 'SHORT';
+          const symbol = pos.symbol;
+          const entryPrice = parseFloat(pos.entryPrice || 0);
+          const currentPrice = parseFloat(pos.markPrice || pos.entryPrice || 0);
+          const pnl = parseFloat(pos.unRealizedProfit || 0);
+          const size = Math.abs(positionAmt);
+          const leverage = parseFloat(pos.leverage || 1);
+          
+          // Calculate P&L percentage
+          const marginUsed = size * entryPrice / leverage;
+          const pnlPercent = marginUsed !== 0 ? (pnl / marginUsed) * 100 : 0;
+          
+          return {
+            id: symbol,
+            symbol: symbol,
+            side: side,
+            size: size,
+            entryPrice: entryPrice,
+            currentPrice: currentPrice,
+            pnl: pnl,
+            pnlPercent: pnlPercent,
+            leverage: leverage,
+            model: 'DeepSeek R1',
+          };
+        }).filter(Boolean); // Remove null entries
       }
       
       // Cache the result

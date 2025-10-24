@@ -61,10 +61,14 @@ export default function EnhancedDashboard() {
             // Update account value
             setAccountValue(accountValue);
             
-            // Update positions
-            positions?.forEach((position: any) => {
-              updatePosition(position);
-            });
+            // Update positions with safety checks
+            if (positions && Array.isArray(positions)) {
+              positions.forEach((position: any) => {
+                if (position && typeof position === 'object') {
+                  updatePosition(position);
+                }
+              });
+            }
             
             console.log(`📊 Updated: Account=${accountValue}, Positions=${positions.length}, PnL=${unrealizedPnL}`);
           }
