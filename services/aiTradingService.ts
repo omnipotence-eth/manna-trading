@@ -1229,7 +1229,7 @@ class AITradingService {
             const durationSeconds = Math.floor((now - entryTime) / 1000);
             
             // Create trade journal entry
-            useStore.getState().addTrade({
+            const tradeEntry = {
               id: `trade-${now}`,
               timestamp: new Date(entryTime).toISOString(),
               model: 'DeepSeek R1',
@@ -1249,7 +1249,28 @@ class AITradingService {
               exitReason: reason,
               exitTimestamp: new Date(now).toISOString(),
               duration: durationSeconds,
-            });
+            };
+            
+            // Add to client-side store (if running in browser)
+            if (typeof window !== 'undefined') {
+              useStore.getState().addTrade(tradeEntry);
+            }
+            
+            // ALSO log to server-side trade history (persists across sessions)
+            try {
+              const response = await fetch('/api/trades', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(tradeEntry),
+              });
+              if (response.ok) {
+                logger.info(`✅ Trade logged to server: ${position.symbol}`, { context: 'TradeJournal' });
+              } else {
+                logger.warn(`⚠️ Failed to log trade to server (${response.status})`, { context: 'TradeJournal' });
+              }
+            } catch (error) {
+              logger.error('Failed to log trade to server', error, { context: 'TradeJournal' });
+            }
             
             // Remove entry data from map
             this.entryDataMap.delete(position.symbol);
