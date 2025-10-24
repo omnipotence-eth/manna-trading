@@ -88,14 +88,14 @@ export default function PriceChart({ symbol, height = 300 }: PriceChartProps) {
           width: containerWidth,
           height: height,
           layout: {
-            background: { type: 'solid' as const, color: 'transparent' },
+            background: { color: 'transparent' },
             textColor: '#10b981',
           },
           grid: {
             vertLines: { color: 'rgba(16, 185, 129, 0.1)' },
             horzLines: { color: 'rgba(16, 185, 129, 0.1)' },
           },
-        });
+        } as any);
 
         console.log('🎨 Chart created successfully');
 
