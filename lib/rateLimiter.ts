@@ -57,8 +57,12 @@ class RateLimiter {
 }
 
 // Global rate limiter instance (shared across all API routes)
-// Aster DEX allows much higher rates, but we keep it conservative for reliability
-export const globalRateLimiter = new RateLimiter(60000, 300); // 300 requests per minute (5 req/sec) - Conservative but responsive
+// Optimized for Aster DEX API specifications:
+// - Weighted requests: 1200 per minute (20 req/sec)
+// - Order requests: 10 per second
+// - Raw requests: 6000 per minute (100 req/sec)
+// We use a conservative 20 req/sec for authenticated endpoints
+export const globalRateLimiter = new RateLimiter(60000, 1200); // 1200 requests per minute (20 req/sec) - Aster DEX optimized
 
 /**
  * Middleware to apply rate limiting to API routes

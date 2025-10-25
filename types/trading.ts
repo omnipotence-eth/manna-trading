@@ -15,6 +15,7 @@ export interface MarketData {
   openPrice?: number;
   trades?: number;
   quoteVolume?: number;
+  volatility?: number;
 }
 
 export interface WebSocketMessage {
@@ -86,6 +87,18 @@ export interface ChartDataPoint {
   time: string;
   value: number;
   volume?: number;
+}
+
+export interface TradingSignal {
+  symbol: string;
+  action: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number;
+  size: number;
+  reasoning: string;
+}
+
+export interface AITradingModel {
+  analyze(symbol: string, marketData: MarketData): Promise<TradingSignal>;
 }
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
