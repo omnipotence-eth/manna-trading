@@ -3,6 +3,7 @@ import { logger } from '@/lib/logger';
 import { asterDexService } from './asterDexService';
 import { GodspeedModel } from './aiTradingModels';
 import { AITradingModel } from '@/types/trading';
+import { useStore } from '@/store/useStore';
 
 // Global entry data map for trade journal
 const globalEntryDataMap = new Map<string, any>();
@@ -20,6 +21,19 @@ class AITradingService {
     // Initialize Godspeed - our optimized trading strategy
     this.model = new GodspeedModel();
     logger.info('✅ Godspeed AI trading model initialized', { context: 'AITrading' });
+  }
+
+  private addModelMessage(message: string, type: 'analysis' | 'trade' | 'alert' = 'analysis') {
+    const modelMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      model: 'Godspeed',
+      message,
+      timestamp: Date.now(),
+      type
+    };
+    
+    // Add to store
+    useStore.getState().addModelMessage(modelMessage);
   }
 
   async start() {
@@ -80,6 +94,9 @@ class AITradingService {
           sample: symbols.slice(0, 10) // Show first 10 for logging
         }
       });
+
+      // Add analysis start message
+      this.addModelMessage(`🔍 Starting market analysis of ${symbols.length} trading pairs...`, 'analysis');
 
       // GODSPEED: Analyze EVERY coin to find the single best opportunity
       const allSignals: TradingSignal[] = [];
@@ -166,6 +183,9 @@ class AITradingService {
                 reasoning: signal.reasoning.substring(0, 100) + '...'
               },
             });
+
+            // Add opportunity message
+            this.addModelMessage(`💡 Found opportunity: ${signal.action} ${symbol} @ ${(signal.confidence * 100).toFixed(1)}% confidence - ${signal.reasoning.substring(0, 80)}...`, 'analysis');
           }
         } catch (error) {
           skippedCount++;
@@ -188,6 +208,9 @@ class AITradingService {
           }, {})
         }
       });
+
+      // Add analysis complete message
+      this.addModelMessage(`📊 Analysis complete: Analyzed ${analyzedCount} coins, found ${allSignals.length} opportunities`, 'analysis');
 
       // Get current open positions to check which coins we're already trading
       const currentPositions = await asterDexService.getPositions();
@@ -222,11 +245,17 @@ class AITradingService {
             currentPositions: openSymbols.size
           }
         });
+
+        // Add trade execution message
+        this.addModelMessage(`🚀 Executing trade: ${bestSignal.action} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence`, 'trade');
         
         // Execute the best available trade
         await this.executeTrade(bestSignal);
       } else {
         logger.info(`😴 HYPER-AGGRESSIVE: No new profitable opportunities found among ${symbols.length} coins (${openSymbols.size} already trading)`, { context: 'AITrading' });
+        
+        // Add no opportunities message
+        this.addModelMessage(`😴 No profitable opportunities found among ${symbols.length} coins (${openSymbols.size} already trading)`, 'analysis');
       }
 
       return { signals: allSignals, bestSignal };
