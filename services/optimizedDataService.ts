@@ -184,7 +184,8 @@ class OptimizedDataService {
   private async getAccountValueFast(): Promise<number> {
     try {
       // Use direct API call to get the correct account value
-      const response = await fetch('/api/aster/account');
+      const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+      const response = await fetch(`${baseUrl}/api/aster/account`);
       if (response.ok) {
         const data = await response.json();
         // Use the pre-calculated balance field from the API (this is the correct ~$59.87 value)
@@ -221,7 +222,8 @@ class OptimizedDataService {
   private async getPositionsFast(): Promise<any[]> {
     try {
       // Use direct API call to get positions data
-      const response = await fetch('/api/aster/positions');
+      const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+      const response = await fetch(`${baseUrl}/api/aster/positions`);
       if (response.ok) {
         const data = await response.json();
         // Transform Aster API response to our format (same as asterDexService.getPositions())
