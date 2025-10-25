@@ -159,6 +159,46 @@ export default function AIPerformanceChart() {
 
   return (
     <div className="w-full h-full flex flex-col p-2">
+      {/* Godspeed Stats - Moved to TOP of chart */}
+      <div className="mb-2 shrink-0" style={{ height: '65px' }}>
+        <div className="bg-black/30 rounded border border-green-500/20 p-2 hover:border-green-500/40 transition-all overflow-hidden h-full">
+          {/* Godspeed Header */}
+          <div className="flex items-center gap-2 mb-1.5">
+            <div
+              className="w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ backgroundColor: '#00ff41', boxShadow: '0 0 8px #00ff41' }}
+            />
+            <div className="text-sm font-bold text-neon-green">
+              Godspeed AI Trading System
+            </div>
+          </div>
+          
+          {/* Stats Grid - Horizontal Layout */}
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <div className="text-xs text-green-500/50 leading-none">Account Value</div>
+              <div className="text-sm font-bold text-green-500 leading-tight">
+                $48.23
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-green-500/50 leading-none">Change</div>
+              <div className={`text-sm font-bold leading-tight ${modelsPerformance[0].change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {modelsPerformance[0].change >= 0 ? '+' : ''}{modelsPerformance[0].change.toFixed(1)}%
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-green-500/50 leading-none">Win Rate</div>
+              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].winRate.toFixed(0)}%</div>
+            </div>
+            <div>
+              <div className="text-xs text-green-500/50 leading-none">Total Trades</div>
+              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].totalTrades}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Chart - Flex to take remaining space after model cards */}
       <div className="relative bg-black/20 rounded-lg flex-1 min-h-0">
         {isLoading ? (
@@ -203,7 +243,7 @@ export default function AIPerformanceChart() {
               );
             })}
 
-            {/* X-axis label */}
+            {/* X-axis label with date/time */}
             <text
               x={chartWidth / 2}
               y={chartHeight - 5}
@@ -212,7 +252,7 @@ export default function AIPerformanceChart() {
               textAnchor="middle"
               opacity="0.6"
             >
-              {timeRange}
+              {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()} | {timeRange}
             </text>
 
             {/* Performance lines for each model */}
@@ -244,46 +284,6 @@ export default function AIPerformanceChart() {
             ))}
           </svg>
         )}
-      </div>
-
-      {/* Godspeed Stats - Single Card */}
-      <div className="mt-2 shrink-0" style={{ height: '65px' }}>
-        <div className="bg-black/30 rounded border border-green-500/20 p-2 hover:border-green-500/40 transition-all overflow-hidden h-full">
-          {/* Godspeed Header */}
-          <div className="flex items-center gap-2 mb-1.5">
-            <div
-              className="w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ backgroundColor: '#00ff41', boxShadow: '0 0 8px #00ff41' }}
-            />
-            <div className="text-sm font-bold text-neon-green">
-              Godspeed AI Trading System
-            </div>
-          </div>
-          
-          {/* Stats Grid - Horizontal Layout */}
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Account Value</div>
-              <div className="text-sm font-bold text-green-500 leading-tight">
-                ${(modelsPerformance[0].currentValue / 1000).toFixed(1)}k
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Change</div>
-              <div className={`text-sm font-bold leading-tight ${modelsPerformance[0].change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {modelsPerformance[0].change >= 0 ? '+' : ''}{modelsPerformance[0].change.toFixed(1)}%
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Win Rate</div>
-              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].winRate.toFixed(0)}%</div>
-            </div>
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Total Trades</div>
-              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].totalTrades}</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
