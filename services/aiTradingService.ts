@@ -505,9 +505,16 @@ class AITradingService {
       // Place the trade using Aster DEX with MAXIMUM LEVERAGE + 100% MARGIN
       // Formula: Position Value = (Balance × 100%) × MAX_LEVERAGE / Price
       // Example: $100 × 50x = $5,000 position (100% margin, 50x leverage)
+      
+      // Type guard: ensure signal.action is BUY or SELL (never HOLD at this point)
+      if (signal.action === 'HOLD') {
+        logger.error(`❌ Unexpected HOLD signal in executeTrade: ${signal.symbol}`, { context: 'AITrading' });
+        return;
+      }
+      
       const order = await asterDexService.placeMarketOrder(
         signal.symbol,
-        signal.action,
+        signal.action as 'BUY' | 'SELL',
         quantity, // Quantity = (balancePerTrade × maxLeverage) / currentPrice
         maxLeverage, // ✅ MAXIMUM leverage per coin from exchange (dynamic 20x-100x)
         false // Not reduce-only (opening new position)
