@@ -542,7 +542,40 @@ class AITradingService {
     }
   }
 
-  // ... rest of existing code ...
+  /**
+   * Get trading service status
+   */
+  getStatus() {
+    return {
+      isRunning: this.isRunning,
+      model: 'Godspeed',
+      version: '2.0.0'
+    };
+  }
+
+  /**
+   * Get performance metrics (for backwards compatibility with API)
+   */
+  getPerformanceMetrics() {
+    return {
+      model: 'Godspeed',
+      version: '2.0.0',
+      isRunning: this.isRunning,
+      message: 'Use /api/trades endpoint for detailed metrics'
+    };
+  }
+
+  /**
+   * Update configuration (for backwards compatibility with API)
+   */
+  updateConfig(config: any) {
+    logger.info('Config update requested but ignored - v2.0 uses hardcoded optimal config', { 
+      context: 'AITrading',
+      data: config 
+    });
+    // Configuration is hardcoded for optimal performance in v2.0
+    // This method exists for API compatibility only
+  }
 }
 
 // Export the service instance
