@@ -38,7 +38,7 @@ class AITradingService {
       this.runTradingCycle();
     }, 30000); // Every 30 seconds for balanced frequency
 
-    logger.info('✅ GODSPEED ACTIVE [Cycle: 30s, Min Confidence: 60%, Leverage: MAX (20x-50x per coin), Margin: 100%, Risk/Reward: 1:3] 🚀', { context: 'AITrading' });
+    logger.info('✅ GODSPEED ACTIVE [Cycle: 30s, Min Confidence: 55%, Leverage: MAX (20x-50x per coin), Margin: 100%, Risk/Reward: 1:3, Rapid Movement Detection: ON] 🚀', { context: 'AITrading' });
   }
 
   async stop() {
@@ -353,8 +353,8 @@ class AITradingService {
     
     // Analyze confidence distribution to understand why only certain coins trade
     const confidenceRanges = {
-      high: sortedSignals.filter(s => s.confidence >= 0.6).length,
-      medium: sortedSignals.filter(s => s.confidence >= 0.4 && s.confidence < 0.6).length,
+      high: sortedSignals.filter(s => s.confidence >= 0.55).length,
+      medium: sortedSignals.filter(s => s.confidence >= 0.4 && s.confidence < 0.55).length,
       low: sortedSignals.filter(s => s.confidence < 0.4).length
     };
     
@@ -362,8 +362,8 @@ class AITradingService {
       context: 'AITrading',
       data: {
         total: sortedSignals.length,
-        highConfidence: `${confidenceRanges.high} (60%+) ✅ TRADEABLE`,
-        mediumConfidence: `${confidenceRanges.medium} (40-60%) ⚠️ TOO RISKY`,
+        highConfidence: `${confidenceRanges.high} (55%+) ✅ TRADEABLE`,
+        mediumConfidence: `${confidenceRanges.medium} (40-55%) ⚠️ TOO RISKY`,
         lowConfidence: `${confidenceRanges.low} (<40%) ❌ REJECTED`,
         bestConfidence: (bestSignal.confidence * 100).toFixed(1) + '%'
       }
@@ -379,27 +379,28 @@ class AITradingService {
           symbol: s.symbol,
           action: s.action,
           confidence: (s.confidence * 100).toFixed(1) + '%',
-          tradeable: s.confidence >= 0.6 ? '✅ YES' : '❌ NO',
+          tradeable: s.confidence >= 0.55 ? '✅ YES' : '❌ NO',
           reasoning: s.reasoning.substring(0, 80) + '...'
         }))
       }
     });
     
-    // 🎯 KELLY CRITERION RESPECT: Only take HIGH CONFIDENCE trades (60%+)
+    // 🎯 KELLY CRITERION RESPECT: Only take HIGH CONFIDENCE trades (55%+)
+    // Adjusted from 60% to 55% to catch more rapid movement opportunities
     // With 100% margin deployment, we MUST be selective on quality
-    if (bestSignal.confidence >= 0.6) {
+    if (bestSignal.confidence >= 0.55) {
       bestSignal.size = 1.0; // 100% of available margin - HIGH CONFIDENCE ONLY
       logger.info(`✅ HIGH CONFIDENCE TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}%`, {
         context: 'AITrading'
       });
     } else {
       // Reject low/medium confidence trades - wait for better opportunities
-      logger.info(`⏭️ SKIPPING - Need 60%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
+      logger.info(`⏭️ SKIPPING - Need 55%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
         context: 'AITrading',
         data: {
           symbol: bestSignal.symbol,
           confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-          threshold: '60%',
+          threshold: '55%',
           reasoning: bestSignal.reasoning
         }
       });

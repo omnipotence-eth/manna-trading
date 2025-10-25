@@ -166,6 +166,21 @@ export class GodspeedModel implements AITradingModel {
         reasoning += ` [High volatility warning: ${volatility.toFixed(1)}]`;
       }
 
+      // 🚀 RAPID MOVEMENT BOOST: If short-term momentum is much stronger than 24h trend
+      // This catches pumps/dumps that 24h averages miss
+      const has24hData = marketData.priceChange !== priceChange; // If they differ, we have short-term data
+      if (has24hData && action !== 'HOLD') {
+        const shortTermChange = priceChange;
+        const longTermChange = marketData.priceChange;
+        
+        // If short-term move is 2x+ stronger than 24h average, boost confidence
+        if (Math.abs(shortTermChange) > Math.abs(longTermChange) * 2) {
+          const rapidBoost = Math.min(0.2, Math.abs(shortTermChange) / 100); // Up to 20% boost
+          confidence = Math.min(confidence * (1 + rapidBoost), 0.95);
+          reasoning += ` [🔥 Rapid movement boost: ${shortTermChange.toFixed(2)}% vs ${longTermChange.toFixed(2)}% 24h]`;
+        }
+      }
+
       const signal: TradingSignal = {
         symbol,
         action,
