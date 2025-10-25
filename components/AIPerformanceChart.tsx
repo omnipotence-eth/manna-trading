@@ -21,7 +21,9 @@ interface ModelPerformance {
 
 export default function AIPerformanceChart() {
   const [timeRange, setTimeRange] = useState<'ALL' | '72H'>('ALL');
+  const [displayMode, setDisplayMode] = useState<'$' | '%'>('$');
   const [isLoading, setIsLoading] = useState(true);
+  const [hoveredPoint, setHoveredPoint] = useState<{x: number, y: number, value: number, timestamp: number} | null>(null);
   const accountValue = useStore((state) => state.accountValue);
   const trades = useStore((state) => state.trades);
 
@@ -147,6 +149,47 @@ export default function AIPerformanceChart() {
   const getX = (timestamp: number) => padding.left + ((timestamp - minTime) / timeRange_ms) * innerWidth;
   const getY = (value: number) => padding.top + innerHeight - ((value - minValue) / valueRange) * innerHeight;
 
+  // Handle mouse interaction
+  const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Check if mouse is within chart area
+    if (x >= padding.left && x <= padding.left + innerWidth && 
+        y >= padding.top && y <= padding.top + innerHeight) {
+      
+      // Find closest data point
+      const model = modelsPerformance[0];
+      if (model.data.length > 0) {
+        let closestPoint = model.data[0];
+        let minDistance = Infinity;
+        
+        model.data.forEach(point => {
+          const pointX = getX(point.timestamp);
+          const distance = Math.abs(x - pointX);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestPoint = point;
+          }
+        });
+        
+        setHoveredPoint({
+          x: getX(closestPoint.timestamp),
+          y: getY(closestPoint.value),
+          value: closestPoint.value,
+          timestamp: closestPoint.timestamp
+        });
+      }
+    } else {
+      setHoveredPoint(null);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredPoint(null);
+  };
+
   // Generate SVG path for a model
   const generatePath = (data: ChartDataPoint[]) => {
     if (data.length === 0) return '';
@@ -164,13 +207,39 @@ export default function AIPerformanceChart() {
       <div className="mb-2 shrink-0" style={{ height: '65px' }}>
         <div className="bg-black/30 rounded border border-green-500/20 p-2 hover:border-green-500/40 transition-all overflow-hidden h-full">
           {/* Godspeed Header */}
-          <div className="flex items-center gap-2 mb-1.5">
-            <div
-              className="w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ backgroundColor: '#00ff41', boxShadow: '0 0 8px #00ff41' }}
-            />
-            <div className="text-sm font-bold text-neon-green">
-              Godspeed AI Trading System
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: '#00ff41', boxShadow: '0 0 8px #00ff41' }}
+              />
+              <div className="text-sm font-bold text-neon-green">
+                Godspeed AI Trading System
+              </div>
+            </div>
+            
+            {/* Display Mode Toggle */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setDisplayMode('$')}
+                className={`px-2 py-1 text-xs font-bold rounded transition-all ${
+                  displayMode === '$' 
+                    ? 'bg-green-500 text-black' 
+                    : 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
+                }`}
+              >
+                $
+              </button>
+              <button
+                onClick={() => setDisplayMode('%')}
+                className={`px-2 py-1 text-xs font-bold rounded transition-all ${
+                  displayMode === '%' 
+                    ? 'bg-green-500 text-black' 
+                    : 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
+                }`}
+              >
+                %
+              </button>
             </div>
           </div>
           
@@ -207,7 +276,15 @@ export default function AIPerformanceChart() {
             <div className="text-green-500/60 text-lg">Loading Chart Data...</div>
           </div>
         ) : (
-          <svg width={chartWidth} height={chartHeight} className="w-full h-full" preserveAspectRatio="none" viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
+          <svg 
+            width={chartWidth} 
+            height={chartHeight} 
+            className="w-full h-full cursor-crosshair" 
+            preserveAspectRatio="none" 
+            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+          >
             {/* Grid lines */}
             <defs>
               <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -220,6 +297,10 @@ export default function AIPerformanceChart() {
             {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
               const value = minValue + valueRange * ratio;
               const y = padding.top + innerHeight - (ratio * innerHeight);
+              const displayValue = displayMode === '$' 
+                ? `$${value.toFixed(2)}` 
+                : `${((value - currentAccountValue) / currentAccountValue * 100).toFixed(1)}%`;
+              
               return (
                 <g key={i}>
                   <line
@@ -238,7 +319,7 @@ export default function AIPerformanceChart() {
                     textAnchor="end"
                     opacity="0.6"
                   >
-                    ${value.toFixed(2)}
+                    {displayValue}
                   </text>
                 </g>
               );
@@ -311,6 +392,75 @@ export default function AIPerformanceChart() {
                 )}
               </g>
             ))}
+
+            {/* Hover indicator */}
+            {hoveredPoint && (
+              <g>
+                {/* Vertical line */}
+                <line
+                  x1={hoveredPoint.x}
+                  y1={padding.top}
+                  x2={hoveredPoint.x}
+                  y2={padding.top + innerHeight}
+                  stroke="#00ff41"
+                  strokeWidth="1"
+                  opacity="0.6"
+                />
+                {/* Horizontal line */}
+                <line
+                  x1={padding.left}
+                  y1={hoveredPoint.y}
+                  x2={padding.left + innerWidth}
+                  y2={hoveredPoint.y}
+                  stroke="#00ff41"
+                  strokeWidth="1"
+                  opacity="0.6"
+                />
+                {/* Hover point */}
+                <circle
+                  cx={hoveredPoint.x}
+                  cy={hoveredPoint.y}
+                  r="6"
+                  fill="#00ff41"
+                  stroke="black"
+                  strokeWidth="2"
+                />
+                {/* Tooltip */}
+                <rect
+                  x={hoveredPoint.x - 60}
+                  y={hoveredPoint.y - 40}
+                  width="120"
+                  height="30"
+                  fill="rgba(0,0,0,0.8)"
+                  stroke="#00ff41"
+                  strokeWidth="1"
+                  rx="4"
+                />
+                <text
+                  x={hoveredPoint.x}
+                  y={hoveredPoint.y - 25}
+                  fill="#00ff41"
+                  fontSize="10"
+                  textAnchor="middle"
+                  fontWeight="bold"
+                >
+                  {displayMode === '$' 
+                    ? `$${hoveredPoint.value.toFixed(2)}` 
+                    : `${((hoveredPoint.value - currentAccountValue) / currentAccountValue * 100).toFixed(1)}%`
+                  }
+                </text>
+                <text
+                  x={hoveredPoint.x}
+                  y={hoveredPoint.y - 10}
+                  fill="#00ff41"
+                  fontSize="8"
+                  textAnchor="middle"
+                  opacity="0.8"
+                >
+                  {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+                </text>
+              </g>
+            )}
           </svg>
         )}
       </div>
