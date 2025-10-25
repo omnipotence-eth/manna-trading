@@ -31,7 +31,7 @@ export default function AIPerformanceChart() {
   const [modelsPerformance, setModelsPerformance] = useState<ModelPerformance[]>([
     {
       name: 'Godspeed',
-      color: '#00ff41',
+      color: '#00ff88', // Softer, more pleasant green
       data: [],
       currentValue: 0,
       change: 0,
@@ -149,7 +149,7 @@ export default function AIPerformanceChart() {
   const getX = (timestamp: number) => padding.left + ((timestamp - minTime) / timeRange_ms) * innerWidth;
   const getY = (value: number) => padding.top + innerHeight - ((value - minValue) / valueRange) * innerHeight;
 
-  // Handle mouse interaction
+  // Handle mouse interaction - interpolate between data points
   const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -159,26 +159,36 @@ export default function AIPerformanceChart() {
     if (x >= padding.left && x <= padding.left + innerWidth && 
         y >= padding.top && y <= padding.top + innerHeight) {
       
-      // Find closest data point
       const model = modelsPerformance[0];
-      if (model.data.length > 0) {
-        let closestPoint = model.data[0];
-        let minDistance = Infinity;
+      if (model.data.length > 1) {
+        // Convert x position to timestamp
+        const mouseTimestamp = minTime + ((x - padding.left) / innerWidth) * timeRange_ms;
         
-        model.data.forEach(point => {
-          const pointX = getX(point.timestamp);
-          const distance = Math.abs(x - pointX);
-          if (distance < minDistance) {
-            minDistance = distance;
-            closestPoint = point;
+        // Find the two data points surrounding the mouse timestamp
+        let leftPoint = model.data[0];
+        let rightPoint = model.data[model.data.length - 1];
+        
+        for (let i = 0; i < model.data.length - 1; i++) {
+          if (model.data[i].timestamp <= mouseTimestamp && model.data[i + 1].timestamp >= mouseTimestamp) {
+            leftPoint = model.data[i];
+            rightPoint = model.data[i + 1];
+            break;
           }
-        });
+        }
+        
+        // Interpolate value and timestamp
+        const timeDiff = rightPoint.timestamp - leftPoint.timestamp;
+        const valueDiff = rightPoint.value - leftPoint.value;
+        const ratio = timeDiff > 0 ? (mouseTimestamp - leftPoint.timestamp) / timeDiff : 0;
+        
+        const interpolatedValue = leftPoint.value + (valueDiff * ratio);
+        const interpolatedTimestamp = leftPoint.timestamp + ((rightPoint.timestamp - leftPoint.timestamp) * ratio);
         
         setHoveredPoint({
-          x: getX(closestPoint.timestamp),
-          y: getY(closestPoint.value),
-          value: closestPoint.value,
-          timestamp: closestPoint.timestamp
+          x: x,
+          y: getY(interpolatedValue),
+          value: interpolatedValue,
+          timestamp: interpolatedTimestamp
         });
       }
     } else {
@@ -368,11 +378,26 @@ export default function AIPerformanceChart() {
             {/* Performance lines for each model */}
             {modelsPerformance.map((model, idx) => (
               <g key={model.name}>
+                {/* Glow effect */}
                 <motion.path
                   d={generatePath(model.data)}
                   fill="none"
                   stroke={model.color}
-                  strokeWidth="2"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.2"
+                  filter="blur(4px)"
+                  initial={{ pathLength: 0, opacity: 0 }}
+                  animate={{ pathLength: 1, opacity: 0.2 }}
+                  transition={{ duration: 1, delay: idx * 0.2 }}
+                />
+                {/* Main line */}
+                <motion.path
+                  d={generatePath(model.data)}
+                  fill="none"
+                  stroke={model.color}
+                  strokeWidth="3"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   initial={{ pathLength: 0, opacity: 0 }}
@@ -384,7 +409,7 @@ export default function AIPerformanceChart() {
                   <circle
                     cx={getX(model.data[model.data.length - 1].timestamp)}
                     cy={getY(model.data[model.data.length - 1].value)}
-                    r="4"
+                    r="5"
                     fill={model.color}
                     stroke="black"
                     strokeWidth="2"
@@ -402,9 +427,10 @@ export default function AIPerformanceChart() {
                   y1={padding.top}
                   x2={hoveredPoint.x}
                   y2={padding.top + innerHeight}
-                  stroke="#00ff41"
-                  strokeWidth="1"
-                  opacity="0.6"
+                  stroke="#00ff88"
+                  strokeWidth="1.5"
+                  strokeDasharray="4,4"
+                  opacity="0.5"
                 />
                 {/* Horizontal line */}
                 <line
@@ -412,35 +438,44 @@ export default function AIPerformanceChart() {
                   y1={hoveredPoint.y}
                   x2={padding.left + innerWidth}
                   y2={hoveredPoint.y}
-                  stroke="#00ff41"
-                  strokeWidth="1"
-                  opacity="0.6"
+                  stroke="#00ff88"
+                  strokeWidth="1.5"
+                  strokeDasharray="4,4"
+                  opacity="0.5"
+                />
+                {/* Hover point glow */}
+                <circle
+                  cx={hoveredPoint.x}
+                  cy={hoveredPoint.y}
+                  r="10"
+                  fill="#00ff88"
+                  opacity="0.2"
                 />
                 {/* Hover point */}
                 <circle
                   cx={hoveredPoint.x}
                   cy={hoveredPoint.y}
                   r="6"
-                  fill="#00ff41"
+                  fill="#00ff88"
                   stroke="black"
                   strokeWidth="2"
                 />
                 {/* Tooltip */}
                 <rect
-                  x={hoveredPoint.x - 60}
-                  y={hoveredPoint.y - 40}
-                  width="120"
-                  height="30"
-                  fill="rgba(0,0,0,0.8)"
-                  stroke="#00ff41"
-                  strokeWidth="1"
-                  rx="4"
+                  x={hoveredPoint.x - 70}
+                  y={hoveredPoint.y - 50}
+                  width="140"
+                  height="40"
+                  fill="rgba(0,0,0,0.9)"
+                  stroke="#00ff88"
+                  strokeWidth="2"
+                  rx="6"
                 />
                 <text
                   x={hoveredPoint.x}
-                  y={hoveredPoint.y - 25}
-                  fill="#00ff41"
-                  fontSize="10"
+                  y={hoveredPoint.y - 32}
+                  fill="#00ff88"
+                  fontSize="12"
                   textAnchor="middle"
                   fontWeight="bold"
                 >
@@ -451,13 +486,23 @@ export default function AIPerformanceChart() {
                 </text>
                 <text
                   x={hoveredPoint.x}
-                  y={hoveredPoint.y - 10}
-                  fill="#00ff41"
-                  fontSize="8"
+                  y={hoveredPoint.y - 18}
+                  fill="#00ff88"
+                  fontSize="9"
                   textAnchor="middle"
                   opacity="0.8"
                 >
                   {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+                </text>
+                <text
+                  x={hoveredPoint.x}
+                  y={hoveredPoint.y - 6}
+                  fill="#00ff88"
+                  fontSize="8"
+                  textAnchor="middle"
+                  opacity="0.7"
+                >
+                  {new Date(hoveredPoint.timestamp).toLocaleTimeString()}
                 </text>
               </g>
             )}
