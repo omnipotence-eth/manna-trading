@@ -132,11 +132,32 @@ export default function AIPerformanceChart() {
   const innerWidth = chartWidth - padding.left - padding.right;
   const innerHeight = chartHeight - padding.top - padding.bottom;
 
-  // Calculate Y-axis range centered on current account value
+  // Calculate Y-axis range dynamically based on actual data
   const currentAccountValue = accountValue || 48.23; // Use real account value from API
-  const rangePercent = 0.2; // 20% range above and below current value
-  const minValue = currentAccountValue * (1 - rangePercent);
-  const maxValue = currentAccountValue * (1 + rangePercent);
+  const allValues = modelsPerformance.flatMap(model => model.data.map(d => d.value));
+  
+  // If we have data, use min/max with 10% padding, otherwise use current value +/- 20%
+  let minValue: number;
+  let maxValue: number;
+  
+  if (allValues.length > 0) {
+    const dataMin = Math.min(...allValues);
+    const dataMax = Math.max(...allValues);
+    const dataRange = dataMax - dataMin;
+    
+    // Add 10% padding above and below
+    minValue = dataMin - (dataRange * 0.1);
+    maxValue = dataMax + (dataRange * 0.1);
+    
+    // Ensure current value is always visible
+    minValue = Math.min(minValue, currentAccountValue * 0.95);
+    maxValue = Math.max(maxValue, currentAccountValue * 1.05);
+  } else {
+    // Fallback if no data yet
+    minValue = currentAccountValue * 0.8;
+    maxValue = currentAccountValue * 1.2;
+  }
+  
   const valueRange = maxValue - minValue;
 
   // Find time range
@@ -149,7 +170,7 @@ export default function AIPerformanceChart() {
   const getX = (timestamp: number) => padding.left + ((timestamp - minTime) / timeRange_ms) * innerWidth;
   const getY = (value: number) => padding.top + innerHeight - ((value - minValue) / valueRange) * innerHeight;
 
-  // Handle mouse interaction - interpolate between data points
+  // Handle mouse interaction - only show tooltip when near the line
   const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -183,13 +204,20 @@ export default function AIPerformanceChart() {
         
         const interpolatedValue = leftPoint.value + (valueDiff * ratio);
         const interpolatedTimestamp = leftPoint.timestamp + ((rightPoint.timestamp - leftPoint.timestamp) * ratio);
+        const lineY = getY(interpolatedValue);
         
-        setHoveredPoint({
-          x: x,
-          y: getY(interpolatedValue),
-          value: interpolatedValue,
-          timestamp: interpolatedTimestamp
-        });
+        // Only show tooltip if mouse is within 30px of the line
+        const distanceFromLine = Math.abs(y - lineY);
+        if (distanceFromLine < 30) {
+          setHoveredPoint({
+            x: x,
+            y: lineY,
+            value: interpolatedValue,
+            timestamp: interpolatedTimestamp
+          });
+        } else {
+          setHoveredPoint(null);
+        }
       }
     } else {
       setHoveredPoint(null);
@@ -214,8 +242,8 @@ export default function AIPerformanceChart() {
   return (
     <div className="w-full h-full flex flex-col p-2">
       {/* Godspeed Stats - Moved to TOP of chart */}
-      <div className="mb-2 shrink-0" style={{ height: '65px' }}>
-        <div className="bg-black/30 rounded border border-green-500/20 p-2 hover:border-green-500/40 transition-all overflow-hidden h-full">
+      <div className="mb-2 shrink-0" style={{ height: '70px' }}>
+        <div className="bg-black/30 rounded border border-green-500/20 p-2.5 hover:border-green-500/40 transition-all overflow-hidden h-full">
           {/* Godspeed Header */}
           <div className="flex items-center justify-between mb-1.5">
             <div className="flex items-center gap-2">
@@ -254,25 +282,25 @@ export default function AIPerformanceChart() {
           </div>
           
           {/* Stats Grid - Horizontal Layout */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-4 gap-3">
             <div>
-              <div className="text-xs text-green-500/50 leading-none">Account Value</div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Account Value</div>
               <div className="text-sm font-bold text-green-500 leading-tight">
                 ${currentAccountValue.toFixed(2)}
               </div>
             </div>
             <div>
-              <div className="text-xs text-green-500/50 leading-none">Change</div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Change</div>
               <div className={`text-sm font-bold leading-tight ${modelsPerformance[0].change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                 {modelsPerformance[0].change >= 0 ? '+' : ''}{modelsPerformance[0].change.toFixed(1)}%
               </div>
             </div>
             <div>
-              <div className="text-xs text-green-500/50 leading-none">Win Rate</div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Win Rate</div>
               <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].winRate.toFixed(0)}%</div>
             </div>
             <div>
-              <div className="text-xs text-green-500/50 leading-none">Total Trades</div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Total Trades</div>
               <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].totalTrades}</div>
             </div>
           </div>
