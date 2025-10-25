@@ -12,6 +12,7 @@ interface Trade {
   pnl: number;
   pnlPercent: number;
   leverage: number;
+  status?: 'completed' | 'open'; // Optional for backwards compatibility
   // Entry analysis
   entryReason: string;
   entryConfidence: number;
@@ -115,9 +116,18 @@ export const useStore = create<AppState>((set) => ({
     })),
 
   addTrade: (trade) =>
-    set((state) => ({
-      trades: [trade, ...state.trades.slice(0, 99)], // Keep last 100 trades
-    })),
+    set((state) => {
+      // Check if trade already exists (by ID)
+      const existingIndex = state.trades.findIndex((t) => t.id === trade.id);
+      if (existingIndex >= 0) {
+        // Trade already exists, don't add duplicate
+        return state;
+      }
+      // Add new trade and keep last 100
+      return {
+        trades: [trade, ...state.trades.slice(0, 99)],
+      };
+    }),
 
   updatePosition: (position) =>
     set((state) => {

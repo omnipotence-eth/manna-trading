@@ -7,6 +7,8 @@ import { useStore } from '@/store/useStore';
 export default function ModelChat() {
   const modelMessages = useStore((state) => state.modelMessages);
   const positions = useStore((state) => state.positions);
+  const trades = useStore((state) => state.trades);
+  const accountValue = useStore((state) => state.accountValue);
   const [userInput, setUserInput] = useState('');
   const [chatHistory, setChatHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string; timestamp: number }>>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -38,37 +40,36 @@ export default function ModelChat() {
     setIsLoading(true);
 
     try {
-      // Call AI API endpoint
-      const response = await fetch('/api/chat', {
+      // Call Ollama chat API for interactive conversation
+      const response = await fetch('/api/ollama-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           message,
-          context: {
-            recentAnalysis: modelMessages.slice(-5).map(m => m.message),
-            positions: positions.map(p => ({
-              symbol: p.symbol,
-              side: p.side,
-              pnl: p.pnlPercent?.toFixed(2) || 0,
-            })),
-          }
-        }),
+          context: 'trading',
+          positions: positions.map(p => ({
+            symbol: p.symbol,
+            side: p.side,
+            pnl: p.pnlPercent?.toFixed(2) || 0,
+          })),
+          accountValue: accountValue,
+          totalTrades: trades.length
+        })
       });
-
-      if (!response.ok) throw new Error('Failed to get response');
-
-      const data = await response.json();
       
-      // Add AI response to history
-      const aiMessage = { role: 'assistant' as const, content: data.response, timestamp: Date.now() };
-      setChatHistory(prev => [...prev, aiMessage]);
+      if (response.ok) {
+        const data = await response.json();
+        const aiResponse = data.response || 'Sorry, I could not generate a response.';
+        
+        const assistantMessage = { role: 'assistant' as const, content: aiResponse, timestamp: Date.now() };
+        setChatHistory(prev => [...prev, assistantMessage]);
+      } else {
+        const errorMessage = { role: 'assistant' as const, content: '❌ Failed to get Godspeed response. Please try again.', timestamp: Date.now() };
+        setChatHistory(prev => [...prev, errorMessage]);
+      }
     } catch (error) {
-      console.error('Error sending message:', error);
-      const errorMessage = { 
-        role: 'assistant' as const, 
-        content: 'I\'m having trouble connecting right now. Please try again in a moment.', 
-        timestamp: Date.now() 
-      };
+      console.error('Error calling Godspeed:', error);
+      const errorMessage = { role: 'assistant' as const, content: '❌ Error connecting to Godspeed. Please try again.', timestamp: Date.now() };
       setChatHistory(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
@@ -83,20 +84,20 @@ export default function ModelChat() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-full h-[450px]">
       {/* AI Thought Stream (Left Side) */}
       <motion.div
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
-        className="glass-effect rounded-lg overflow-hidden flex flex-col"
+        className="glass-effect rounded-lg overflow-hidden flex flex-col max-w-full h-[450px]"
       >
         {/* Header */}
         <div className="bg-black/50 border-b border-green-500/30 p-4">
           <div className="flex items-center gap-3">
             <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse shadow-lg shadow-green-500/50"></div>
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-neon-blue">AI Thought Stream</h3>
-              <p className="text-xs text-green-500/60">Real-time market analysis</p>
+              <h3 className="text-lg font-bold text-neon-blue">Godspeed Analysis</h3>
+              <p className="text-xs text-green-500/60">Real-time AI market analysis</p>
             </div>
             <span className="text-xs text-green-500/60 px-2 py-1 bg-green-500/10 rounded border border-green-500/30">
               {modelMessages.length} thoughts
@@ -107,7 +108,7 @@ export default function ModelChat() {
         {/* Messages */}
         <div 
           ref={thoughtsRef}
-          className="flex-1 h-[350px] overflow-y-auto p-3 space-y-2 bg-black/20"
+          className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2 bg-black/20"
         >
           {modelMessages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
@@ -162,9 +163,9 @@ export default function ModelChat() {
                           {new Date(msg.timestamp).toLocaleTimeString()}
                         </span>
                       </div>
-                      <div className="text-xs text-green-500 whitespace-pre-wrap break-words leading-snug">
-                        {msg.message}
-                      </div>
+                             <div className="text-xs text-green-500 whitespace-pre-wrap break-words leading-snug max-w-full overflow-hidden word-break">
+                               {msg.message}
+                             </div>
                     </div>
                   </div>
                 </motion.div>
@@ -178,15 +179,15 @@ export default function ModelChat() {
       <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
-        className="glass-effect rounded-lg overflow-hidden flex flex-col"
+        className="glass-effect rounded-lg overflow-hidden flex flex-col max-w-full h-[450px]"
       >
         {/* Header */}
         <div className="bg-black/50 border-b border-neon-blue/30 p-4">
           <div className="flex items-center gap-3">
             <div className="w-3 h-3 rounded-full bg-neon-blue animate-pulse shadow-lg shadow-neon-blue/50"></div>
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-neon-blue">Ask DeepSeek R1</h3>
-              <p className="text-xs text-green-500/60">Interactive Q&A</p>
+              <h3 className="text-lg font-bold text-neon-blue">Ask Godspeed</h3>
+              <p className="text-xs text-green-500/60">Interactive AI Chat</p>
             </div>
             <span className="text-xs text-green-500/60 px-2 py-1 bg-neon-blue/10 rounded border border-neon-blue/30">
               {chatHistory.length} messages
@@ -197,15 +198,15 @@ export default function ModelChat() {
         {/* Chat History */}
         <div 
           ref={chatRef}
-          className="flex-1 h-[350px] overflow-y-auto p-3 space-y-2 bg-black/20"
+          className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2 bg-black/20"
         >
           {chatHistory.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-md px-3">
                 <div className="text-4xl mb-2">💬</div>
-                <div className="text-neon-blue text-sm font-bold mb-1.5">Interactive Q&A</div>
+                <div className="text-neon-blue text-sm font-bold mb-1.5">Godspeed AI Chat</div>
                 <div className="text-green-500/60 text-xs mb-3 leading-snug">
-                  Ask about markets, strategy, or trades
+                  Ask Godspeed about markets, strategy, or trades
                 </div>
                 <div className="text-left bg-neon-blue/5 border border-neon-blue/30 rounded p-2.5">
                   <div className="text-xs text-neon-blue font-bold mb-1.5">💡 Try asking:</div>
@@ -243,16 +244,16 @@ export default function ModelChat() {
                             {msg.role === 'user' ? (
                               <span className="text-neon-blue">You</span>
                             ) : (
-                              <span className="text-green-400">R1</span>
+                              <span className="text-green-400">Ollama</span>
                             )}
                           </span>
                           <span className="text-xs text-green-500/50">
                             {new Date(msg.timestamp).toLocaleTimeString()}
                           </span>
                         </div>
-                        <div className="text-xs text-green-500 whitespace-pre-wrap break-words leading-snug">
-                          {msg.content}
-                        </div>
+                               <div className="text-xs text-green-500 whitespace-pre-wrap break-words leading-snug max-w-full overflow-hidden word-break">
+                                 {msg.content}
+                               </div>
                       </div>
                     </div>
                   </div>
@@ -301,7 +302,7 @@ export default function ModelChat() {
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
               onKeyDown={handleKeyPress}
-              placeholder="Ask about markets, strategy, trades..."
+              placeholder="Ask Godspeed about markets, strategy, trades..."
               disabled={isLoading}
               className="flex-1 bg-black/50 border border-green-500/30 rounded px-3 py-2 text-sm text-green-500 placeholder-green-500/40 focus:outline-none focus:border-neon-blue focus:ring-1 focus:ring-neon-blue/20 transition-all disabled:opacity-50"
             />

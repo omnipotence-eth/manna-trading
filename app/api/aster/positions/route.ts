@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
     // Apply rate limiting
     return await withRateLimit(async () => {
       // Build signed query with fresh timestamp (AFTER rate limiter)
-      const queryString = await buildSignedQuery({ timestamp: Date.now() }, API_SECRET);
+      // Subtract 1000ms to account for server time difference
+      const queryString = await buildSignedQuery({ timestamp: Date.now() - 1000 }, API_SECRET);
       const url = `${ASTER_BASE_URL}/fapi/v1/positionRisk?${queryString}`;
 
       logger.debug('Fetching Aster positions', { context: 'AsterAPI', data: { url } });
@@ -37,6 +38,39 @@ export async function GET(req: NextRequest) {
 
       if (!response.ok) {
         const errorText = await response.text();
+        
+        // Handle specific Aster DEX error codes
+        if (response.status === 429) {
+          logger.warn('Aster API rate limit exceeded', undefined, {
+            context: 'AsterAPI',
+            data: { status: response.status, error: errorText }
+          });
+          return NextResponse.json(
+            { error: 'Rate limit exceeded. Please try again later.' },
+            { status: 429 }
+          );
+        }
+        
+        if (response.status === 401) {
+          logger.error('Aster API authentication failed', undefined, {
+            context: 'AsterAPI',
+            data: { status: response.status, error: errorText }
+          });
+          return NextResponse.json(
+            { error: 'Authentication failed. Please check API credentials.' },
+            { status: 401 }
+          );
+        }
+        
+        // For 400 errors, return empty positions instead of failing
+        if (response.status === 400) {
+          logger.warn('Aster API returned 400, returning empty positions', undefined, {
+            context: 'AsterAPI',
+            data: { status: response.status, error: errorText }
+          });
+          return NextResponse.json([]);
+        }
+        
         logger.error('Aster API positions fetch failed', undefined, {
           context: 'AsterAPI',
           data: { 

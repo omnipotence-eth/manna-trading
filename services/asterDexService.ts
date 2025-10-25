@@ -760,6 +760,63 @@ class AsterDexService {
   }
 
   /**
+   * Get kline/candlestick data for technical analysis
+   * CACHED: 30 seconds for short-term intervals (1m, 5m), 60 seconds for longer
+   */
+  async getKlines(symbol: string, interval: string = '1m', limit: number = 100): Promise<Array<{
+    openTime: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    closeTime: number;
+  }> | null> {
+    const cacheKey = `klines:${symbol}:${interval}:${limit}`;
+    
+    // Check cache first
+    const cachedKlines = apiCache.get<any>(cacheKey);
+    if (cachedKlines !== null) {
+      return cachedKlines;
+    }
+    
+    return this.rateLimitedRequest(async () => {
+      try {
+        // Convert BTC/USDT to BTCUSDT format
+        const binanceSymbol = symbol.replace('/', '');
+        const url = `${this.baseUrl}/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Parse kline data: [openTime, open, high, low, close, volume, closeTime, ...]
+        const klines = data.map((k: any[]) => ({
+          openTime: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+          closeTime: k[6],
+        }));
+        
+        // Cache for 30 seconds for short intervals, 60 seconds for longer
+        const cacheTTL = ['1m', '3m', '5m'].includes(interval) ? 30 : 60;
+        apiCache.set(cacheKey, klines, cacheTTL);
+        
+        return klines;
+      } catch (error) {
+        logger.error(`Failed to get klines for ${symbol}`, error, { context: 'AsterDex' });
+        return null;
+      }
+    });
+  }
+
+  /**
    * Get all available trading pairs from Aster DEX
    */
   async getAllTradingPairs(): Promise<string[]> {
@@ -808,6 +865,144 @@ class AsterDexService {
   }
 
   /**
+   * Get account information including available balance
+   * CACHED: 3 seconds to reduce redundant account fetches during trade execution
+   */
+  async getAccountInfo(): Promise<{ totalWalletBalance: number; availableBalance: number } | null> {
+    const cacheKey = 'accountInfo';
+    
+    // Check cache first (3 second TTL)
+    const cached = apiCache.get(cacheKey);
+    if (cached) {
+      logger.debug('Using cached account info', { context: 'AsterDex' });
+      return cached as { totalWalletBalance: number; availableBalance: number };
+    }
+    
+    try {
+      const response = await fetch(this.getApiUrl('/api/aster/account'), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API returned ${response.status}: ${errorText}`);
+      }
+
+      const data = await response.json();
+      
+      // Prioritize totalWalletBalance if available
+      const totalWalletBalance = parseFloat(data.totalWalletBalance || data.totalCrossWalletBalance || data.availableBalance || '0');
+      const availableBalance = parseFloat(data.availableBalance || data.totalCrossWalletBalance || data.totalWalletBalance || '0');
+
+      const accountInfo = {
+        totalWalletBalance: Math.abs(totalWalletBalance),
+        availableBalance: Math.abs(availableBalance),
+      };
+
+      // Cache for 3 seconds
+      apiCache.set(cacheKey, accountInfo, 3);
+      
+      logger.debug('Fetched and cached account info', { context: 'AsterDex', data: accountInfo });
+      return accountInfo;
+    } catch (error) {
+      logger.error('Failed to get account info', error, { context: 'AsterDex' });
+      return null;
+    }
+  }
+
+  /**
+   * Get maximum leverage for a specific symbol
+   */
+  async getMaxLeverage(symbol: string): Promise<number> {
+    try {
+      const cacheKey = `maxLeverage:${symbol}`;
+      
+      // Check cache first (cache for 1 hour as leverage limits don't change often)
+      const cached = apiCache.get(cacheKey);
+      if (cached) {
+        return cached as number;
+      }
+
+      // Convert symbol format (BTC/USDT -> BTCUSDT)
+      const binanceSymbol = symbol.replace('/', '');
+      
+      const url = `${this.baseUrl}/exchangeInfo`;
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Find the symbol and get its max leverage
+      const symbolInfo = data.symbols.find((s: any) => s.symbol === binanceSymbol);
+      
+      if (symbolInfo && symbolInfo.maxLeverage) {
+        const maxLeverage = parseInt(symbolInfo.maxLeverage);
+        
+        // Cache for 1 hour (3600 seconds)
+        apiCache.set(cacheKey, maxLeverage, 3600);
+        
+        logger.debug(`📊 Max leverage for ${symbol}: ${maxLeverage}x`, { 
+          context: 'AsterDex',
+          data: { symbol, maxLeverage }
+        });
+        
+        return maxLeverage;
+      }
+      
+      // Default fallback
+      logger.warn(`Could not find max leverage for ${symbol}, using default 20x`, { context: 'AsterDex' });
+      return 20;
+    } catch (error) {
+      logger.error(`Failed to get max leverage for ${symbol}, using default 20x`, error, { context: 'AsterDex' });
+      return 20; // Safe default
+    }
+  }
+
+  /**
+   * Set leverage for a specific symbol
+   * MUST be called BEFORE placing an order with leverage
+   */
+  async setLeverage(symbol: string, leverage: number): Promise<boolean> {
+    try {
+      const response = await fetch(this.getApiUrl('/api/aster/leverage'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          symbol,
+          leverage
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.text();
+        logger.error(`Failed to set leverage for ${symbol}`, undefined, { 
+          context: 'AsterDex', 
+          data: { symbol, leverage, error } 
+        });
+        return false;
+      }
+      
+      logger.info(`✅ Leverage set: ${symbol} @ ${leverage}x`, { 
+        context: 'AsterDex',
+        data: { symbol, leverage }
+      });
+      
+      return true;
+    } catch (error) {
+      logger.error(`Error setting leverage for ${symbol}`, error, { context: 'AsterDex' });
+      return false;
+    }
+  }
+
+  /**
    * Place a market order
    */
   async placeMarketOrder(
@@ -819,12 +1014,22 @@ class AsterDexService {
   ): Promise<AsterOrder | null> {
     this.validateOrderParams(symbol, side, size, leverage, reduceOnly);
     try {
+      // CRITICAL: Set leverage BEFORE placing order (Aster DEX requirement)
+      if (leverage > 1 && !reduceOnly) {
+        const leverageSet = await this.setLeverage(symbol, leverage);
+        if (!leverageSet) {
+          logger.warn(`⚠️ Failed to set leverage, order may use default 1x`, { 
+            context: 'AsterDex',
+            data: { symbol, requestedLeverage: leverage }
+          });
+        }
+      }
+      
       const orderPayload: any = { 
         symbol, 
         side, 
         type: 'MARKET', 
-        quantity: size, 
-        leverage 
+        quantity: size
       };
       
       // Add reduceOnly flag for closing positions
@@ -847,7 +1052,7 @@ class AsterDexService {
       
       const data = await response.json();
       const logType = reduceOnly ? '🔄 POSITION CLOSED' : '✅ REAL MARKET ORDER PLACED';
-      logger.trade(logType, { context: 'AsterDex', data: { symbol, side, size, orderId: data.orderId, reduceOnly } });
+      logger.trade(logType, { context: 'AsterDex', data: { symbol, side, size, leverage, orderId: data.orderId, reduceOnly } });
       return data as AsterOrder;
     } catch (error) {
       logger.error(ERROR_MESSAGES.ORDER_EXECUTION_FAILED, error, { context: 'AsterDex' });

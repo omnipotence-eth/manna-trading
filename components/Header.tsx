@@ -3,8 +3,8 @@
 import { motion } from 'framer-motion';
 
 interface HeaderProps {
-  activeView: 'live' | 'leaderboard' | 'models';
-  setActiveView: (view: 'live' | 'leaderboard' | 'models') => void;
+  activeView: 'live' | 'models';
+  setActiveView: (view: 'live' | 'models') => void;
 }
 
 export default function Header({ activeView, setActiveView }: HeaderProps) {
@@ -15,22 +15,21 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-4"
+            className="flex items-center gap-3"
           >
-            <h1 className="text-2xl font-bold terminal-text">
-              <span className="text-neon-green">MANNA</span>
-              <span className="text-neon-blue"> AI ARENA</span>
-            </h1>
-            <div className="text-xs text-green-500/60">
-              Powered by Aster DEX
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-neon-green animate-pulse shadow-lg shadow-neon-green/50"></div>
+              <h1 className="text-xl sm:text-2xl font-bold">
+                <span className="text-neon-green">MANNA ARENA</span>
+                <span className="text-neon-blue ml-2">AI</span>
+              </h1>
             </div>
           </motion.div>
 
           <nav className="flex gap-1 sm:gap-2">
             {[
               { id: 'live' as const, label: 'LIVE' },
-              { id: 'leaderboard' as const, label: 'JOURNAL' },
-              { id: 'models' as const, label: 'MODELS' },
+              { id: 'models' as const, label: 'GODSPEED' },
             ].map((item) => (
               <motion.button
                 key={item.id}

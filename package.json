@@ -1,6 +1,6 @@
 {
   "name": "manna-ai-arena",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -18,6 +18,7 @@
     "ethers": "^6.13.2",
     "framer-motion": "^11.18.2",
     "lightweight-charts": "^5.0.9",
+    "lucide-react": "^0.548.0",
     "next": "14.2.13",
     "pg": "^8.16.3",
     "react": "^18.3.1",
