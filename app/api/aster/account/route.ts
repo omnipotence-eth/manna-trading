@@ -131,8 +131,11 @@ export async function GET(req: NextRequest) {
       let perpTotalValue = 0;
       let sourceField = '';
       
-      // Use totalWalletBalance as the primary source (absolute value since it's negative)
-      if (Math.abs(totalWalletBalance) > 0) {
+      // Use availableBalance as the primary source (actual trading balance)
+      if (availableBalance > 0) {
+        perpTotalValue = availableBalance;
+        sourceField = 'availableBalance';
+      } else if (Math.abs(totalWalletBalance) > 0) {
         perpTotalValue = Math.abs(totalWalletBalance);
         sourceField = 'totalWalletBalance';
       } else if (directBalance > 0) {

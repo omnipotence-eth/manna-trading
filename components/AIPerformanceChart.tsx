@@ -283,17 +283,6 @@ export default function AIPerformanceChart() {
               );
             })}
             
-            {/* Current time indicator */}
-            <text
-              x={chartWidth / 2}
-              y={chartHeight - 5}
-              fill="#00ff41"
-              fontSize="10"
-              textAnchor="middle"
-              opacity="0.6"
-            >
-              {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()} | {timeRange}
-            </text>
 
             {/* Performance lines for each model */}
             {modelsPerformance.map((model, idx) => (
