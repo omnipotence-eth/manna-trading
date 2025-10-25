@@ -130,10 +130,11 @@ export default function AIPerformanceChart() {
   const innerWidth = chartWidth - padding.left - padding.right;
   const innerHeight = chartHeight - padding.top - padding.bottom;
 
-  // Find min/max values across all models
-  const allValues = modelsPerformance.flatMap(model => model.data.map(d => d.value));
-  const minValue = Math.min(...allValues) * 0.95;
-  const maxValue = Math.max(...allValues) * 1.05;
+  // Calculate Y-axis range centered on current account value
+  const currentAccountValue = accountValue || 48.23; // Use real account value from API
+  const rangePercent = 0.2; // 20% range above and below current value
+  const minValue = currentAccountValue * (1 - rangePercent);
+  const maxValue = currentAccountValue * (1 + rangePercent);
   const valueRange = maxValue - minValue;
 
   // Find time range
@@ -178,7 +179,7 @@ export default function AIPerformanceChart() {
             <div>
               <div className="text-xs text-green-500/50 leading-none">Account Value</div>
               <div className="text-sm font-bold text-green-500 leading-tight">
-                $48.23
+                ${currentAccountValue.toFixed(2)}
               </div>
             </div>
             <div>
@@ -215,7 +216,7 @@ export default function AIPerformanceChart() {
             </defs>
             <rect x={padding.left} y={padding.top} width={innerWidth} height={innerHeight} fill="url(#grid)" />
 
-            {/* Y-axis labels */}
+            {/* Y-axis labels - Price range centered on account value */}
             {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
               const value = minValue + valueRange * ratio;
               const y = padding.top + innerHeight - (ratio * innerHeight);
@@ -237,13 +238,52 @@ export default function AIPerformanceChart() {
                     textAnchor="end"
                     opacity="0.6"
                   >
-                    ${(value / 1000).toFixed(1)}k
+                    ${value.toFixed(2)}
                   </text>
                 </g>
               );
             })}
 
-            {/* X-axis label with date/time */}
+            {/* X-axis with date/time labels */}
+            {allTimestamps.length > 0 && [0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+              const timestamp = minTime + timeRange_ms * ratio;
+              const x = padding.left + (ratio * innerWidth);
+              const date = new Date(timestamp);
+              return (
+                <g key={i}>
+                  <line
+                    x1={x}
+                    y1={padding.top}
+                    x2={x}
+                    y2={padding.top + innerHeight}
+                    stroke="rgba(0,255,65,0.1)"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={x}
+                    y={padding.top + innerHeight + 15}
+                    fill="#00ff41"
+                    fontSize="9"
+                    textAnchor="middle"
+                    opacity="0.6"
+                  >
+                    {date.toLocaleDateString()}
+                  </text>
+                  <text
+                    x={x}
+                    y={padding.top + innerHeight + 28}
+                    fill="#00ff41"
+                    fontSize="8"
+                    textAnchor="middle"
+                    opacity="0.5"
+                  >
+                    {date.toLocaleTimeString()}
+                  </text>
+                </g>
+              );
+            })}
+            
+            {/* Current time indicator */}
             <text
               x={chartWidth / 2}
               y={chartHeight - 5}
