@@ -169,7 +169,7 @@ class AITradingService {
           }
         } catch (error) {
           skippedCount++;
-          logger.warn(`Failed to analyze ${symbol}`, error as Error, { context: 'AITrading' });
+          logger.warn(`Failed to analyze ${symbol}: ${error}`, { context: 'AITrading' });
           continue;
         }
       }
