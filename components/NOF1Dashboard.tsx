@@ -62,7 +62,7 @@ export default function NOF1Dashboard() {
     };
 
     updateData();
-    const intervalId = setInterval(updateData, 3000);
+    const intervalId = setInterval(updateData, 2000);
 
     return () => {
       isMounted = false;
