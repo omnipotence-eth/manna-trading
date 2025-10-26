@@ -10,6 +10,143 @@ export class GodspeedModel implements AITradingModel {
   private modelName = 'Godspeed';
 
   /**
+   * Analyze chart trends across multiple timeframes
+   */
+  private async analyzeChartTrends(symbol: string): Promise<{
+    trend1m: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
+    trend5m: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
+    trend15m: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
+    strength1m: number;
+    strength5m: number;
+    strength15m: number;
+    trendAlignment: 'BULLISH' | 'BEARISH' | 'MIXED' | 'NEUTRAL';
+    confidence: number;
+    reasoning: string;
+  }> {
+    try {
+      // Fetch candles for different timeframes
+      const [klines1m, klines5m, klines15m] = await Promise.all([
+        asterDexService.getKlines(symbol, '1m', 20),
+        asterDexService.getKlines(symbol, '5m', 20),
+        asterDexService.getKlines(symbol, '15m', 20)
+      ]);
+
+      // Helper function to detect trend in a timeframe
+      const detectTrend = (candles: any[] | null) => {
+        if (!candles || candles.length < 10) {
+          return { trend: 'SIDEWAYS' as const, strength: 0 };
+        }
+
+        // Use simple moving averages and price action
+        const prices = candles.map(k => k.close);
+        const recentPrices = prices.slice(-5);
+        const olderPrices = prices.slice(0, 10);
+
+        const recentAvg = recentPrices.reduce((sum, p) => sum + p, 0) / recentPrices.length;
+        const olderAvg = olderPrices.reduce((sum, p) => sum + p, 0) / olderPrices.length;
+
+        const priceChange = ((recentAvg - olderAvg) / olderAvg) * 100;
+
+        // Count higher highs/lows for trend confirmation
+        let higherHighs = 0;
+        let lowerLows = 0;
+        
+        for (let i = 1; i < candles.length; i++) {
+          if (candles[i].high > candles[i-1].high) higherHighs++;
+          if (candles[i].low < candles[i-1].low) lowerLows++;
+        }
+
+        const bullishBias = higherHighs / (candles.length - 1);
+        const bearishBias = lowerLows / (candles.length - 1);
+
+        // Determine trend
+        let trend: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS' = 'SIDEWAYS';
+        let strength = 0;
+
+        if (priceChange > 0.3 && bullishBias > 0.5) {
+          trend = 'UPTREND';
+          strength = Math.min(bullishBias * Math.abs(priceChange) * 10, 1);
+        } else if (priceChange < -0.3 && bearishBias > 0.5) {
+          trend = 'DOWNTREND';
+          strength = Math.min(bearishBias * Math.abs(priceChange) * 10, 1);
+        } else {
+          trend = 'SIDEWAYS';
+          strength = 0.3;
+        }
+
+        return { trend, strength };
+      };
+
+      // Analyze each timeframe
+      const analysis1m = detectTrend(klines1m);
+      const analysis5m = detectTrend(klines5m);
+      const analysis15m = detectTrend(klines15m);
+
+      // Determine overall trend alignment
+      let trendAlignment: 'BULLISH' | 'BEARISH' | 'MIXED' | 'NEUTRAL' = 'NEUTRAL';
+      let confidence = 0;
+      let reasoning = '';
+
+      const bullishCount = [analysis1m.trend, analysis5m.trend, analysis15m.trend]
+        .filter(t => t === 'UPTREND').length;
+      const bearishCount = [analysis1m.trend, analysis5m.trend, analysis15m.trend]
+        .filter(t => t === 'DOWNTREND').length;
+
+      // Strong alignment: All timeframes agree
+      if (bullishCount === 3) {
+        trendAlignment = 'BULLISH';
+        confidence = (analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3;
+        reasoning = `📈 ALL TIMEFRAMES BULLISH: 1m/5m/15m all trending up (strength: ${(confidence * 100).toFixed(0)}%)`;
+      } else if (bearishCount === 3) {
+        trendAlignment = 'BEARISH';
+        confidence = (analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3;
+        reasoning = `📉 ALL TIMEFRAMES BEARISH: 1m/5m/15m all trending down (strength: ${(confidence * 100).toFixed(0)}%)`;
+      }
+      // Moderate alignment: 2/3 agree
+      else if (bullishCount >= 2) {
+        trendAlignment = 'BULLISH';
+        confidence = ((analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3) * 0.75;
+        reasoning = `📈 MOSTLY BULLISH: ${bullishCount}/3 timeframes uptrend (strength: ${(confidence * 100).toFixed(0)}%)`;
+      } else if (bearishCount >= 2) {
+        trendAlignment = 'BEARISH';
+        confidence = ((analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3) * 0.75;
+        reasoning = `📉 MOSTLY BEARISH: ${bearishCount}/3 timeframes downtrend (strength: ${(confidence * 100).toFixed(0)}%)`;
+      }
+      // Mixed signals
+      else {
+        trendAlignment = 'MIXED';
+        confidence = 0.3;
+        reasoning = `⚠️ MIXED TRENDS: 1m ${analysis1m.trend}, 5m ${analysis5m.trend}, 15m ${analysis15m.trend}`;
+      }
+
+      return {
+        trend1m: analysis1m.trend,
+        trend5m: analysis5m.trend,
+        trend15m: analysis15m.trend,
+        strength1m: analysis1m.strength,
+        strength5m: analysis5m.strength,
+        strength15m: analysis15m.strength,
+        trendAlignment,
+        confidence,
+        reasoning
+      };
+    } catch (error) {
+      logger.error(`Chart trend analysis failed for ${symbol}`, error, { context: 'Godspeed' });
+      return {
+        trend1m: 'SIDEWAYS',
+        trend5m: 'SIDEWAYS',
+        trend15m: 'SIDEWAYS',
+        strength1m: 0,
+        strength5m: 0,
+        strength15m: 0,
+        trendAlignment: 'NEUTRAL',
+        confidence: 0,
+        reasoning: 'Trend analysis error'
+      };
+    }
+  }
+
+  /**
    * Analyze 1-minute candles for rapid volume and price changes
    */
   private async analyze1MinuteAction(symbol: string): Promise<{
@@ -179,28 +316,71 @@ export class GodspeedModel implements AITradingModel {
 
   async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
     try {
-      // 🚀 PRIORITY 1: Check 1-minute chart for rapid volume spikes and price action
+      // 🚀 PRIORITY 1: Analyze chart trends across timeframes
+      const trendAnalysis = await this.analyzeChartTrends(symbol);
+      
+      // 🚀 PRIORITY 2: Check 1-minute chart for rapid volume spikes and price action
       const oneMinAnalysis = await this.analyze1MinuteAction(symbol);
       
-      // If 1-minute analysis finds a strong signal, use it immediately
+      // STRONG SIGNAL: Volume spike + Trend alignment
       if (oneMinAnalysis.confidence >= 0.65 && oneMinAnalysis.action !== 'NEUTRAL') {
+        // Boost confidence if trend aligns
+        let finalConfidence = oneMinAnalysis.confidence;
+        let trendBoost = 0;
+        
+        if (oneMinAnalysis.action === 'BUY' && trendAnalysis.trendAlignment === 'BULLISH') {
+          trendBoost = trendAnalysis.confidence * 0.1; // Up to 10% boost
+          finalConfidence = Math.min(finalConfidence + trendBoost, 0.98);
+        } else if (oneMinAnalysis.action === 'SELL' && trendAnalysis.trendAlignment === 'BEARISH') {
+          trendBoost = trendAnalysis.confidence * 0.1; // Up to 10% boost
+          finalConfidence = Math.min(finalConfidence + trendBoost, 0.98);
+        }
+        
         logger.info(`🎯 1-MINUTE SIGNAL TRIGGERED: ${symbol}`, {
           context: 'Godspeed',
           data: {
             action: oneMinAnalysis.action,
-            confidence: (oneMinAnalysis.confidence * 100).toFixed(1) + '%',
+            confidence: (finalConfidence * 100).toFixed(1) + '%',
             rapidChange: oneMinAnalysis.rapidPriceChange.toFixed(2) + '%',
             volumeSpike: oneMinAnalysis.volumeSpike,
-            reasoning: oneMinAnalysis.reasoning
+            trendAlignment: trendAnalysis.trendAlignment,
+            trendBoost: trendBoost > 0 ? `+${(trendBoost * 100).toFixed(1)}%` : 'none'
+          }
+        });
+
+        const reasoning = trendBoost > 0 
+          ? `${oneMinAnalysis.reasoning} | ${trendAnalysis.reasoning}`
+          : oneMinAnalysis.reasoning;
+
+        return {
+          symbol,
+          action: oneMinAnalysis.action as 'BUY' | 'SELL',
+          confidence: finalConfidence,
+          size: 1.0,
+          reasoning: `[${this.modelName}] ${reasoning}`
+        };
+      }
+      
+      // STRONG SIGNAL: Trend alignment alone (all 3 timeframes agree)
+      if (trendAnalysis.confidence >= 0.70 && trendAnalysis.trendAlignment !== 'NEUTRAL' && trendAnalysis.trendAlignment !== 'MIXED') {
+        const action = trendAnalysis.trendAlignment === 'BULLISH' ? 'BUY' : 'SELL';
+        
+        logger.info(`🎯 TREND ALIGNMENT SIGNAL: ${symbol}`, {
+          context: 'Godspeed',
+          data: {
+            action,
+            confidence: (trendAnalysis.confidence * 100).toFixed(1) + '%',
+            alignment: trendAnalysis.trendAlignment,
+            trends: `1m:${trendAnalysis.trend1m} 5m:${trendAnalysis.trend5m} 15m:${trendAnalysis.trend15m}`
           }
         });
 
         return {
           symbol,
-          action: oneMinAnalysis.action as 'BUY' | 'SELL',
-          confidence: oneMinAnalysis.confidence,
+          action,
+          confidence: trendAnalysis.confidence,
           size: 1.0,
-          reasoning: `[${this.modelName}] ${oneMinAnalysis.reasoning}`
+          reasoning: `[${this.modelName}] ${trendAnalysis.reasoning}`
         };
       }
 
@@ -227,6 +407,10 @@ export class GodspeedModel implements AITradingModel {
         oneMinuteBoost = oneMinAnalysis.confidence * 0.15; // Up to 10% boost
         reasoning += ` [1m boost: +${(oneMinuteBoost * 100).toFixed(1)}%]`;
       }
+
+      // 📊 TREND BOOST: If short-term trends align, boost the signal
+      let trendBoost = 0;
+      const chartTrendAnalysis = trendAnalysis; // Rename to avoid confusion with getTrendStrength
 
       // ===== PROFITABLE STRATEGY: MULTI-FACTOR CONFIRMATION =====
       
@@ -361,6 +545,17 @@ export class GodspeedModel implements AITradingModel {
         reasoning += ` [⚡ 1min activity: ${oneMinAnalysis.rapidPriceChange.toFixed(2)}% in 5min]`;
       }
 
+      // 📈 CHART TREND BOOST: Apply boost if multi-timeframe trends align with our signal
+      if (action === 'BUY' && (chartTrendAnalysis.trendAlignment === 'BULLISH')) {
+        trendBoost = chartTrendAnalysis.confidence * 0.12; // Up to 12% boost
+        confidence = Math.min(confidence + trendBoost, 0.95);
+        reasoning += ` [📈 Trend aligned: ${chartTrendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
+      } else if (action === 'SELL' && (chartTrendAnalysis.trendAlignment === 'BEARISH')) {
+        trendBoost = chartTrendAnalysis.confidence * 0.12; // Up to 12% boost
+        confidence = Math.min(confidence + trendBoost, 0.95);
+        reasoning += ` [📉 Trend aligned: ${chartTrendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
+      }
+
       const signal: TradingSignal = {
         symbol,
         action,
@@ -371,7 +566,14 @@ export class GodspeedModel implements AITradingModel {
 
       logger.debug(`Godspeed OPTIMIZED analysis for ${symbol}`, {
         context: 'Godspeed',
-        data: { action, confidence: (confidence * 100).toFixed(1) + '%', rsi: rsi.toFixed(0), trend: trendAnalysis.trend, reasoning }
+        data: { 
+          action, 
+          confidence: (confidence * 100).toFixed(1) + '%', 
+          rsi: rsi.toFixed(0), 
+          trend: trendAnalysis.trend, 
+          chartTrends: `1m:${chartTrendAnalysis.trend1m} 5m:${chartTrendAnalysis.trend5m} 15m:${chartTrendAnalysis.trend15m}`,
+          reasoning 
+        }
       });
 
       return signal;
