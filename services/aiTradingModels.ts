@@ -174,7 +174,15 @@ export class GodspeedModel implements AITradingModel {
         strength15m: 0,
         trendAlignment: 'NEUTRAL',
         confidence: 0,
-        reasoning: 'Trend analysis error'
+        reasoning: 'Trend analysis error',
+        predictiveSignal: 'NEUTRAL',
+        leadingIndicators: {
+          volumeDivergence: 0,
+          momentumShift: 0,
+          supportResistanceBreak: 0,
+          accumulationDistribution: 0
+        },
+        predictionConfidence: 0
       };
     }
   }
