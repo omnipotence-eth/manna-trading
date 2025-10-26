@@ -656,6 +656,15 @@ class AITradingService {
         return;
       }
       
+      // Additional validation for negative wallet balance scenarios
+      if (availableBalance < 5) { // Minimum 5 USDT required for trading
+        logger.warn(`⚠️ Insufficient available balance for trading: ${availableBalance} USDT (minimum: 5 USDT)`, { 
+          context: 'AITrading',
+          data: { availableBalance, minimum: 5 }
+        });
+        return;
+      }
+      
       // Get current price for the symbol
       const currentPrice = await asterDexService.getPrice(signal.symbol);
       if (currentPrice <= 0) {
@@ -672,12 +681,13 @@ class AITradingService {
       // positionValue = margin × leverage = total position size in USDT
       // quantity = positionValue / currentPrice = amount of base asset to buy
       
-      // 🛡️ SAFETY BUFFER: Use 98% of available margin to account for:
+      // 🛡️ ULTRA-CONSERVATIVE SAFETY BUFFER: Use 80% of available margin to account for:
       // - Trading fees (~0.04% maker/taker)
       // - Price slippage during execution
       // - Exchange liquidation buffer requirements
-      const SAFETY_MARGIN_PERCENT = 0.98;
-      const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 98% of available margin
+      // - Negative wallet balance issues
+      const SAFETY_MARGIN_PERCENT = 0.80; // Reduced from 0.98 to 0.80 for ultra-conservative approach
+      const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 80% of available margin
       const positionValue = marginToUse * maxLeverage; // Position size = margin × leverage
       let quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
       
