@@ -578,14 +578,37 @@ class AITradingService {
       const positionValue = marginToUse * maxLeverage; // Position size = margin × leverage
       let quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
       
-      // 🎯 PRECISION FIX: Round quantity to match exchange requirements
+      // 🎯 PRECISION FIX: Round quantity and cap at maximum to match exchange requirements
       const precisionInfo = await asterDexService.getSymbolPrecision(signal.symbol);
       if (precisionInfo) {
         const originalQuantity = quantity;
+        const maxQty = precisionInfo.maxQty;
+        
+        // Round to precision first
         quantity = asterDexService.roundQuantity(quantity, precisionInfo.quantityPrecision);
-        logger.info(`🎯 Rounded quantity for ${signal.symbol}: ${originalQuantity.toFixed(8)} → ${quantity} (precision: ${precisionInfo.quantityPrecision} decimals)`, {
+        
+        // Cap at maximum allowed quantity for this symbol
+        if (quantity > maxQty) {
+          logger.warn(`⚠️ Quantity ${quantity.toFixed(8)} exceeds max ${maxQty} for ${signal.symbol}, capping to maximum`, {
+            context: 'AITrading',
+            data: {
+              requestedQty: quantity,
+              maxQty,
+              symbol: signal.symbol
+            }
+          });
+          quantity = asterDexService.roundQuantity(maxQty, precisionInfo.quantityPrecision); // Cap and re-round
+        }
+        
+        logger.info(`🎯 Quantity adjusted for ${signal.symbol}: ${originalQuantity.toFixed(8)} → ${quantity.toFixed(8)} (precision: ${precisionInfo.quantityPrecision} decimals, max: ${maxQty}, capped: ${quantity === maxQty})`, {
           context: 'AITrading',
-          data: { original: originalQuantity, rounded: quantity, precision: precisionInfo.quantityPrecision }
+          data: { 
+            original: originalQuantity, 
+            rounded: quantity, 
+            precision: precisionInfo.quantityPrecision,
+            maxQty,
+            wasCapped: quantity === maxQty
+          }
         });
       }
       
