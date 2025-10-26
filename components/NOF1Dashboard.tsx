@@ -22,10 +22,13 @@ function ChatTabContent() {
       className="flex-1 overflow-y-auto space-y-2 px-3 py-2"
     >
       {modelMessages.length === 0 ? (
-        <div className="text-center py-12 text-green-500/60">
-          <div className="text-3xl mb-2">🧠</div>
-          <div className="text-sm font-semibold">Godspeed is thinking...</div>
-          <div className="text-xs opacity-60 mt-1">Trading decisions will appear here</div>
+        <div className="text-center py-12 text-green-500/60 px-4">
+          <div className="text-4xl mb-3">🧠</div>
+          <div className="text-sm font-semibold mb-2">Analyzing Markets</div>
+          <div className="text-xs opacity-75 leading-relaxed">
+            Godspeed is scanning all Aster DEX markets.<br/>
+            Trade decisions will appear here when executed.
+          </div>
         </div>
       ) : (
         modelMessages.slice(0, 10).map((msg: any) => (
@@ -117,7 +120,7 @@ export default function NOF1Dashboard() {
     };
 
     updateData();
-    const intervalId = setInterval(updateData, 2000);
+    const intervalId = setInterval(updateData, 1000); // 1 second for real-time updates
 
     return () => {
       isMounted = false;
@@ -345,10 +348,13 @@ export default function NOF1Dashboard() {
                     </div>
                   ))}
                   {trades.length === 0 && (
-                    <div className="text-center py-12 text-green-500/60">
-                      <div className="text-3xl mb-2">📊</div>
-                      <div className="text-sm font-semibold">No completed trades yet</div>
-                      <div className="text-xs opacity-60 mt-1">Godspeed will execute trades soon</div>
+                    <div className="text-center py-12 text-green-500/60 px-4">
+                      <div className="text-4xl mb-3">📊</div>
+                      <div className="text-sm font-semibold mb-2">No Trade History</div>
+                      <div className="text-xs opacity-75 leading-relaxed">
+                        New trades will appear here automatically.<br/>
+                        Currently monitoring {positions.length} open position{positions.length !== 1 ? 's' : ''}.
+                      </div>
                     </div>
                   )}
                 </motion.div>
