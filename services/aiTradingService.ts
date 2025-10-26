@@ -349,11 +349,11 @@ class AITradingService {
           let shouldClose = false;
           let reason = '';
           
-          // ULTRA-AGGRESSIVE RISK MANAGEMENT: Cut losses immediately
-          // Stop-loss at -0.5% ROE (cut losses immediately)
-          if (roePnlPercent <= -0.5) {
+          // BALANCED RISK MANAGEMENT: 1:1 risk/reward for 24/7 trading
+          // Stop-loss at -2% ROE (balanced risk control)
+          if (roePnlPercent <= -2.0) {
             shouldClose = true;
-            reason = `🛑 STOP-LOSS: ROE down ${roePnlPercent.toFixed(2)}% (threshold: -0.5%)`;
+            reason = `🛑 STOP-LOSS: ROE down ${roePnlPercent.toFixed(2)}% (threshold: -2.0%)`;
           }
           // Take-profit at +2% ROE (quick profits for active trading)
           else if (roePnlPercent >= 2.0) {
