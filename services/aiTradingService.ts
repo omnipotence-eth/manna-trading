@@ -350,6 +350,18 @@ class AITradingService {
           
           // Close the position
           try {
+            // 🔍 TIER 3: Double-check position still exists on exchange before closing
+            const freshPositions = await asterDexService.getPositions(true); // Bust cache for freshest data
+            const positionStillExists = freshPositions.some(p => p.symbol === position.symbol && p.side === position.side);
+            
+            if (!positionStillExists) {
+              logger.warn(`⚠️ Position ${position.symbol} ${position.side} already closed on exchange. Skipping close order.`, {
+                context: 'AITrading',
+                data: { symbol: position.symbol, side: position.side }
+              });
+              return; // Exit early - position already closed
+            }
+            
             const closeSide = position.side === 'LONG' ? 'SELL' : 'BUY';
             
             // 🎯 FIX: Round close quantity to correct precision to avoid ReduceOnly rejection
@@ -464,8 +476,35 @@ class AITradingService {
                 logger.error(`Failed to send close message`, error, { context: 'AITrading' });
               }
             }
-          } catch (error) {
+          } catch (error: any) {
+            // 🛡️ TIER 1: Handle "ReduceOnly rejected" gracefully (position already closed)
+            const errorMessage = error?.message || String(error);
+            if (errorMessage.includes('ReduceOnly Order is rejected') || errorMessage.includes('-2022')) {
+              logger.warn(`⚠️ ReduceOnly rejected for ${position.symbol} ${position.side} - position likely already closed. Clearing from monitoring.`, {
+                context: 'AITrading',
+                data: { symbol: position.symbol, side: position.side, error: errorMessage }
+              });
+              
+              // Position is already closed on exchange, no action needed
+              // The next monitoring cycle will fetch fresh positions and won't see this one
+              return;
+            }
+            
+            // For other errors, log and continue
             logger.error(`Failed to close position ${position.symbol}`, error, { context: 'AITrading' });
+          } finally {
+            // 🔄 TIER 2: Force refresh position cache after any close attempt
+            // This ensures next cycle has fresh data from exchange
+            try {
+              // Clear the cached positions by fetching fresh ones (with cache bust)
+              await asterDexService.getPositions(true);
+              logger.info(`✅ Position cache refreshed after close attempt for ${position.symbol}`, {
+                context: 'AITrading',
+                data: { symbol: position.symbol }
+              });
+            } catch (refreshError) {
+              logger.error(`Failed to refresh position cache`, refreshError, { context: 'AITrading' });
+            }
           }
         } else {
           logger.debug(`📊 Position ${position.symbol} ${position.side} within limits (ROE: ${roePnlPercent.toFixed(2)}%)`, {

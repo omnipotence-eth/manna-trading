@@ -1159,9 +1159,15 @@ class AsterDexService {
    * Uses request deduplication AND caching to prevent concurrent identical requests
    * CACHED: 10 seconds
    */
-  async getPositions(): Promise<AsterPosition[]> {
+  async getPositions(bustCache: boolean = false): Promise<AsterPosition[]> {
     const requestKey = 'getPositions';
     const cacheKey = 'positions:all';
+    
+    // 🔥 CACHE BUSTING: Allow forced refresh after position operations
+    if (bustCache) {
+      apiCache.invalidate(cacheKey);
+      logger.debug('💥 Position cache busted - forcing fresh fetch', { context: 'AsterDex' });
+    }
     
     // Check cache first
     const cachedPositions = apiCache.get<AsterPosition[]>(cacheKey);
@@ -1199,8 +1205,8 @@ class AsterDexService {
           data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) },
         });
         
-        // Cache for 10 seconds
-        apiCache.set(cacheKey, positions, apiCache.getTTL('POSITIONS'));
+        // Cache for only 2 seconds (aggressive refresh to prevent stale position data)
+        apiCache.set(cacheKey, positions, 2);
         
         return positions;
       } catch (error) {
