@@ -17,10 +17,10 @@ export async function POST(request: NextRequest) {
       type: payload.type || 'analysis',
     };
 
-    // Save to database
+    // Save to database (PostgreSQL uses $1, $2, etc. for parameters)
     await db.execute(
       `INSERT INTO model_messages (id, model, message, timestamp, type) 
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5)`,
       [message.id, message.model, message.message, message.timestamp, message.type]
     );
 
