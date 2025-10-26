@@ -713,6 +713,19 @@ class AITradingService {
           quantity = asterDexService.roundQuantity(maxQty, precisionInfo.quantityPrecision); // Cap and re-round
         }
         
+        // Additional safety check: Ensure quantity doesn't exceed 100 for any symbol
+        if (quantity > 100) {
+          logger.warn(`⚠️ Quantity ${quantity.toFixed(8)} exceeds 100 limit for ${signal.symbol}, capping to 100`, {
+            context: 'AITrading',
+            data: {
+              requestedQty: quantity,
+              maxAllowed: 100,
+              symbol: signal.symbol
+            }
+          });
+          quantity = asterDexService.roundQuantity(100, precisionInfo.quantityPrecision); // Cap to 100 and re-round
+        }
+        
         logger.info(`🎯 Quantity adjusted for ${signal.symbol}: ${originalQuantity.toFixed(8)} → ${quantity.toFixed(8)} (precision: ${precisionInfo.quantityPrecision} decimals, max: ${maxQty}, capped: ${quantity === maxQty})`, {
           context: 'AITrading',
           data: { 
