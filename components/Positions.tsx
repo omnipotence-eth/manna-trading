@@ -8,20 +8,21 @@ export default function Positions() {
   const positions = useStore((state) => state.positions);
 
   return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-7 gap-2 text-xs text-green-500/60 pb-2 border-b border-green-500/30">
-        <div>MODEL</div>
-        <div>SYMBOL</div>
-        <div>SIDE</div>
-        <div>SIZE</div>
-        <div>ENTRY</div>
-        <div>CURRENT</div>
-        <div>PNL</div>
+    <div className="space-y-4">
+      <div className="grid grid-cols-6 gap-4 text-xs text-green-500/60 pb-3 border-b border-green-500/30 font-semibold uppercase tracking-wider">
+        <div className="pl-2">SYMBOL</div>
+        <div className="text-center">SIDE</div>
+        <div className="text-right pr-2">SIZE</div>
+        <div className="text-right pr-2">ENTRY</div>
+        <div className="text-right pr-2">CURRENT</div>
+        <div className="text-right pr-2">PNL</div>
       </div>
 
       {positions.length === 0 ? (
-        <div className="text-center py-8 text-green-500/60">
-          No open positions. DeepSeek R1 will open positions when opportunities arise.
+        <div className="text-center py-12 text-green-500/60">
+          <div className="text-4xl mb-3">💤</div>
+          <div className="font-semibold mb-1 text-base">No open positions</div>
+          <div className="text-xs opacity-60">Godspeed will open positions when opportunities arise</div>
         </div>
       ) : (
         positions.map((position, index) => (
@@ -30,18 +31,20 @@ export default function Positions() {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
-            className="grid grid-cols-7 gap-2 text-xs p-2 border border-green-500/20 hover:border-green-500/40 transition-all"
+            className="grid grid-cols-6 gap-4 text-sm p-4 border border-green-500/20 hover:border-green-500/40 transition-all rounded bg-black/20"
           >
-            <div className="text-neon-blue">{position.model}</div>
-            <div>{position.symbol}</div>
-            <div className={position.side === 'LONG' ? 'text-neon-green' : 'text-red-500'}>
+            <div className="font-bold pl-2 truncate">{position.symbol}</div>
+            <div className={`font-bold text-center ${position.side === 'LONG' ? 'text-neon-green' : 'text-red-500'}`}>
               {position.side}
             </div>
-            <div>{position.size.toFixed(4)}</div>
-            <div>${position.entryPrice.toFixed(2)}</div>
-            <div>${position.currentPrice.toFixed(2)}</div>
-            <div className={position.pnl >= 0 ? 'text-neon-green' : 'text-red-500'}>
-              ${position.pnl.toFixed(2)} ({position.pnlPercent.toFixed(2)}%)
+            <div className="text-right pr-2 tabular-nums text-xs">{position.size.toFixed(4)}</div>
+            <div className="text-right pr-2 tabular-nums text-xs">${position.entryPrice.toFixed(2)}</div>
+            <div className="text-right pr-2 tabular-nums text-xs">${position.currentPrice.toFixed(2)}</div>
+            <div className={`text-right font-bold pr-2 tabular-nums ${position.pnl >= 0 ? 'text-neon-green' : 'text-red-500'}`}>
+              <div className="text-sm">{position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)}</div>
+              <div className="text-xs opacity-70 mt-0.5">
+                {position.pnl >= 0 ? '+' : ''}{position.pnlPercent.toFixed(2)}%
+              </div>
             </div>
           </motion.div>
         ))

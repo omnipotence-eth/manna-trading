@@ -21,15 +21,30 @@ interface ModelPerformance {
 
 export default function AIPerformanceChart() {
   const [timeRange, setTimeRange] = useState<'ALL' | '72H'>('ALL');
+  // Load display mode from localStorage, default to '$'
+  const [displayMode, setDisplayMode] = useState<'$' | '%'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('chartDisplayMode') as '$' | '%') || '$';
+    }
+    return '$';
+  });
   const [isLoading, setIsLoading] = useState(true);
+  const [hoveredPoint, setHoveredPoint] = useState<{x: number, y: number, value: number, timestamp: number} | null>(null);
   const accountValue = useStore((state) => state.accountValue);
   const trades = useStore((state) => state.trades);
+
+  // Persist display mode to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chartDisplayMode', displayMode);
+    }
+  }, [displayMode]);
 
   // AI model performance data - will be populated with real trade data
   const [modelsPerformance, setModelsPerformance] = useState<ModelPerformance[]>([
     {
       name: 'Godspeed',
-      color: '#00ff41',
+      color: '#00ff41', // Consistent neon green from theme
       data: [],
       currentValue: 0,
       change: 0,
@@ -81,11 +96,30 @@ export default function AIPerformanceChart() {
       });
     });
     
-    // Add current point if last trade is old
-    const lastTradeTime = points[points.length - 1].timestamp;
-    if (now - lastTradeTime > 60000) { // If last trade was >1 minute ago
-      points.push({ timestamp: now, value: currentAccountValue });
+    // ALWAYS add current point to show real-time account value changes
+    // This ensures the chart updates live as open positions gain/lose value
+    const lastTradeTime = points[points.length - 1]?.timestamp || now;
+    
+    // Add intermediate points every minute between last trade and now for smooth line
+    const timeSinceLastTrade = now - lastTradeTime;
+    if (timeSinceLastTrade > 60000) {
+      // Add points every minute to show the progression
+      const minutesSinceLastTrade = Math.floor(timeSinceLastTrade / 60000);
+      const valueChange = currentAccountValue - runningBalance;
+      
+      // Add up to 10 intermediate points for smooth progression
+      const numIntermediatePoints = Math.min(minutesSinceLastTrade, 10);
+      for (let i = 1; i <= numIntermediatePoints; i++) {
+        const ratio = i / (numIntermediatePoints + 1);
+        points.push({
+          timestamp: lastTradeTime + (timeSinceLastTrade * ratio),
+          value: runningBalance + (valueChange * ratio)
+        });
+      }
     }
+    
+    // Always add the most recent point with current account value
+    points.push({ timestamp: now, value: currentAccountValue });
     
     return points;
   }
@@ -130,10 +164,32 @@ export default function AIPerformanceChart() {
   const innerWidth = chartWidth - padding.left - padding.right;
   const innerHeight = chartHeight - padding.top - padding.bottom;
 
-  // Find min/max values across all models
+  // Calculate Y-axis range dynamically based on actual data
+  const currentAccountValue = accountValue || 48.23; // Use real account value from API
   const allValues = modelsPerformance.flatMap(model => model.data.map(d => d.value));
-  const minValue = Math.min(...allValues) * 0.95;
-  const maxValue = Math.max(...allValues) * 1.05;
+  
+  // If we have data, use min/max with 10% padding, otherwise use current value +/- 20%
+  let minValue: number;
+  let maxValue: number;
+  
+  if (allValues.length > 0) {
+    const dataMin = Math.min(...allValues);
+    const dataMax = Math.max(...allValues);
+    const dataRange = dataMax - dataMin;
+    
+    // Add 10% padding above and below
+    minValue = dataMin - (dataRange * 0.1);
+    maxValue = dataMax + (dataRange * 0.1);
+    
+    // Ensure current value is always visible
+    minValue = Math.min(minValue, currentAccountValue * 0.95);
+    maxValue = Math.max(maxValue, currentAccountValue * 1.05);
+  } else {
+    // Fallback if no data yet
+    minValue = currentAccountValue * 0.8;
+    maxValue = currentAccountValue * 1.2;
+  }
+  
   const valueRange = maxValue - minValue;
 
   // Find time range
@@ -145,6 +201,64 @@ export default function AIPerformanceChart() {
   // Convert data point to SVG coordinates
   const getX = (timestamp: number) => padding.left + ((timestamp - minTime) / timeRange_ms) * innerWidth;
   const getY = (value: number) => padding.top + innerHeight - ((value - minValue) / valueRange) * innerHeight;
+
+  // Handle mouse interaction - only show tooltip when near the line
+  const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Check if mouse is within chart area
+    if (x >= padding.left && x <= padding.left + innerWidth && 
+        y >= padding.top && y <= padding.top + innerHeight) {
+      
+      const model = modelsPerformance[0];
+      if (model.data.length > 1) {
+        // Convert x position to timestamp
+        const mouseTimestamp = minTime + ((x - padding.left) / innerWidth) * timeRange_ms;
+        
+        // Find the two data points surrounding the mouse timestamp
+        let leftPoint = model.data[0];
+        let rightPoint = model.data[model.data.length - 1];
+        
+        for (let i = 0; i < model.data.length - 1; i++) {
+          if (model.data[i].timestamp <= mouseTimestamp && model.data[i + 1].timestamp >= mouseTimestamp) {
+            leftPoint = model.data[i];
+            rightPoint = model.data[i + 1];
+            break;
+          }
+        }
+        
+        // Interpolate value and timestamp
+        const timeDiff = rightPoint.timestamp - leftPoint.timestamp;
+        const valueDiff = rightPoint.value - leftPoint.value;
+        const ratio = timeDiff > 0 ? (mouseTimestamp - leftPoint.timestamp) / timeDiff : 0;
+        
+        const interpolatedValue = leftPoint.value + (valueDiff * ratio);
+        const interpolatedTimestamp = leftPoint.timestamp + ((rightPoint.timestamp - leftPoint.timestamp) * ratio);
+        const lineY = getY(interpolatedValue);
+        
+        // Show tooltip if mouse is within 80px of the line (very generous tolerance)
+        const distanceFromLine = Math.abs(y - lineY);
+        if (distanceFromLine < 80) {
+          setHoveredPoint({
+            x: x,
+            y: lineY,
+            value: interpolatedValue,
+            timestamp: interpolatedTimestamp
+          });
+        } else {
+          setHoveredPoint(null);
+        }
+      }
+    } else {
+      setHoveredPoint(null);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredPoint(null);
+  };
 
   // Generate SVG path for a model
   const generatePath = (data: ChartDataPoint[]) => {
@@ -159,6 +273,72 @@ export default function AIPerformanceChart() {
 
   return (
     <div className="w-full h-full flex flex-col p-2">
+      {/* Godspeed Stats - Moved to TOP of chart */}
+      <div className="mb-2 shrink-0" style={{ height: '70px' }}>
+        <div className="bg-black/30 rounded border border-green-500/20 p-2.5 hover:border-green-500/40 transition-all overflow-hidden h-full">
+          {/* Godspeed Header */}
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-2">
+              <div
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: '#00ff41', boxShadow: '0 0 8px #00ff41' }}
+              />
+              <div className="text-sm font-bold text-neon-green">
+                Godspeed AI Trading System
+              </div>
+            </div>
+            
+            {/* Display Mode Toggle */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setDisplayMode('$')}
+                className={`px-2 py-1 text-xs font-bold rounded transition-all ${
+                  displayMode === '$' 
+                    ? 'bg-green-500 text-black' 
+                    : 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
+                }`}
+              >
+                $
+              </button>
+              <button
+                onClick={() => setDisplayMode('%')}
+                className={`px-2 py-1 text-xs font-bold rounded transition-all ${
+                  displayMode === '%' 
+                    ? 'bg-green-500 text-black' 
+                    : 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
+                }`}
+              >
+                %
+              </button>
+            </div>
+          </div>
+          
+          {/* Stats Grid - Horizontal Layout */}
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Account Value</div>
+              <div className="text-sm font-bold text-green-500 leading-tight">
+                ${currentAccountValue.toFixed(2)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Change</div>
+              <div className={`text-sm font-bold leading-tight ${modelsPerformance[0].change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {modelsPerformance[0].change >= 0 ? '+' : ''}{modelsPerformance[0].change.toFixed(1)}%
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Win Rate</div>
+              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].winRate.toFixed(0)}%</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-green-500/50 leading-tight mb-0.5">Total Trades</div>
+              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].totalTrades}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Chart - Flex to take remaining space after model cards */}
       <div className="relative bg-black/20 rounded-lg flex-1 min-h-0">
         {isLoading ? (
@@ -166,7 +346,15 @@ export default function AIPerformanceChart() {
             <div className="text-green-500/60 text-lg">Loading Chart Data...</div>
           </div>
         ) : (
-          <svg width={chartWidth} height={chartHeight} className="w-full h-full" preserveAspectRatio="none" viewBox={`0 0 ${chartWidth} ${chartHeight}`}>
+          <svg 
+            width={chartWidth} 
+            height={chartHeight} 
+            className="w-full h-full cursor-crosshair" 
+            preserveAspectRatio="none" 
+            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+          >
             {/* Grid lines */}
             <defs>
               <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -175,10 +363,14 @@ export default function AIPerformanceChart() {
             </defs>
             <rect x={padding.left} y={padding.top} width={innerWidth} height={innerHeight} fill="url(#grid)" />
 
-            {/* Y-axis labels */}
+            {/* Y-axis labels - Price range centered on account value */}
             {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
               const value = minValue + valueRange * ratio;
               const y = padding.top + innerHeight - (ratio * innerHeight);
+              const displayValue = displayMode === '$' 
+                ? `$${value.toFixed(2)}` 
+                : `${((value - currentAccountValue) / currentAccountValue * 100).toFixed(1)}%`;
+              
               return (
                 <g key={i}>
                   <line
@@ -197,32 +389,75 @@ export default function AIPerformanceChart() {
                     textAnchor="end"
                     opacity="0.6"
                   >
-                    ${(value / 1000).toFixed(1)}k
+                    {displayValue}
                   </text>
                 </g>
               );
             })}
 
-            {/* X-axis label */}
-            <text
-              x={chartWidth / 2}
-              y={chartHeight - 5}
-              fill="#00ff41"
-              fontSize="10"
-              textAnchor="middle"
-              opacity="0.6"
-            >
-              {timeRange}
-            </text>
+            {/* X-axis with date/time labels */}
+            {allTimestamps.length > 0 && [0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+              const timestamp = minTime + timeRange_ms * ratio;
+              const x = padding.left + (ratio * innerWidth);
+              const date = new Date(timestamp);
+              return (
+                <g key={i}>
+                  <line
+                    x1={x}
+                    y1={padding.top}
+                    x2={x}
+                    y2={padding.top + innerHeight}
+                    stroke="rgba(0,255,65,0.1)"
+                    strokeWidth="1"
+                  />
+                  <text
+                    x={x}
+                    y={padding.top + innerHeight + 15}
+                    fill="#00ff41"
+                    fontSize="9"
+                    textAnchor="middle"
+                    opacity="0.6"
+                  >
+                    {date.toLocaleDateString()}
+                  </text>
+                  <text
+                    x={x}
+                    y={padding.top + innerHeight + 28}
+                    fill="#00ff41"
+                    fontSize="8"
+                    textAnchor="middle"
+                    opacity="0.5"
+                  >
+                    {date.toLocaleTimeString()}
+                  </text>
+                </g>
+              );
+            })}
+            
 
             {/* Performance lines for each model */}
             {modelsPerformance.map((model, idx) => (
               <g key={model.name}>
+                {/* Glow effect */}
                 <motion.path
                   d={generatePath(model.data)}
                   fill="none"
                   stroke={model.color}
-                  strokeWidth="2"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.2"
+                  filter="blur(4px)"
+                  initial={{ pathLength: 0, opacity: 0 }}
+                  animate={{ pathLength: 1, opacity: 0.2 }}
+                  transition={{ duration: 1, delay: idx * 0.2 }}
+                />
+                {/* Main line */}
+                <motion.path
+                  d={generatePath(model.data)}
+                  fill="none"
+                  stroke={model.color}
+                  strokeWidth="3"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   initial={{ pathLength: 0, opacity: 0 }}
@@ -234,7 +469,7 @@ export default function AIPerformanceChart() {
                   <circle
                     cx={getX(model.data[model.data.length - 1].timestamp)}
                     cy={getY(model.data[model.data.length - 1].value)}
-                    r="4"
+                    r="5"
                     fill={model.color}
                     stroke="black"
                     strokeWidth="2"
@@ -242,48 +477,97 @@ export default function AIPerformanceChart() {
                 )}
               </g>
             ))}
+
+            {/* Hover indicator */}
+            {hoveredPoint && (
+              <g>
+                {/* Vertical line */}
+                <line
+                  x1={hoveredPoint.x}
+                  y1={padding.top}
+                  x2={hoveredPoint.x}
+                  y2={padding.top + innerHeight}
+                  stroke="#00ff88"
+                  strokeWidth="1.5"
+                  strokeDasharray="4,4"
+                  opacity="0.5"
+                />
+                {/* Horizontal line */}
+                <line
+                  x1={padding.left}
+                  y1={hoveredPoint.y}
+                  x2={padding.left + innerWidth}
+                  y2={hoveredPoint.y}
+                  stroke="#00ff88"
+                  strokeWidth="1.5"
+                  strokeDasharray="4,4"
+                  opacity="0.5"
+                />
+                {/* Hover point glow */}
+                <circle
+                  cx={hoveredPoint.x}
+                  cy={hoveredPoint.y}
+                  r="10"
+                  fill="#00ff88"
+                  opacity="0.2"
+                />
+                {/* Hover point */}
+                <circle
+                  cx={hoveredPoint.x}
+                  cy={hoveredPoint.y}
+                  r="6"
+                  fill="#00ff88"
+                  stroke="black"
+                  strokeWidth="2"
+                />
+                {/* Tooltip */}
+                <rect
+                  x={hoveredPoint.x - 70}
+                  y={hoveredPoint.y - 50}
+                  width="140"
+                  height="40"
+                  fill="rgba(0,0,0,0.9)"
+                  stroke="#00ff88"
+                  strokeWidth="2"
+                  rx="6"
+                />
+                <text
+                  x={hoveredPoint.x}
+                  y={hoveredPoint.y - 32}
+                  fill="#00ff88"
+                  fontSize="12"
+                  textAnchor="middle"
+                  fontWeight="bold"
+                >
+                  {displayMode === '$' 
+                    ? `$${hoveredPoint.value.toFixed(2)}` 
+                    : `${((hoveredPoint.value - currentAccountValue) / currentAccountValue * 100).toFixed(1)}%`
+                  }
+                </text>
+                <text
+                  x={hoveredPoint.x}
+                  y={hoveredPoint.y - 18}
+                  fill="#00ff88"
+                  fontSize="9"
+                  textAnchor="middle"
+                  opacity="0.8"
+                >
+                  {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+                </text>
+                <text
+                  x={hoveredPoint.x}
+                  y={hoveredPoint.y - 6}
+                  fill="#00ff88"
+                  fontSize="8"
+                  textAnchor="middle"
+                  opacity="0.7"
+                >
+                  {new Date(hoveredPoint.timestamp).toLocaleTimeString()}
+                </text>
+              </g>
+            )}
           </svg>
         )}
-      </div>
-
-      {/* Godspeed Stats - Single Card */}
-      <div className="mt-2 shrink-0" style={{ height: '65px' }}>
-        <div className="bg-black/30 rounded border border-green-500/20 p-2 hover:border-green-500/40 transition-all overflow-hidden h-full">
-          {/* Godspeed Header */}
-          <div className="flex items-center gap-2 mb-1.5">
-            <div
-              className="w-2.5 h-2.5 rounded-full shrink-0"
-              style={{ backgroundColor: '#00ff41', boxShadow: '0 0 8px #00ff41' }}
-            />
-            <div className="text-sm font-bold text-neon-green">
-              Godspeed AI Trading System
-            </div>
-          </div>
-          
-          {/* Stats Grid - Horizontal Layout */}
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Account Value</div>
-              <div className="text-sm font-bold text-green-500 leading-tight">
-                ${(modelsPerformance[0].currentValue / 1000).toFixed(1)}k
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Change</div>
-              <div className={`text-sm font-bold leading-tight ${modelsPerformance[0].change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {modelsPerformance[0].change >= 0 ? '+' : ''}{modelsPerformance[0].change.toFixed(1)}%
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Win Rate</div>
-              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].winRate.toFixed(0)}%</div>
-            </div>
-            <div>
-              <div className="text-xs text-green-500/50 leading-none">Total Trades</div>
-              <div className="text-sm font-bold text-green-500/80 leading-tight">{modelsPerformance[0].totalTrades}</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -73,8 +73,8 @@ export default function PriceTicker() {
     // Fetch immediately
     fetchPrices();
     
-    // Then fetch every 10 seconds
-    const interval = setInterval(fetchPrices, 10000);
+    // Then fetch every 3 seconds for faster price updates
+    const interval = setInterval(fetchPrices, 3000);
     
     return () => clearInterval(interval);
   }, []);

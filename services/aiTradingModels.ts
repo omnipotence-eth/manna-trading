@@ -1,12 +1,283 @@
 import { TradingSignal, MarketData, AITradingModel } from '@/types/trading';
 import { logger } from '@/lib/logger';
+import { asterDexService } from './asterDexService';
 
 /**
  * Godspeed AI Trading Model
- * OPTIMIZED FOR PROFIT - Professional trading strategy
+ * OPTIMIZED FOR PROFIT - Professional trading strategy with 1-minute chart analysis
  */
 export class GodspeedModel implements AITradingModel {
   private modelName = 'Godspeed';
+
+  /**
+   * Analyze chart trends across multiple timeframes
+   */
+  private async analyzeChartTrends(symbol: string): Promise<{
+    trend1m: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
+    trend5m: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
+    trend15m: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
+    strength1m: number;
+    strength5m: number;
+    strength15m: number;
+    trendAlignment: 'BULLISH' | 'BEARISH' | 'MIXED' | 'NEUTRAL';
+    confidence: number;
+    reasoning: string;
+  }> {
+    try {
+      // Fetch candles for different timeframes
+      const [klines1m, klines5m, klines15m] = await Promise.all([
+        asterDexService.getKlines(symbol, '1m', 20),
+        asterDexService.getKlines(symbol, '5m', 20),
+        asterDexService.getKlines(symbol, '15m', 20)
+      ]);
+
+      // Helper function to detect trend in a timeframe
+      const detectTrend = (candles: any[] | null) => {
+        if (!candles || candles.length < 10) {
+          return { trend: 'SIDEWAYS' as const, strength: 0 };
+        }
+
+        // Use simple moving averages and price action
+        const prices = candles.map(k => k.close);
+        const recentPrices = prices.slice(-5);
+        const olderPrices = prices.slice(0, 10);
+
+        const recentAvg = recentPrices.reduce((sum, p) => sum + p, 0) / recentPrices.length;
+        const olderAvg = olderPrices.reduce((sum, p) => sum + p, 0) / olderPrices.length;
+
+        const priceChange = ((recentAvg - olderAvg) / olderAvg) * 100;
+
+        // Count higher highs/lows for trend confirmation
+        let higherHighs = 0;
+        let lowerLows = 0;
+        
+        for (let i = 1; i < candles.length; i++) {
+          if (candles[i].high > candles[i-1].high) higherHighs++;
+          if (candles[i].low < candles[i-1].low) lowerLows++;
+        }
+
+        const bullishBias = higherHighs / (candles.length - 1);
+        const bearishBias = lowerLows / (candles.length - 1);
+
+        // Determine trend
+        let trend: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS' = 'SIDEWAYS';
+        let strength = 0;
+
+        if (priceChange > 0.3 && bullishBias > 0.5) {
+          trend = 'UPTREND';
+          strength = Math.min(bullishBias * Math.abs(priceChange) * 10, 1);
+        } else if (priceChange < -0.3 && bearishBias > 0.5) {
+          trend = 'DOWNTREND';
+          strength = Math.min(bearishBias * Math.abs(priceChange) * 10, 1);
+        } else {
+          trend = 'SIDEWAYS';
+          strength = 0.3;
+        }
+
+        return { trend, strength };
+      };
+
+      // Analyze each timeframe
+      const analysis1m = detectTrend(klines1m);
+      const analysis5m = detectTrend(klines5m);
+      const analysis15m = detectTrend(klines15m);
+
+      // Determine overall trend alignment
+      let trendAlignment: 'BULLISH' | 'BEARISH' | 'MIXED' | 'NEUTRAL' = 'NEUTRAL';
+      let confidence = 0;
+      let reasoning = '';
+
+      const bullishCount = [analysis1m.trend, analysis5m.trend, analysis15m.trend]
+        .filter(t => t === 'UPTREND').length;
+      const bearishCount = [analysis1m.trend, analysis5m.trend, analysis15m.trend]
+        .filter(t => t === 'DOWNTREND').length;
+
+      // Strong alignment: All timeframes agree
+      if (bullishCount === 3) {
+        trendAlignment = 'BULLISH';
+        confidence = (analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3;
+        reasoning = `📈 ALL TIMEFRAMES BULLISH: 1m/5m/15m all trending up (strength: ${(confidence * 100).toFixed(0)}%)`;
+      } else if (bearishCount === 3) {
+        trendAlignment = 'BEARISH';
+        confidence = (analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3;
+        reasoning = `📉 ALL TIMEFRAMES BEARISH: 1m/5m/15m all trending down (strength: ${(confidence * 100).toFixed(0)}%)`;
+      }
+      // Moderate alignment: 2/3 agree
+      else if (bullishCount >= 2) {
+        trendAlignment = 'BULLISH';
+        confidence = ((analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3) * 0.75;
+        reasoning = `📈 MOSTLY BULLISH: ${bullishCount}/3 timeframes uptrend (strength: ${(confidence * 100).toFixed(0)}%)`;
+      } else if (bearishCount >= 2) {
+        trendAlignment = 'BEARISH';
+        confidence = ((analysis1m.strength + analysis5m.strength + analysis15m.strength) / 3) * 0.75;
+        reasoning = `📉 MOSTLY BEARISH: ${bearishCount}/3 timeframes downtrend (strength: ${(confidence * 100).toFixed(0)}%)`;
+      }
+      // Mixed signals
+      else {
+        trendAlignment = 'MIXED';
+        confidence = 0.3;
+        reasoning = `⚠️ MIXED TRENDS: 1m ${analysis1m.trend}, 5m ${analysis5m.trend}, 15m ${analysis15m.trend}`;
+      }
+
+      return {
+        trend1m: analysis1m.trend,
+        trend5m: analysis5m.trend,
+        trend15m: analysis15m.trend,
+        strength1m: analysis1m.strength,
+        strength5m: analysis5m.strength,
+        strength15m: analysis15m.strength,
+        trendAlignment,
+        confidence,
+        reasoning
+      };
+    } catch (error) {
+      logger.error(`Chart trend analysis failed for ${symbol}`, error, { context: 'Godspeed' });
+      return {
+        trend1m: 'SIDEWAYS',
+        trend5m: 'SIDEWAYS',
+        trend15m: 'SIDEWAYS',
+        strength1m: 0,
+        strength5m: 0,
+        strength15m: 0,
+        trendAlignment: 'NEUTRAL',
+        confidence: 0,
+        reasoning: 'Trend analysis error'
+      };
+    }
+  }
+
+  /**
+   * Analyze 1-minute candles for rapid volume and price changes
+   */
+  private async analyze1MinuteAction(symbol: string): Promise<{
+    volumeSpike: boolean;
+    sellVolume: boolean;
+    buyVolume: boolean;
+    rapidPriceChange: number;
+    avgVolume: number;
+    recentVolume: number;
+    action: 'BUY' | 'SELL' | 'NEUTRAL';
+    confidence: number;
+    reasoning: string;
+  }> {
+    try {
+      // Fetch last 15 1-minute candles
+      const klines = await asterDexService.getKlines(symbol, '1m', 15);
+      
+      if (!klines || klines.length < 10) {
+        return {
+          volumeSpike: false,
+          sellVolume: false,
+          buyVolume: false,
+          rapidPriceChange: 0,
+          avgVolume: 0,
+          recentVolume: 0,
+          action: 'NEUTRAL',
+          confidence: 0,
+          reasoning: 'Insufficient 1m data'
+        };
+      }
+
+      // Get most recent candles
+      const latestCandle = klines[klines.length - 1];
+      const recentCandles = klines.slice(-5); // Last 5 minutes
+      const olderCandles = klines.slice(0, -5); // Previous 10 minutes for baseline
+
+      // Calculate average volumes
+      const avgVolume = olderCandles.reduce((sum, k) => sum + k.volume, 0) / olderCandles.length;
+      const recentVolume = recentCandles.reduce((sum, k) => sum + k.volume, 0) / recentCandles.length;
+      const latestVolume = latestCandle.volume;
+
+      // Detect volume spike: Recent volume > 2x average
+      const volumeSpike = recentVolume > avgVolume * 2.0 || latestVolume > avgVolume * 2.5;
+
+      // Calculate rapid price change (last 5 minutes)
+      const fiveMinAgo = recentCandles[0].close;
+      const currentPrice = latestCandle.close;
+      const rapidPriceChange = ((currentPrice - fiveMinAgo) / fiveMinAgo) * 100;
+
+      // Detect buy vs sell pressure from candle patterns
+      let buyPressure = 0;
+      let sellPressure = 0;
+
+      recentCandles.forEach(candle => {
+        const bodySize = Math.abs(candle.close - candle.open);
+        const wickSize = candle.high - candle.low;
+        const isBullish = candle.close > candle.open;
+
+        if (isBullish) {
+          buyPressure += (bodySize / wickSize) * candle.volume;
+        } else {
+          sellPressure += (bodySize / wickSize) * candle.volume;
+        }
+      });
+
+      const totalPressure = buyPressure + sellPressure;
+      const buyVolumeRatio = totalPressure > 0 ? buyPressure / totalPressure : 0.5;
+      const sellVolumeRatio = 1 - buyVolumeRatio;
+
+      // Strong buy volume: More than 65% buy pressure
+      const buyVolume = buyVolumeRatio > 0.65 && volumeSpike;
+      
+      // Strong sell volume: More than 65% sell pressure  
+      const sellVolume = sellVolumeRatio > 0.65 && volumeSpike;
+
+      // Determine action based on 1-minute analysis
+      let action: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
+      let confidence = 0;
+      let reasoning = '';
+
+      // STRATEGY: Buy into large volume spikes with positive price action
+      if (buyVolume && rapidPriceChange > 0.3) {
+        action = 'BUY';
+        confidence = Math.min(0.75 + (rapidPriceChange / 10), 0.95);
+        reasoning = `🚀 BUY VOLUME SPIKE: ${buyVolumeRatio.toFixed(0)}% buy pressure, ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} vol, +${rapidPriceChange.toFixed(2)}% in 5min`;
+      }
+      // STRATEGY: Sell into sell volume quickly (dump detection)
+      else if (sellVolume && rapidPriceChange < -0.3) {
+        action = 'SELL';
+        confidence = Math.min(0.75 + (Math.abs(rapidPriceChange) / 10), 0.95);
+        reasoning = `📉 SELL VOLUME SPIKE: ${sellVolumeRatio.toFixed(0)}% sell pressure, ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} vol, ${rapidPriceChange.toFixed(2)}% in 5min`;
+      }
+      // STRATEGY: Catch early breakouts (volume spike + price rising)
+      else if (volumeSpike && rapidPriceChange > 0.5) {
+        action = 'BUY';
+        confidence = Math.min(0.65 + (rapidPriceChange / 15), 0.85);
+        reasoning = `⚡ RAPID BREAKOUT: ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} volume, +${rapidPriceChange.toFixed(2)}% surge in 5min`;
+      }
+      // STRATEGY: Catch dumps early (volume spike + price falling)
+      else if (volumeSpike && rapidPriceChange < -0.5) {
+        action = 'SELL';
+        confidence = Math.min(0.65 + (Math.abs(rapidPriceChange) / 15), 0.85);
+        reasoning = `⚡ RAPID DUMP: ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} volume, ${rapidPriceChange.toFixed(2)}% drop in 5min`;
+      }
+
+      return {
+        volumeSpike,
+        sellVolume,
+        buyVolume,
+        rapidPriceChange,
+        avgVolume,
+        recentVolume,
+        action,
+        confidence,
+        reasoning
+      };
+    } catch (error) {
+      logger.error(`1-minute analysis failed for ${symbol}`, error, { context: 'Godspeed' });
+      return {
+        volumeSpike: false,
+        sellVolume: false,
+        buyVolume: false,
+        rapidPriceChange: 0,
+        avgVolume: 0,
+        recentVolume: 0,
+        action: 'NEUTRAL',
+        confidence: 0,
+        reasoning: 'Analysis error'
+      };
+    }
+  }
 
   /**
    * Calculate RSI (Relative Strength Index)
@@ -45,6 +316,74 @@ export class GodspeedModel implements AITradingModel {
 
   async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
     try {
+      // 🚀 PRIORITY 1: Analyze chart trends across timeframes
+      const trendAnalysis = await this.analyzeChartTrends(symbol);
+      
+      // 🚀 PRIORITY 2: Check 1-minute chart for rapid volume spikes and price action
+      const oneMinAnalysis = await this.analyze1MinuteAction(symbol);
+      
+      // STRONG SIGNAL: Volume spike + Trend alignment
+      if (oneMinAnalysis.confidence >= 0.65 && oneMinAnalysis.action !== 'NEUTRAL') {
+        // Boost confidence if trend aligns
+        let finalConfidence = oneMinAnalysis.confidence;
+        let trendBoost = 0;
+        
+        if (oneMinAnalysis.action === 'BUY' && trendAnalysis.trendAlignment === 'BULLISH') {
+          trendBoost = trendAnalysis.confidence * 0.1; // Up to 10% boost
+          finalConfidence = Math.min(finalConfidence + trendBoost, 0.98);
+        } else if (oneMinAnalysis.action === 'SELL' && trendAnalysis.trendAlignment === 'BEARISH') {
+          trendBoost = trendAnalysis.confidence * 0.1; // Up to 10% boost
+          finalConfidence = Math.min(finalConfidence + trendBoost, 0.98);
+        }
+        
+        logger.info(`🎯 1-MINUTE SIGNAL TRIGGERED: ${symbol}`, {
+          context: 'Godspeed',
+          data: {
+            action: oneMinAnalysis.action,
+            confidence: (finalConfidence * 100).toFixed(1) + '%',
+            rapidChange: oneMinAnalysis.rapidPriceChange.toFixed(2) + '%',
+            volumeSpike: oneMinAnalysis.volumeSpike,
+            trendAlignment: trendAnalysis.trendAlignment,
+            trendBoost: trendBoost > 0 ? `+${(trendBoost * 100).toFixed(1)}%` : 'none'
+          }
+        });
+
+        const reasoning = trendBoost > 0 
+          ? `${oneMinAnalysis.reasoning} | ${trendAnalysis.reasoning}`
+          : oneMinAnalysis.reasoning;
+
+        return {
+          symbol,
+          action: oneMinAnalysis.action as 'BUY' | 'SELL',
+          confidence: finalConfidence,
+          size: 1.0,
+          reasoning: `[${this.modelName}] ${reasoning}`
+        };
+      }
+      
+      // STRONG SIGNAL: Trend alignment alone (all 3 timeframes agree)
+      if (trendAnalysis.confidence >= 0.70 && trendAnalysis.trendAlignment !== 'NEUTRAL' && trendAnalysis.trendAlignment !== 'MIXED') {
+        const action = trendAnalysis.trendAlignment === 'BULLISH' ? 'BUY' : 'SELL';
+        
+        logger.info(`🎯 TREND ALIGNMENT SIGNAL: ${symbol}`, {
+          context: 'Godspeed',
+          data: {
+            action,
+            confidence: (trendAnalysis.confidence * 100).toFixed(1) + '%',
+            alignment: trendAnalysis.trendAlignment,
+            trends: `1m:${trendAnalysis.trend1m} 5m:${trendAnalysis.trend5m} 15m:${trendAnalysis.trend15m}`
+          }
+        });
+
+        return {
+          symbol,
+          action,
+          confidence: trendAnalysis.confidence,
+          size: 1.0,
+          reasoning: `[${this.modelName}] ${trendAnalysis.reasoning}`
+        };
+      }
+
       // Extract market data
       const priceChange = marketData.priceChange;
       const volume = marketData.volume;
@@ -55,34 +394,44 @@ export class GodspeedModel implements AITradingModel {
 
       // Calculate technical indicators
       const rsi = this.calculateRSI(priceChange, volatility);
-      const trendAnalysis = this.getTrendStrength(currentPrice, movingAverage, priceChange);
+      const longTermTrend = this.getTrendStrength(currentPrice, movingAverage, priceChange);
       
       let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
       let confidence = 0;
       let reasoning = '';
       let signalScore = 0;
 
+      // 💡 BOOST: If 1-minute analysis shows moderate interest, boost the longer-term signal
+      let oneMinuteBoost = 0;
+      if (oneMinAnalysis.confidence > 0.4 && oneMinAnalysis.confidence < 0.65) {
+        oneMinuteBoost = oneMinAnalysis.confidence * 0.15; // Up to 10% boost
+        reasoning += ` [1m boost: +${(oneMinuteBoost * 100).toFixed(1)}%]`;
+      }
+
+      // 📊 TREND BOOST: If short-term trends align, boost the signal
+      let trendBoost = 0;
+
       // ===== PROFITABLE STRATEGY: MULTI-FACTOR CONFIRMATION =====
       
-      // 1. RSI CONDITIONS (Mean Reversion + Momentum)
-      const isOversold = rsi < 30; // Oversold = potential BUY
-      const isOverbought = rsi > 70; // Overbought = potential SELL
-      const isBullishMomentum = rsi > 50 && rsi < 70; // Healthy uptrend
-      const isBearishMomentum = rsi < 50 && rsi > 30; // Healthy downtrend
+      // 1. RSI CONDITIONS (AGGRESSIVE - Lower thresholds for low volatility markets)
+      const isOversold = rsi < 40; // AGGRESSIVE: Catch early oversold (was 30)
+      const isOverbought = rsi > 60; // AGGRESSIVE: Catch early overbought (was 70)
+      const isBullishMomentum = rsi > 50 && rsi < 75; // Wider bullish range
+      const isBearishMomentum = rsi < 50 && rsi > 25; // Wider bearish range
       
-      // 2. VOLUME CONFIRMATION (High volume = strong signal)
-      const hasHighVolume = volumeRatio > 1.5; // 50% above average
-      const hasVeryHighVolume = volumeRatio > 2.5; // 150% above average
+      // 2. VOLUME CONFIRMATION (AGGRESSIVE - Lower requirements)
+      const hasHighVolume = volumeRatio > 1.2; // AGGRESSIVE: 20% above average (was 1.5x)
+      const hasVeryHighVolume = volumeRatio > 2.0; // AGGRESSIVE: 100% above average (was 2.5x)
       
-      // 3. TREND CONFIRMATION
-      const isStrongTrend = trendAnalysis.strength > 0.7;
-      const isBullish = trendAnalysis.trend === 'BULL' || trendAnalysis.trend === 'STRONG_BULL';
-      const isBearish = trendAnalysis.trend === 'BEAR' || trendAnalysis.trend === 'STRONG_BEAR';
+      // 3. TREND CONFIRMATION (AGGRESSIVE - Accept weaker trends)
+      const isStrongTrend = longTermTrend.strength > 0.6; // AGGRESSIVE: Accept slightly weaker trends (was 0.7)
+      const isBullish = longTermTrend.trend === 'BULL' || longTermTrend.trend === 'STRONG_BULL';
+      const isBearish = longTermTrend.trend === 'BEAR' || longTermTrend.trend === 'STRONG_BEAR';
       
-      // 4. VOLATILITY FILTER (Too much volatility = risky)
+      // 4. VOLATILITY FILTER (AGGRESSIVE - Be more tolerant of volatility)
       const isLowVolatility = volatility < 3;
-      const isMediumVolatility = volatility >= 3 && volatility < 8;
-      const isHighVolatility = volatility >= 8;
+      const isMediumVolatility = volatility >= 3 && volatility < 10; // AGGRESSIVE: Higher threshold (was 8)
+      const isHighVolatility = volatility >= 10; // AGGRESSIVE: Only penalize extreme volatility (was 8)
 
       // ===== DECISION LOGIC: QUALITY OVER QUANTITY =====
       
@@ -94,7 +443,7 @@ export class GodspeedModel implements AITradingModel {
         signalScore += isStrongTrend ? 15 : 0; // Trend strength
         signalScore += Math.abs(priceChange) * 2; // Price momentum
         confidence = Math.min(signalScore / 100, 0.95);
-        reasoning = `🚀 STRONG BUY: Bullish trend (${trendAnalysis.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, +${priceChange.toFixed(2)}%`;
+        reasoning = `🚀 STRONG BUY: Bullish trend (${longTermTrend.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, +${priceChange.toFixed(2)}%`;
       } 
       else if (isBearish && hasHighVolume && isBearishMomentum && !isHighVolatility) {
         action = 'SELL';
@@ -103,7 +452,7 @@ export class GodspeedModel implements AITradingModel {
         signalScore += isStrongTrend ? 15 : 0; // Trend strength
         signalScore += Math.abs(priceChange) * 2; // Price momentum
         confidence = Math.min(signalScore / 100, 0.95);
-        reasoning = `📉 STRONG SELL: Bearish trend (${trendAnalysis.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, ${priceChange.toFixed(2)}%`;
+        reasoning = `📉 STRONG SELL: Bearish trend (${longTermTrend.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, ${priceChange.toFixed(2)}%`;
       }
       
       // STRATEGY 2: Mean Reversion (Oversold/Overbought Bounce)
@@ -134,36 +483,76 @@ export class GodspeedModel implements AITradingModel {
         reasoning = `💥 BREAKDOWN: ${priceChange.toFixed(2)}% with ${volumeRatio.toFixed(1)}x volume spike, RSI ${rsi.toFixed(0)}`;
       }
       
-      // STRATEGY 4: Moderate Trend Following (Lower confidence)
-      else if (isBullish && isBullishMomentum && volumeRatio > 1.2) {
+      // STRATEGY 4: Moderate Trend Following (AGGRESSIVE - Higher base confidence)
+      else if (isBullish && isBullishMomentum && volumeRatio > 1.0) {
         action = 'BUY';
-        confidence = 0.45;
+        confidence = 0.52; // AGGRESSIVE: Above 50% threshold (was 0.45)
         reasoning = `📈 Moderate BUY: Bullish trend, RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, +${priceChange.toFixed(2)}%`;
       }
-      else if (isBearish && isBearishMomentum && volumeRatio > 1.2) {
+      else if (isBearish && isBearishMomentum && volumeRatio > 1.0) {
         action = 'SELL';
-        confidence = 0.45;
+        confidence = 0.52; // AGGRESSIVE: Above 50% threshold (was 0.45)
         reasoning = `📉 Moderate SELL: Bearish trend, RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, ${priceChange.toFixed(2)}%`;
+      }
+      
+      // STRATEGY 5: AGGRESSIVE Range Trading (NEW - for sideways markets)
+      else if ((rsi < 45 || rsi > 55) && volumeRatio > 0.8) {
+        if (rsi < 45 && priceChange < 0) {
+          action = 'BUY';
+          confidence = 0.51; // Just above threshold
+          reasoning = `🎯 RANGE BUY: RSI ${rsi.toFixed(0)} near support, ${priceChange.toFixed(2)}% pullback`;
+        } else if (rsi > 55 && priceChange > 0) {
+          action = 'SELL';
+          confidence = 0.51; // Just above threshold
+          reasoning = `🎯 RANGE SELL: RSI ${rsi.toFixed(0)} near resistance, +${priceChange.toFixed(2)}% extension`;
+        }
       }
       
       // DEFAULT: HOLD (No clear edge)
       else {
         action = 'HOLD';
         confidence = 0.2;
-        reasoning = `⏸️ HOLD: Mixed signals - RSI ${rsi.toFixed(0)}, Trend ${trendAnalysis.trend}, Vol ${volumeRatio.toFixed(1)}x, ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
+        reasoning = `⏸️ HOLD: Mixed signals - RSI ${rsi.toFixed(0)}, Trend ${longTermTrend.trend}, Vol ${volumeRatio.toFixed(1)}x, ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
       }
 
-      // RISK FILTER: Reject low confidence trades
-      if (confidence < 0.4 && action !== 'HOLD') {
+      // RISK FILTER: AGGRESSIVE - Lower rejection threshold
+      if (confidence < 0.35 && action !== 'HOLD') {
         action = 'HOLD';
         reasoning = `🛑 REJECTED: ${reasoning} [Confidence too low: ${(confidence * 100).toFixed(0)}%]`;
         confidence = 0.2;
       }
 
-      // VOLATILITY PENALTY: Reduce confidence in high volatility
+      // VOLATILITY PENALTY: AGGRESSIVE - Smaller penalty
       if (isHighVolatility && action !== 'HOLD') {
-        confidence *= 0.7; // 30% penalty
+        confidence *= 0.85; // AGGRESSIVE: Only 15% penalty (was 30%)
         reasoning += ` [High volatility warning: ${volatility.toFixed(1)}]`;
+      }
+
+      // 🚀 STRONG MOVEMENT BOOST: Boost confidence for significant 24h moves
+      // This rewards coins with strong momentum (pumping/dumping hard)
+      if (action !== 'HOLD' && Math.abs(priceChange) > 3) {
+        // For moves > 3%, boost confidence proportionally
+        const momentumBoost = Math.min(0.12, Math.abs(priceChange) / 100); // Up to 12% boost
+        const oldConfidence = confidence;
+        confidence = Math.min(confidence * (1 + momentumBoost), 0.95);
+        reasoning += ` [🔥 Strong momentum boost: +${((confidence - oldConfidence) * 100).toFixed(1)}% for ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}% 24h move]`;
+      }
+
+      // 💥 1-MINUTE BOOST: Apply boost from 1-minute analysis if present
+      if (oneMinuteBoost > 0 && action !== 'HOLD') {
+        confidence = Math.min(confidence + oneMinuteBoost, 0.95);
+        reasoning += ` [⚡ 1min activity: ${oneMinAnalysis.rapidPriceChange.toFixed(2)}% in 5min]`;
+      }
+
+      // 📈 CHART TREND BOOST: Apply boost if multi-timeframe trends align with our signal
+      if (action === 'BUY' && (trendAnalysis.trendAlignment === 'BULLISH')) {
+        trendBoost = trendAnalysis.confidence * 0.12; // Up to 12% boost
+        confidence = Math.min(confidence + trendBoost, 0.95);
+        reasoning += ` [📈 Trend aligned: ${trendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
+      } else if (action === 'SELL' && (trendAnalysis.trendAlignment === 'BEARISH')) {
+        trendBoost = trendAnalysis.confidence * 0.12; // Up to 12% boost
+        confidence = Math.min(confidence + trendBoost, 0.95);
+        reasoning += ` [📉 Trend aligned: ${trendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
       }
 
       const signal: TradingSignal = {
@@ -176,7 +565,14 @@ export class GodspeedModel implements AITradingModel {
 
       logger.debug(`Godspeed OPTIMIZED analysis for ${symbol}`, {
         context: 'Godspeed',
-        data: { action, confidence: (confidence * 100).toFixed(1) + '%', rsi: rsi.toFixed(0), trend: trendAnalysis.trend, reasoning }
+        data: { 
+          action, 
+          confidence: (confidence * 100).toFixed(1) + '%', 
+          rsi: rsi.toFixed(0), 
+          longTermTrend: longTermTrend.trend, 
+          chartTrends: `1m:${trendAnalysis.trend1m} 5m:${trendAnalysis.trend5m} 15m:${trendAnalysis.trend15m}`,
+          reasoning 
+        }
       });
 
       return signal;

@@ -42,7 +42,7 @@ export interface AsterTrade {
 }
 
 class AsterDexService {
-  private baseUrl: string = 'https://api.asterdex.com'; // Placeholder URL
+  private baseUrl: string = 'https://fapi.asterdex.com'; // Real Aster DEX API URL
   private WS_BASE_URL: string = 'wss://fstream.asterdex.com/stream'; // Real WebSocket URL
   private apiKey: string | null = null;
   private secretKey: string | null = null;
@@ -54,12 +54,12 @@ class AsterDexService {
   private requestQueue: Array<() => Promise<any>> = [];
   private isProcessingQueue: boolean = false;
   private lastRequestTime: number = 0;
-  private readonly MIN_REQUEST_DELAY = 100; // 100ms between requests = max 10 req/sec (very safe for exchanges)
-  private readonly BATCH_SIZE = 3; // Process 3 requests concurrently
+  private readonly MIN_REQUEST_DELAY = 50; // 50ms between requests = max 20 req/sec (aggressive but safe)
+  private readonly BATCH_SIZE = 5; // Process 5 requests concurrently for faster parallel fetching
   private requestCount: number = 0;
   private requestWindow: number = Date.now();
   private lastSuccessfulRequest: number = 0;
-  private readonly MAX_REQUESTS_PER_MINUTE = 300; // Conservative limit (most exchanges allow 1200+)
+  private readonly MAX_REQUESTS_PER_MINUTE = 600; // Increased limit for faster throughput (still safe for most exchanges)
   
   // Request deduplication to prevent concurrent identical requests
   private pendingRequests: Map<string, Promise<any>> = new Map();
@@ -807,8 +807,8 @@ class AsterDexService {
           closeTime: k[6],
         }));
         
-        // Cache for 30 seconds for short intervals, 60 seconds for longer
-        const cacheTTL = ['1m', '3m', '5m'].includes(interval) ? 30 : 60;
+        // Cache for 5-15 seconds depending on interval (ultra-fast for 1m)
+        const cacheTTL = interval === '1m' ? 5 : (['3m', '5m'].includes(interval) ? 10 : 15);
         apiCache.set(cacheKey, klines, cacheTTL);
         
         return klines;
@@ -817,6 +817,64 @@ class AsterDexService {
         return null;
       }
     });
+  }
+
+  /**
+   * Get symbol precision info (quantity decimals, step size, etc.)
+   * CACHED: 1 hour (exchange info rarely changes)
+   */
+  async getSymbolPrecision(symbol: string): Promise<{ quantityPrecision: number; stepSize: string; maxQty: number } | null> {
+    const cacheKey = `symbolPrecision:${symbol}`;
+    const cached = apiCache.get(cacheKey) as { quantityPrecision: number; stepSize: string; maxQty: number } | undefined;
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const url = `${this.baseUrl}/exchangeInfo`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const symbolData = data.symbols.find((s: any) => s.symbol === symbol.replace('/', ''));
+      
+      if (!symbolData) {
+        logger.warn(`Symbol ${symbol} not found in exchange info`, { context: 'AsterDex' });
+        return null;
+      }
+      
+      // Find the LOT_SIZE filter to get step size, precision, and max quantity
+      const lotSizeFilter = symbolData.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+      const quantityPrecision = symbolData.quantityPrecision || 2; // Default to 2 decimals
+      const stepSize = lotSizeFilter?.stepSize || '0.01'; // Default step size
+      const maxQty = lotSizeFilter?.maxQty ? parseFloat(lotSizeFilter.maxQty) : 1000000; // Default to high limit
+      
+      const result = { quantityPrecision, stepSize, maxQty };
+      
+      // Cache for 1 hour (exchange info rarely changes)
+      apiCache.set(cacheKey, result, 3600);
+      
+      logger.debug(`Symbol precision for ${symbol}`, { 
+        context: 'AsterDex', 
+        data: { quantityPrecision, stepSize, maxQty } 
+      });
+      
+      return result;
+    } catch (error) {
+      logger.error(`Failed to fetch symbol precision for ${symbol}`, error, { context: 'AsterDex' });
+      // Return safe defaults
+      return { quantityPrecision: 2, stepSize: '0.01', maxQty: 1000000 };
+    }
+  }
+
+  /**
+   * Round quantity to match symbol's precision requirements
+   */
+  roundQuantity(quantity: number, precision: number): number {
+    const multiplier = Math.pow(10, precision);
+    return Math.floor(quantity * multiplier) / multiplier;
   }
 
   /**
@@ -905,8 +963,8 @@ class AsterDexService {
         availableBalance: Math.abs(availableBalance),
       };
 
-      // Cache for 3 seconds
-      apiCache.set(cacheKey, accountInfo, 3);
+      // Cache for 100ms for ultra real-time updates (10x per second max)
+      apiCache.set(cacheKey, accountInfo, 0.1);
       
       logger.debug('Fetched and cached account info', { context: 'AsterDex', data: accountInfo });
       return accountInfo;
@@ -1104,9 +1162,15 @@ class AsterDexService {
    * Uses request deduplication AND caching to prevent concurrent identical requests
    * CACHED: 10 seconds
    */
-  async getPositions(): Promise<AsterPosition[]> {
+  async getPositions(bustCache: boolean = false): Promise<AsterPosition[]> {
     const requestKey = 'getPositions';
     const cacheKey = 'positions:all';
+    
+    // 🔥 CACHE BUSTING: Allow forced refresh after position operations
+    if (bustCache) {
+      apiCache.invalidate(cacheKey);
+      logger.debug('💥 Position cache busted - forcing fresh fetch', { context: 'AsterDex' });
+    }
     
     // Check cache first
     const cachedPositions = apiCache.get<AsterPosition[]>(cacheKey);
@@ -1129,8 +1193,11 @@ class AsterDexService {
         
         const data = await response.json();
         
+        // Filter only positions with non-zero size
+        const activePositions = data.filter((pos: any) => parseFloat(pos.positionAmt) !== 0);
+        
         // Transform Aster API response to our format
-        const positions: AsterPosition[] = data.map((pos: any) => ({
+        const positions: AsterPosition[] = activePositions.map((pos: any) => ({
           symbol: pos.symbol.replace('USDT', '/USDT'),
           side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
           size: Math.abs(parseFloat(pos.positionAmt)),
@@ -1144,8 +1211,8 @@ class AsterDexService {
           data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) },
         });
         
-        // Cache for 10 seconds
-        apiCache.set(cacheKey, positions, apiCache.getTTL('POSITIONS'));
+        // Cache for only 1 second (ultra-aggressive refresh to prevent stale position data)
+        apiCache.set(cacheKey, positions, 1);
         
         return positions;
       } catch (error) {

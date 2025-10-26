@@ -11,15 +11,24 @@ export async function GET(request: NextRequest) {
   try {
     // Verify this is a cron request (optional but recommended for security)
     const authHeader = request.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      logger.warn('⚠️ Unauthorized cron request', { context: 'CronAPI' });
+    const cronSecret = process.env.CRON_SECRET;
+    
+    // Only check auth if CRON_SECRET is set
+    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+      logger.warn('⚠️ Unauthorized cron request', { 
+        context: 'CronAPI',
+        data: { hasAuth: !!authHeader, hasSecret: !!cronSecret }
+      });
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    logger.info('⏰ Cron job triggered', { context: 'CronAPI' });
+    logger.info('⏰ Cron job triggered', { 
+      context: 'CronAPI',
+      data: { hasAuth: !!authHeader, hasSecret: !!cronSecret }
+    });
     
     // Initialize the trading service once
     if (!isInitialized) {
