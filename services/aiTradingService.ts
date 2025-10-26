@@ -470,7 +470,18 @@ class AITradingService {
       // quantity = positionValue / currentPrice = amount of base asset to buy
       const marginToUse = availableBalance * allocationPercent; // 100% of available margin
       const positionValue = marginToUse * maxLeverage; // Position size = margin × leverage
-      const quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
+      let quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
+      
+      // 🎯 PRECISION FIX: Round quantity to match exchange requirements
+      const precisionInfo = await asterDexService.getSymbolPrecision(signal.symbol);
+      if (precisionInfo) {
+        const originalQuantity = quantity;
+        quantity = asterDexService.roundQuantity(quantity, precisionInfo.quantityPrecision);
+        logger.info(`🎯 Rounded quantity for ${signal.symbol}: ${originalQuantity.toFixed(8)} → ${quantity} (precision: ${precisionInfo.quantityPrecision} decimals)`, {
+          context: 'AITrading',
+          data: { original: originalQuantity, rounded: quantity, precision: precisionInfo.quantityPrecision }
+        });
+      }
       
       logger.debug(`📊 Position Calculation:`, {
         context: 'AITrading',
@@ -480,7 +491,7 @@ class AITradingService {
           maxLeverage: maxLeverage,
           positionValue: positionValue.toFixed(2),
           currentPrice: currentPrice.toFixed(6),
-          quantity: quantity.toFixed(8)
+          quantity: quantity
         }
       });
       
@@ -492,8 +503,8 @@ class AITradingService {
 ⚡ LEVERAGE: ${maxLeverage}x (MAXIMUM for ${signal.symbol})
 💰 POSITION VALUE: $${positionValue.toFixed(2)} (${marginEfficiency.toFixed(0)}x leverage multiplier)
 🎯 CONFIDENCE: ${(signal.confidence * 100).toFixed(0)}%
-📦 QUANTITY: ${quantity.toFixed(8)} @ $${currentPrice.toFixed(2)}
-📊 CALCULATION: ${marginToUse.toFixed(2)} margin × ${maxLeverage}x leverage ÷ ${currentPrice.toFixed(2)} price = ${quantity.toFixed(8)} quantity`, {
+📦 QUANTITY: ${quantity} @ $${currentPrice.toFixed(2)}
+📊 CALCULATION: ${marginToUse.toFixed(2)} margin × ${maxLeverage}x leverage ÷ ${currentPrice.toFixed(2)} price = ${quantity} quantity`, {
         context: 'AITrading',
         data: {
           symbol: signal.symbol,

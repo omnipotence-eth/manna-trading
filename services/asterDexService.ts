@@ -817,6 +817,63 @@ class AsterDexService {
   }
 
   /**
+   * Get symbol precision info (quantity decimals, step size, etc.)
+   * CACHED: 1 hour (exchange info rarely changes)
+   */
+  async getSymbolPrecision(symbol: string): Promise<{ quantityPrecision: number; stepSize: string } | null> {
+    const cacheKey = `symbolPrecision:${symbol}`;
+    const cached = apiCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const url = `${this.baseUrl}/exchangeInfo`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const symbolData = data.symbols.find((s: any) => s.symbol === symbol.replace('/', ''));
+      
+      if (!symbolData) {
+        logger.warn(`Symbol ${symbol} not found in exchange info`, { context: 'AsterDex' });
+        return null;
+      }
+      
+      // Find the LOT_SIZE filter to get step size and precision
+      const lotSizeFilter = symbolData.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
+      const quantityPrecision = symbolData.quantityPrecision || 2; // Default to 2 decimals
+      const stepSize = lotSizeFilter?.stepSize || '0.01'; // Default step size
+      
+      const result = { quantityPrecision, stepSize };
+      
+      // Cache for 1 hour (exchange info rarely changes)
+      apiCache.set(cacheKey, result, 3600);
+      
+      logger.debug(`Symbol precision for ${symbol}`, { 
+        context: 'AsterDex', 
+        data: { quantityPrecision, stepSize } 
+      });
+      
+      return result;
+    } catch (error) {
+      logger.error(`Failed to fetch symbol precision for ${symbol}`, error, { context: 'AsterDex' });
+      // Return safe defaults
+      return { quantityPrecision: 2, stepSize: '0.01' };
+    }
+  }
+
+  /**
+   * Round quantity to match symbol's precision requirements
+   */
+  roundQuantity(quantity: number, precision: number): number {
+    const multiplier = Math.pow(10, precision);
+    return Math.floor(quantity * multiplier) / multiplier;
+  }
+
+  /**
    * Get all available trading pairs from Aster DEX
    */
   async getAllTradingPairs(): Promise<string[]> {
