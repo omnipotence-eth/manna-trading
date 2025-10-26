@@ -194,7 +194,7 @@ class AITradingService {
             analyzedCount++;
             
             // Only consider actionable signals (not HOLD)
-            if (result.signal.action !== 'HOLD') {
+            if (result.signal && result.signal.action !== 'HOLD') {
               allSignals.push(result.signal);
               
               logger.info(`🔍 Godspeed found opportunity [${result.symbol}]: ${result.signal.action} @ ${(result.signal.confidence * 100).toFixed(1)}% confidence`, {
