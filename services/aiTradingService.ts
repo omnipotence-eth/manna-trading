@@ -472,28 +472,29 @@ class AITradingService {
       }
     });
     
-      // 🎯 AGGRESSIVE TRADING: Take MEDIUM+ confidence trades (50%+)
-      // Lowered from 55% to 50% to capture more opportunities
-      // With 100% margin deployment and strong risk management, we can be more aggressive
-      if (bestSignal.confidence >= 0.50) {
-        bestSignal.size = 1.0; // 100% of available margin - MEDIUM+ CONFIDENCE
-        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence`, {
+      // 🎯 HYPER-AGGRESSIVE TRADING: Take ANY trade with 48%+ confidence
+      // With excellent trend analysis, volume spike detection, and strong risk management (2% stop-loss)
+      // We can be aggressive and let our risk management protect us
+      if (bestSignal.confidence >= 0.48) {
+        bestSignal.size = 1.0; // 100% of available margin - HYPER-AGGRESSIVE MODE
+        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence [HYPER-AGGRESSIVE]`, {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
             action: bestSignal.action,
             confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-            reasoning: bestSignal.reasoning
+            reasoning: bestSignal.reasoning,
+            mode: 'HYPER-AGGRESSIVE (48%+ threshold)'
           }
         });
       } else {
-        // Reject low confidence trades - wait for better opportunities
-        logger.info(`⏭️ SKIPPING - Need 50%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
+        // Reject very low confidence trades
+        logger.info(`⏭️ SKIPPING - Need 48%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
             confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-            threshold: '50%',
+            threshold: '48%',
             reasoning: bestSignal.reasoning
           }
         });
