@@ -644,7 +644,13 @@ class AITradingService {
       // availableBalance = margin available for new positions
       // positionValue = margin × leverage = total position size in USDT
       // quantity = positionValue / currentPrice = amount of base asset to buy
-      const marginToUse = availableBalance * allocationPercent; // 100% of available margin
+      
+      // 🛡️ SAFETY BUFFER: Use 98% of available margin to account for:
+      // - Trading fees (~0.04% maker/taker)
+      // - Price slippage during execution
+      // - Exchange liquidation buffer requirements
+      const SAFETY_MARGIN_PERCENT = 0.98;
+      const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 98% of available margin
       const positionValue = marginToUse * maxLeverage; // Position size = margin × leverage
       let quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
       
@@ -698,12 +704,13 @@ class AITradingService {
       const marginEfficiency = (positionValue / availableBalance) * 100;
       
       logger.trade(`🚀 GODSPEED EXECUTING: ${signal.action} ${signal.symbol}
-💯 MARGIN: $${marginToUse.toFixed(2)} (100% of $${availableBalance.toFixed(2)} available)
+💯 MARGIN: $${marginToUse.toFixed(2)} (98% of $${availableBalance.toFixed(2)} available - 2% safety buffer)
 ⚡ LEVERAGE: ${maxLeverage}x (MAXIMUM for ${signal.symbol})
 💰 POSITION VALUE: $${positionValue.toFixed(2)} (${marginEfficiency.toFixed(0)}x leverage multiplier)
 🎯 CONFIDENCE: ${(signal.confidence * 100).toFixed(0)}%
 📦 QUANTITY: ${quantity} @ $${currentPrice.toFixed(2)}
-📊 CALCULATION: ${marginToUse.toFixed(2)} margin × ${maxLeverage}x leverage ÷ ${currentPrice.toFixed(2)} price = ${quantity} quantity`, {
+📊 CALCULATION: ${marginToUse.toFixed(2)} margin × ${maxLeverage}x leverage ÷ ${currentPrice.toFixed(2)} price = ${quantity} quantity
+🛡️ SAFETY BUFFER: 2% reserved for fees & slippage`, {
         context: 'AITrading',
         data: {
           symbol: signal.symbol,
