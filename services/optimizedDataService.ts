@@ -36,8 +36,8 @@ class OptimizedDataService {
   private lastUpdateTime: number = 0;
   
   // Rate limiting - ULTRA-OPTIMIZED for real-time trading
-  private readonly MIN_UPDATE_INTERVAL = 200; // 200ms minimum between updates (5 req/sec max)
-  private readonly CACHE_TTL = 250; // 250ms cache TTL for ultra real-time data
+  private readonly MIN_UPDATE_INTERVAL = 100; // 100ms minimum between updates (10 req/sec max)
+  private readonly CACHE_TTL = 100; // 100ms cache TTL for ultra real-time data
   
   /**
    * Get all account data in a single optimized call

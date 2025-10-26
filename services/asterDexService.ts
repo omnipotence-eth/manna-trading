@@ -960,8 +960,8 @@ class AsterDexService {
         availableBalance: Math.abs(availableBalance),
       };
 
-      // Cache for 250ms for ultra real-time updates
-      apiCache.set(cacheKey, accountInfo, 0.25);
+      // Cache for 100ms for ultra real-time updates (10x per second max)
+      apiCache.set(cacheKey, accountInfo, 0.1);
       
       logger.debug('Fetched and cached account info', { context: 'AsterDex', data: accountInfo });
       return accountInfo;
