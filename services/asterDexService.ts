@@ -42,7 +42,7 @@ export interface AsterTrade {
 }
 
 class AsterDexService {
-  private baseUrl: string = 'https://api.asterdex.com'; // Placeholder URL
+  private baseUrl: string = 'https://fapi.asterdex.com'; // Real Aster DEX API URL
   private WS_BASE_URL: string = 'wss://fstream.asterdex.com/stream'; // Real WebSocket URL
   private apiKey: string | null = null;
   private secretKey: string | null = null;
@@ -1183,15 +1183,38 @@ class AsterDexService {
     
     const requestPromise = (async () => {
       try {
-        const response = await fetch(this.getApiUrl('/api/aster/positions'));
+        // Call Aster DEX API directly instead of our own API route
+        const queryString = await this.buildSignedQuery({ timestamp: Date.now() - 1000 });
+        const url = `${this.baseUrl}/fapi/v1/positionRisk?${queryString}`;
+        
+        logger.debug('Fetching Aster positions directly', { context: 'AsterDex', data: { url: url.substring(0, 100) + '...' } });
+        
+        const response = await fetch(url, {
+          headers: {
+            'X-MBX-APIKEY': this.apiKey!,
+          },
+        });
+        
         if (!response.ok) {
-          throw new Error(`API returned ${response.status}`);
+          const errorText = await response.text();
+          logger.error('Aster API positions fetch failed', undefined, {
+            context: 'AsterDex',
+            data: { 
+              status: response.status, 
+              error: errorText,
+              url: url.substring(0, 100) + '...'
+            },
+          });
+          throw new Error(`Aster API error: ${errorText}`);
         }
         
         const data = await response.json();
         
+        // Filter only positions with non-zero size
+        const activePositions = data.filter((pos: any) => parseFloat(pos.positionAmt) !== 0);
+        
         // Transform Aster API response to our format
-        const positions: AsterPosition[] = data.map((pos: any) => ({
+        const positions: AsterPosition[] = activePositions.map((pos: any) => ({
           symbol: pos.symbol.replace('USDT', '/USDT'),
           side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
           size: Math.abs(parseFloat(pos.positionAmt)),

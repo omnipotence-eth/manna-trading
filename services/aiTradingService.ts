@@ -681,13 +681,12 @@ class AITradingService {
       // positionValue = margin × leverage = total position size in USDT
       // quantity = positionValue / currentPrice = amount of base asset to buy
       
-      // 🛡️ ULTRA-CONSERVATIVE SAFETY BUFFER: Use 80% of available margin to account for:
+      // 🛡️ CONSERVATIVE SAFETY BUFFER: Use 90% of available margin to account for:
       // - Trading fees (~0.04% maker/taker)
       // - Price slippage during execution
       // - Exchange liquidation buffer requirements
-      // - Negative wallet balance issues
-      const SAFETY_MARGIN_PERCENT = 0.80; // Reduced from 0.98 to 0.80 for ultra-conservative approach
-      const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 80% of available margin
+      const SAFETY_MARGIN_PERCENT = 0.90; // 90% of available margin for better utilization
+      const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 90% of available margin
       const positionValue = marginToUse * maxLeverage; // Position size = margin × leverage
       let quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
       
@@ -699,6 +698,33 @@ class AITradingService {
         
         // Round to precision first
         quantity = asterDexService.roundQuantity(quantity, precisionInfo.quantityPrecision);
+        
+        // 🚨 MINIMUM ORDER SIZE CHECK: Ensure notional value is at least $5
+        const notionalValue = quantity * currentPrice;
+        if (notionalValue < 5.0) {
+          logger.warn(`⚠️ Order notional ${notionalValue.toFixed(2)} below $5 minimum for ${signal.symbol}, adjusting quantity`, {
+            context: 'AITrading',
+            data: {
+              notionalValue: notionalValue.toFixed(2),
+              minimum: 5.0,
+              symbol: signal.symbol
+            }
+          });
+          // Calculate minimum quantity needed for $5 notional
+          const minQuantity = 5.0 / currentPrice;
+          quantity = asterDexService.roundQuantity(minQuantity, precisionInfo.quantityPrecision);
+          
+          // Recalculate position value with adjusted quantity
+          const adjustedNotional = quantity * currentPrice;
+          logger.info(`📊 Adjusted order: ${quantity.toFixed(8)} qty × $${currentPrice.toFixed(2)} = $${adjustedNotional.toFixed(2)} notional`, {
+            context: 'AITrading',
+            data: {
+              adjustedQty: quantity,
+              price: currentPrice,
+              adjustedNotional: adjustedNotional
+            }
+          });
+        }
         
         // Cap at maximum allowed quantity for this symbol
         if (quantity > maxQty) {
