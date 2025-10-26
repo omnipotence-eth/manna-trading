@@ -606,6 +606,29 @@ class AITradingService {
             mode: 'HYPER-AGGRESSIVE (48%+ threshold)'
           }
         });
+        
+        logger.info(`🎯 GODSPEED SELECTED #1: ${bestSignal.symbol} ${bestSignal.action} @ ${(bestSignal.confidence * 100).toFixed(1)}% [FULL MARGIN: 100%]`, {
+          context: 'AITrading',
+          data: {
+            winner: {
+              symbol: bestSignal.symbol,
+              action: bestSignal.action,
+              confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
+              reasoning: bestSignal.reasoning
+            },
+            totalOpportunities: signals.length,
+            positionSize: '100% (MAXIMUM)',
+            leverage: 'MAX (20x-50x per coin)',
+            runnerUps: sortedSignals.slice(1, 4).map(s => ({ 
+              symbol: s.symbol, 
+              action: s.action, 
+              confidence: (s.confidence * 100).toFixed(1) + '%',
+              reason: 'Lower confidence than winner'
+            }))
+          }
+        });
+        
+        return bestSignal; // 🔥 CRITICAL FIX: Return the approved signal!
       } else {
         // Reject very low confidence trades
         logger.info(`⏭️ SKIPPING - Need 48%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
@@ -619,29 +642,6 @@ class AITradingService {
         });
         return null;
       }
-    
-    logger.info(`🎯 GODSPEED SELECTED #1: ${bestSignal.symbol} ${bestSignal.action} @ ${(bestSignal.confidence * 100).toFixed(1)}% [FULL MARGIN: 100%]`, {
-      context: 'AITrading',
-      data: {
-        winner: {
-          symbol: bestSignal.symbol,
-          action: bestSignal.action,
-          confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-          reasoning: bestSignal.reasoning
-        },
-        totalOpportunities: signals.length,
-        positionSize: '100% (MAXIMUM)',
-        leverage: 'MAX (20x-50x per coin)',
-        runnerUps: sortedSignals.slice(1, 4).map(s => ({ 
-          symbol: s.symbol, 
-          action: s.action, 
-          confidence: (s.confidence * 100).toFixed(1) + '%',
-          reason: 'Lower confidence than winner'
-        }))
-      }
-    });
-    
-    return bestSignal;
   }
 
   private async executeTrade(signal: TradingSignal): Promise<void> {
