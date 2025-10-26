@@ -1205,8 +1205,8 @@ class AsterDexService {
           data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) },
         });
         
-        // Cache for only 2 seconds (aggressive refresh to prevent stale position data)
-        apiCache.set(cacheKey, positions, 2);
+        // Cache for only 1 second (ultra-aggressive refresh to prevent stale position data)
+        apiCache.set(cacheKey, positions, 1);
         
         return positions;
       } catch (error) {
