@@ -98,8 +98,8 @@ class AITradingService {
     
     try {
       // ⚡ SPEED OPTIMIZATION: Skip position monitoring if no positions exist
-      const currentPositions = await asterDexService.getPositions();
-      if (currentPositions.length > 0) {
+      const existingPositions = await asterDexService.getPositions();
+      if (existingPositions.length > 0) {
         await this.monitorPositions();
       } else {
         logger.debug(`⚡ No positions to monitor, skipping position monitoring for speed`, { context: 'AITrading' });
@@ -132,8 +132,6 @@ class AITradingService {
       // ⚡ PARALLEL PROCESSING: Analyze symbols in batches for maximum speed
       const BATCH_SIZE = 5; // Process 5 symbols at once
       const allSignals: TradingSignal[] = [];
-      let analyzedCount = 0;
-      let skippedCount = 0;
       
       // Process symbols in parallel batches
       for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
@@ -267,13 +265,13 @@ class AITradingService {
       // ⚡ ONE POSITION AT A TIME STRATEGY ⚡
       // Get current open positions - if we have any position open, DON'T open new ones
       // This maximizes margin usage: 100% margin on ONE high-conviction trade
-      const currentPositions = await asterDexService.getPositions();
+      const openPositions = await asterDexService.getPositions();
       
-      if (currentPositions.length > 0) {
-        logger.info(`🔒 POSITION MANAGEMENT: Already holding ${currentPositions.length} position(s). Monitoring for exit...`, {
+      if (openPositions.length > 0) {
+        logger.info(`🔒 POSITION MANAGEMENT: Already holding ${openPositions.length} position(s). Monitoring for exit...`, {
           context: 'AITrading',
           data: {
-            openPositions: currentPositions.map(p => ({
+            openPositions: openPositions.map(p => ({
               symbol: p.symbol,
               side: p.side,
               pnl: p.unrealizedPnl.toFixed(2),
