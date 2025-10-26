@@ -822,7 +822,7 @@ class AsterDexService {
    */
   async getSymbolPrecision(symbol: string): Promise<{ quantityPrecision: number; stepSize: string } | null> {
     const cacheKey = `symbolPrecision:${symbol}`;
-    const cached = apiCache.get(cacheKey);
+    const cached = apiCache.get(cacheKey) as { quantityPrecision: number; stepSize: string } | undefined;
     if (cached) {
       return cached;
     }
