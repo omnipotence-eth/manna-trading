@@ -349,21 +349,21 @@ class AITradingService {
           let shouldClose = false;
           let reason = '';
           
-          // OPTIMIZED RISK MANAGEMENT: Better risk/reward ratio (1:3)
-          // Stop-loss at -2% ROE (cut losses quickly)
-          if (roePnlPercent <= -2.0) {
+          // AGGRESSIVE RISK MANAGEMENT: Quick profits, cut losses fast
+          // Stop-loss at -1.5% ROE (cut losses quickly)
+          if (roePnlPercent <= -1.5) {
             shouldClose = true;
-            reason = `🛑 STOP-LOSS: ROE down ${roePnlPercent.toFixed(2)}% (threshold: -2.0%)`;
+            reason = `🛑 STOP-LOSS: ROE down ${roePnlPercent.toFixed(2)}% (threshold: -1.5%)`;
           }
-          // Take-profit at +6% ROE (3x risk/reward ratio)
-          else if (roePnlPercent >= 6.0) {
+          // Take-profit at +2% ROE (quick profits for active trading)
+          else if (roePnlPercent >= 2.0) {
             shouldClose = true;
-            reason = `💰 TAKE-PROFIT: ROE up ${roePnlPercent.toFixed(2)}% (threshold: +6.0%)`;
+            reason = `💰 TAKE-PROFIT: ROE up ${roePnlPercent.toFixed(2)}% (threshold: +2.0%)`;
           }
-          // Trailing stop for strong winners: If ROE > 8%, use tighter stop at +4%
-          else if (roePnlPercent >= 4.0 && position.unrealizedPnl > (marginUsed * 0.08)) {
+          // Trailing stop for strong winners: If ROE > 3%, use tighter stop at +1.5%
+          else if (roePnlPercent >= 1.5 && position.unrealizedPnl > (marginUsed * 0.03)) {
             shouldClose = true;
-            reason = `📈 TRAILING STOP: Securing profits at ROE ${roePnlPercent.toFixed(2)}% (was above +8%, trailing at +4%)`;
+            reason = `📈 TRAILING STOP: Securing profits at ROE ${roePnlPercent.toFixed(2)}% (was above +3%, trailing at +1.5%)`;
           }
         
         if (shouldClose) {
