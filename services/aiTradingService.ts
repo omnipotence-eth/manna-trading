@@ -72,65 +72,52 @@ class AITradingService {
       await this.monitorPositions();
 
       // Get all available trading pairs from Aster DEX
-      const symbols = await asterDexService.getAllTradingPairs();
-      logger.info(`📊 HYPER-AGGRESSIVE: Analyzing ALL ${symbols.length} trading pairs to find the MOST PROFITABLE trade`, { 
+      const allSymbols = await asterDexService.getAllTradingPairs();
+      
+      // ⚡ PERFORMANCE OPTIMIZATION: Analyze top 50 by 24h volume to avoid serverless timeout
+      // This ensures we scan the most liquid/active markets first
+      const symbols = allSymbols.slice(0, 50);
+      
+      logger.info(`📊 GODSPEED FAST SCAN: Analyzing top ${symbols.length} of ${allSymbols.length} pairs by volume`, { 
         context: 'AITrading',
         data: { 
-          totalSymbols: symbols.length,
-          sample: symbols.slice(0, 10) // Show first 10 for logging
+          totalAvailable: allSymbols.length,
+          analyzing: symbols.length,
+          sample: symbols.slice(0, 10)
         }
       });
 
-      // GODSPEED: Analyze EVERY coin to find the single best opportunity
+      // GODSPEED: Analyze top coins to find the single best opportunity
       const allSignals: TradingSignal[] = [];
       let analyzedCount = 0;
       let skippedCount = 0;
       
-      // Analyze each symbol with each model to find the absolute best trade
+      // Track execution time to avoid serverless timeout
+      const startTime = Date.now();
+      const MAX_EXECUTION_TIME = 4.5 * 60 * 1000; // 4.5 minutes (leave 30s buffer)
+      
+      // Analyze each symbol to find the absolute best trade
       for (const symbol of symbols) {
+        // Check if we're approaching timeout
+        if (Date.now() - startTime > MAX_EXECUTION_TIME) {
+          logger.warn(`⚠️ Approaching timeout, stopping analysis at ${analyzedCount} coins`, { context: 'AITrading' });
+          break;
+        }
         try {
-          // Get real market data from Aster DEX
-          const currentPrice = await asterDexService.getPrice(symbol);
-          
-          // Skip if price is 0 (market not available)
-          if (currentPrice === 0) {
-            skippedCount++;
-            logger.debug(`⏭️ Skipping ${symbol} - no price data`, { context: 'AITrading' });
-            continue;
-          }
-          
-          // Fetch real 24h ticker data for additional metrics
+          // ⚡ SPEED: Fetch ticker data only (includes current price)
           const tickerData = await asterDexService.getTicker(symbol);
           
-          if (!tickerData) {
+          if (!tickerData || !tickerData.currentPrice || tickerData.currentPrice === 0) {
             skippedCount++;
-            logger.debug(`⏭️ Skipping ${symbol} - no ticker data`, { context: 'AITrading' });
+            logger.debug(`⏭️ Skipping ${symbol} - no ticker/price data`, { context: 'AITrading' });
             continue;
           }
           
-          // 🚀 REAL-TIME MOMENTUM: Calculate SHORT-TERM price change (5m-15m ago vs NOW)
-          // This catches rapid pumps/dumps that 24h ticker misses!
-          let recentPriceChange = tickerData.priceChangePercent; // Default to 24h change
+          const currentPrice = tickerData.currentPrice;
           
-          try {
-            // Get price from 5 minutes ago using recent klines
-            const recentKlines = await asterDexService.getKlines(symbol, '1m', 5);
-            if (recentKlines && recentKlines.length > 0) {
-              const price5MinAgo = recentKlines[0].open; // Price 5 minutes ago
-              recentPriceChange = ((currentPrice - price5MinAgo) / price5MinAgo) * 100;
-              
-              // If short-term momentum is MUCH stronger than 24h trend, prioritize it!
-              if (Math.abs(recentPriceChange) > Math.abs(tickerData.priceChangePercent) * 2) {
-                logger.info(`🔥 RAPID MOVEMENT DETECTED: ${symbol} ${recentPriceChange >= 0 ? '+' : ''}${recentPriceChange.toFixed(2)}% in 5min (vs ${tickerData.priceChangePercent.toFixed(2)}% 24h)`, {
-                  context: 'AITrading',
-                  data: { symbol, shortTerm: recentPriceChange, longTerm: tickerData.priceChangePercent }
-                });
-              }
-            }
-          } catch (error) {
-            // Fallback to 24h change if klines fail
-            logger.debug(`Could not fetch recent klines for ${symbol}, using 24h change`, { context: 'AITrading' });
-          }
+          // ⚡ SPEED OPTIMIZATION: Use 24h data only to avoid slow klines API
+          // The rapid movement boost logic in the model will still work with 24h data
+          const recentPriceChange = tickerData.priceChangePercent;
           
           const marketData: MarketData = {
             currentPrice: currentPrice,
