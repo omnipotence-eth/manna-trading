@@ -8,6 +8,51 @@ import TradeJournal from './TradeJournal';
 import Positions from './Positions';
 import AIPerformanceChart from './AIPerformanceChart';
 
+// Chat Tab Component with reactive state
+function ChatTabContent() {
+  const modelMessages = useStore((state) => state.modelMessages);
+  
+  return (
+    <motion.div
+      key="chat"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="flex-1 overflow-y-auto space-y-2 px-3 py-2"
+    >
+      {modelMessages.length === 0 ? (
+        <div className="text-center py-12 text-green-500/60 px-4">
+          <div className="text-4xl mb-3">🧠</div>
+          <div className="text-sm font-semibold mb-2">Analyzing Markets</div>
+          <div className="text-xs opacity-75 leading-relaxed">
+            Godspeed is scanning all Aster DEX markets.<br/>
+            Trade decisions will appear here when executed.
+          </div>
+        </div>
+      ) : (
+        modelMessages.slice(0, 10).map((msg: any) => (
+          <div key={msg.id} className="p-3 border border-green-500/20 rounded bg-black/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className={`text-xs px-2 py-0.5 rounded ${
+                msg.type === 'trade' ? 'bg-neon-blue/20 text-neon-blue' : 'bg-green-500/20 text-green-500'
+              }`}>
+                {msg.type === 'trade' ? '💼 TRADE' : '🔍 ANALYSIS'}
+              </span>
+              <span className="text-xs text-green-500/50">
+                {new Date(msg.timestamp).toLocaleTimeString()}
+              </span>
+            </div>
+            <div className="text-xs text-green-500 whitespace-pre-wrap leading-relaxed">
+              {msg.message}
+            </div>
+          </div>
+        ))
+      )}
+    </motion.div>
+  );
+}
+
 export default function NOF1Dashboard() {
   const [activeTab, setActiveTab] = useState<'trades' | 'chat' | 'positions' | 'readme'>('trades');
   const [timeRange, setTimeRange] = useState<'ALL' | '72H'>('ALL');
@@ -17,6 +62,7 @@ export default function NOF1Dashboard() {
   const setAccountValue = useStore((state) => state.setAccountValue);
   const updatePosition = useStore((state) => state.updatePosition);
   const addTrade = useStore((state) => state.addTrade);
+  const addModelMessage = useStore((state) => state.addModelMessage);
   const initRef = useRef(false);
 
   useEffect(() => {
@@ -56,19 +102,63 @@ export default function NOF1Dashboard() {
             });
           }
         }
+
+        // Fetch model messages (chat)
+        const messagesResponse = await fetch('/api/model-message?limit=50');
+        if (messagesResponse.ok) {
+          const messagesData = await messagesResponse.json();
+          if (isMounted && messagesData.success && messagesData.messages) {
+            // Add messages to store (newest first)
+            messagesData.messages.forEach((message: any) => {
+              addModelMessage(message);
+            });
+          }
+        }
       } catch (error) {
         console.error('Error fetching data:', error);
       }
     };
 
+    // Start data updates every 250ms for ultra real-time updates
     updateData();
-    const intervalId = setInterval(updateData, 3000);
+    const dataIntervalId = setInterval(updateData, 1000); // 1x per second (reduced from 250ms)
+
+    // 🤖 GODSPEED AUTO-TRADING: Trigger trading cycle every 60 seconds
+    // This ensures 24/7 trading even if Vercel cron fails
+    let tradingCycleCount = 0;
+    const runTradingCycle = async () => {
+      if (!isMounted) return;
+      try {
+        tradingCycleCount++;
+        console.log(`🔄 Godspeed Auto-Trading Cycle #${tradingCycleCount} starting...`);
+        
+        const response = await fetch('/api/test-cron', {
+          method: 'GET',
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ Godspeed cycle #${tradingCycleCount} completed:`, {
+            signals: data.cronResponse?.signals?.length || 0,
+            bestSignal: data.cronResponse?.bestSignal?.symbol || 'none',
+            confidence: data.cronResponse?.bestSignal?.confidence || 0,
+          });
+        }
+      } catch (error) {
+        console.error('❌ Godspeed trading cycle failed:', error);
+      }
+    };
+
+    // Run trading cycle immediately and then every 30 seconds (more aggressive)
+    runTradingCycle();
+    const tradingIntervalId = setInterval(runTradingCycle, 30000); // Every 30 seconds
 
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
+      clearInterval(dataIntervalId);
+      clearInterval(tradingIntervalId);
     };
-  }, [setAccountValue, updatePosition, addTrade]);
+  }, [setAccountValue, updatePosition, addTrade, addModelMessage]);
 
   // Calculate real PnL and account metrics
   const totalPnL = positions.reduce((sum, pos) => sum + (pos.pnl || 0), 0);
@@ -243,48 +333,67 @@ export default function NOF1Dashboard() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="flex-1 overflow-y-auto divide-y divide-green-500/20"
+                  className="flex-1 overflow-y-auto space-y-2 px-3 py-2"
                 >
-                  {/* Trade List Items - Compact */}
+                  {/* Trade List Items - Full Details */}
                   {trades.slice(-10).reverse().map((trade) => (
-                    <div key={trade.id} className="px-2 py-1 hover:bg-green-500/5 transition-colors">
-                      <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <span className="text-neon-green text-xs font-bold truncate">
-                          Godspeed
-                        </span>
-                        <span className={`text-xs font-bold ${
-                          trade.side === 'LONG' ? 'text-green-500' : 'text-red-500'
-                        }`}>
-                          {trade.side}
-                        </span>
-                      </div>
-                      <div className="text-xs leading-tight">
-                        <div className="text-green-500/80 truncate">{trade.symbol}</div>
-                        <div className={`font-bold ${trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    <div key={trade.id} className="p-3 border border-green-500/20 rounded hover:border-green-500/40 transition-all bg-black/20">
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-500 font-bold text-sm">{trade.symbol}</span>
+                          <span className={`px-2 py-0.5 text-xs rounded font-semibold ${
+                            trade.side === 'LONG' ? 'bg-neon-green/20 text-neon-green' : 'bg-red-500/20 text-red-500'
+                          }`}>
+                            {trade.side}
+                          </span>
+                        </div>
+                        <div className={`text-sm font-bold ${trade.pnl >= 0 ? 'text-neon-green' : 'text-red-500'}`}>
                           {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
                         </div>
+                      </div>
+                      
+                      {/* Trade Details */}
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                        <div>
+                          <span className="text-green-500/60">Entry:</span>
+                          <span className="text-green-500 ml-1 font-semibold">${trade.entryPrice?.toFixed(2) || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-green-500/60">Exit:</span>
+                          <span className="text-green-500 ml-1 font-semibold">${trade.exitPrice?.toFixed(2) || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-green-500/60">Size:</span>
+                          <span className="text-green-500 ml-1 font-semibold">{trade.size?.toFixed(4) || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-green-500/60">Leverage:</span>
+                          <span className="text-green-500 ml-1 font-semibold">{trade.leverage || 'N/A'}x</span>
+                        </div>
+                      </div>
+                      
+                      {/* Timestamp */}
+                      <div className="text-xs text-green-500/50 mt-2">
+                        {new Date(trade.timestamp).toLocaleString()}
                       </div>
                     </div>
                   ))}
                   {trades.length === 0 && (
-                    <div className="px-4 py-8 text-center text-green-500/60 text-sm">
-                      No completed trades yet
+                    <div className="text-center py-12 text-green-500/60 px-4">
+                      <div className="text-4xl mb-3">📊</div>
+                      <div className="text-sm font-semibold mb-2">No Trade History</div>
+                      <div className="text-xs opacity-75 leading-relaxed">
+                        New trades will appear here automatically.<br/>
+                        Currently monitoring {positions.length} open position{positions.length !== 1 ? 's' : ''}.
+                      </div>
                     </div>
                   )}
                 </motion.div>
               )}
               
               {activeTab === 'chat' && (
-                <motion.div
-                  key="chat"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex-1 overflow-y-auto p-2"
-                >
-                  <ModelChat />
-                </motion.div>
+                <ChatTabContent />
               )}
               
               {activeTab === 'positions' && (

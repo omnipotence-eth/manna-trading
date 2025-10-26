@@ -8,7 +8,8 @@ export interface MarketData {
   movingAverage: number;
   volume: number;
   averageVolume: number;
-  priceChange: number;
+  priceChange: number; // Short-term price change (5min)
+  priceChange24h?: number; // 24h price change for comparison
   // Enhanced data for advanced analysis
   highPrice?: number;
   lowPrice?: number;

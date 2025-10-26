@@ -157,9 +157,18 @@ export const useStore = create<AppState>((set) => ({
     }),
 
   addModelMessage: (message) =>
-    set((state) => ({
-      modelMessages: [message, ...state.modelMessages.slice(0, 49)], // Keep last 50 messages
-    })),
+    set((state) => {
+      // Check if message already exists (by ID)
+      const existingIndex = state.modelMessages.findIndex((m) => m.id === message.id);
+      if (existingIndex >= 0) {
+        // Message already exists, don't add duplicate
+        return state;
+      }
+      // Add new message and keep last 50
+      return {
+        modelMessages: [message, ...state.modelMessages.slice(0, 49)],
+      };
+    }),
 
   setAccountValue: (value) => set({ accountValue: value }),
 }));

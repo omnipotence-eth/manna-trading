@@ -36,8 +36,8 @@ class OptimizedDataService {
   private lastUpdateTime: number = 0;
   
   // Rate limiting - OPTIMIZED for real-time trading
-  private readonly MIN_UPDATE_INTERVAL = 1000; // 1 second minimum between updates
-  private readonly CACHE_TTL = 2000; // 2 seconds cache TTL for real-time data
+  private readonly MIN_UPDATE_INTERVAL = 500; // 500ms minimum between updates (2 req/sec max)
+  private readonly CACHE_TTL = 500; // 500ms cache TTL for real-time data
   
   /**
    * Get all account data in a single optimized call
@@ -187,9 +187,7 @@ class OptimizedDataService {
   private async getAccountValueFast(): Promise<number> {
     try {
       // Use direct API call to get the correct account value
-      const baseUrl = process.env.VERCEL_URL 
-        ? `https://${process.env.VERCEL_URL}` 
-        : 'http://localhost:3000';
+      const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
       const response = await fetch(`${baseUrl}/api/aster/account`);
       if (response.ok) {
         const data = await response.json();
@@ -227,9 +225,7 @@ class OptimizedDataService {
   private async getPositionsFast(): Promise<any[]> {
     try {
       // Use direct API call to get positions data
-      const baseUrl = process.env.VERCEL_URL 
-        ? `https://${process.env.VERCEL_URL}` 
-        : 'http://localhost:3000';
+      const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
       const response = await fetch(`${baseUrl}/api/aster/positions`);
       if (response.ok) {
         const data = await response.json();

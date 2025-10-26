@@ -47,10 +47,11 @@ export interface Trade {
 }
 
 /**
- * Initialize database - create trades table if it doesn't exist
+ * Initialize database - create tables if they don't exist
  */
 export async function initializeDatabase() {
   try {
+    // Create trades table
     await sql(`
       CREATE TABLE IF NOT EXISTS trades (
         id VARCHAR(255) PRIMARY KEY,
@@ -76,10 +77,24 @@ export async function initializeDatabase() {
       );
     `);
 
+    // Create model_messages table for chat/analysis messages
+    await sql(`
+      CREATE TABLE IF NOT EXISTS model_messages (
+        id VARCHAR(255) PRIMARY KEY,
+        model VARCHAR(100) NOT NULL,
+        message TEXT NOT NULL,
+        timestamp TIMESTAMP NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // Create indexes for faster queries
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp DESC);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_model ON trades(model);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON model_messages(timestamp DESC);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_messages_model ON model_messages(model);`);
 
     logger.info('✅ Database initialized successfully', { context: 'Database' });
     return true;
@@ -286,4 +301,10 @@ export async function deleteOldTrades(daysOld: number = 90) {
     return 0;
   }
 }
+
+// Export the database helper for direct queries
+export const db = {
+  execute: sql,
+  pool
+};
 
