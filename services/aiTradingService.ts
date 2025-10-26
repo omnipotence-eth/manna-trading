@@ -906,18 +906,18 @@ class AITradingService {
       }
     });
     
-      // 🎯 CONSERVATIVE TRADING: Only take HIGH-CONFIDENCE trades with 65%+ confidence
-      // This reduces the number of losing trades and focuses on quality opportunities
-      if (bestSignal.confidence >= 0.65) {
+      // 🎯 BALANCED TRADING: Take MODERATE-CONFIDENCE trades with 55%+ confidence
+      // This allows more opportunities while maintaining quality standards
+      if (bestSignal.confidence >= 0.55) {
         bestSignal.size = 0.25; // 25% of available margin - CONSERVATIVE MODE
-        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence [CONSERVATIVE]`, {
+        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence [BALANCED]`, {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
             action: bestSignal.action,
             confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
             reasoning: bestSignal.reasoning,
-            mode: 'CONSERVATIVE (65%+ threshold, 25% margin)'
+            mode: 'BALANCED (55%+ threshold, 25% margin)'
           }
         });
         
@@ -945,12 +945,12 @@ class AITradingService {
         return bestSignal; // 🔥 CRITICAL FIX: Return the approved signal!
       } else {
         // Reject very low confidence trades
-        logger.info(`⏭️ SKIPPING - Need 65%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
+        logger.info(`⏭️ SKIPPING - Need 55%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
             confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-            threshold: '65%',
+            threshold: '55%',
             reasoning: bestSignal.reasoning
           }
         });
