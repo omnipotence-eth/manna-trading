@@ -14,6 +14,7 @@ class AITradingService {
   private model: GodspeedModel;
   private isRunning: boolean = false
   private intervalId: NodeJS.Timeout | null = null
+  private positionMonitorInterval: NodeJS.Timeout | null = null
   private entryDataMap: Map<string, any> = globalEntryDataMap; // Use global map for trade journal
 
   constructor() {
@@ -38,6 +39,9 @@ class AITradingService {
       this.runTradingCycle();
     }, 30000); // Every 30 seconds for balanced frequency
 
+    // 🔥 CRITICAL: Start high-frequency position monitoring
+    this.startPositionMonitoring();
+
     logger.info('✅ GODSPEED ACTIVE [Cycle: 30s, Min Confidence: 50% (AGGRESSIVE), Leverage: MAX (20x-50x per coin), Margin: 100%, Risk/Reward: 1:3, Strong Momentum Boost: ON] 🚀', { context: 'AITrading' });
   }
 
@@ -51,8 +55,33 @@ class AITradingService {
       this.intervalId = null;
     }
 
+    if (this.positionMonitorInterval) {
+      clearInterval(this.positionMonitorInterval);
+      this.positionMonitorInterval = null;
+    }
+
     this.isRunning = false;
     logger.info('🛑 AI trading service stopped', { context: 'AITrading' });
+  }
+
+  /**
+   * 🔥 HIGH-FREQUENCY POSITION MONITORING
+   * Monitors positions every 5 seconds for stop-loss/take-profit execution
+   * This ensures positions are closed quickly when they hit risk levels
+   */
+  private startPositionMonitoring(): void {
+    // Monitor positions every 5 seconds (much faster than trading cycle)
+    this.positionMonitorInterval = setInterval(async () => {
+      try {
+        await this.monitorPositions();
+      } catch (error) {
+        logger.error('Position monitoring error', error, { context: 'AITrading' });
+      }
+    }, 5000); // Every 5 seconds
+
+    logger.info('🔥 High-frequency position monitoring started (5s intervals)', { 
+      context: 'AITrading' 
+    });
   }
 
   async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
