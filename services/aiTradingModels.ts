@@ -166,19 +166,14 @@ export class GodspeedModel implements AITradingModel {
         reasoning += ` [High volatility warning: ${volatility.toFixed(1)}]`;
       }
 
-      // 🚀 RAPID MOVEMENT BOOST: If short-term momentum is much stronger than 24h trend
-      // This catches pumps/dumps that 24h averages miss
-      if (marketData.priceChange24h !== undefined && action !== 'HOLD') {
-        const shortTermChange = priceChange; // 5min change
-        const longTermChange = marketData.priceChange24h; // 24h change
-        
-        // If short-term move is 2x+ stronger than 24h average, boost confidence
-        if (Math.abs(shortTermChange) > Math.abs(longTermChange) * 2 && Math.abs(shortTermChange) > 1) {
-          const rapidBoost = Math.min(0.15, Math.abs(shortTermChange) / 100); // Up to 15% boost
-          const oldConfidence = confidence;
-          confidence = Math.min(confidence * (1 + rapidBoost), 0.95);
-          reasoning += ` [🔥 Rapid boost: +${((confidence - oldConfidence) * 100).toFixed(1)}% for ${shortTermChange.toFixed(2)}% in 5min vs ${longTermChange.toFixed(2)}% 24h]`;
-        }
+      // 🚀 STRONG MOVEMENT BOOST: Boost confidence for significant 24h moves
+      // This rewards coins with strong momentum (pumping/dumping hard)
+      if (action !== 'HOLD' && Math.abs(priceChange) > 3) {
+        // For moves > 3%, boost confidence proportionally
+        const momentumBoost = Math.min(0.12, Math.abs(priceChange) / 100); // Up to 12% boost
+        const oldConfidence = confidence;
+        confidence = Math.min(confidence * (1 + momentumBoost), 0.95);
+        reasoning += ` [🔥 Strong momentum boost: +${((confidence - oldConfidence) * 100).toFixed(1)}% for ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}% 24h move]`;
       }
 
       const signal: TradingSignal = {
