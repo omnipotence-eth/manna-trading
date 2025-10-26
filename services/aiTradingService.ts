@@ -113,7 +113,7 @@ class AITradingService {
     
     try {
       // ⚡ SPEED OPTIMIZATION: Skip position monitoring if no positions exist
-      const existingPositions = await asterDexService.getPositions();
+      const existingPositions = await asterDexService.getPositions(true); // Bust cache for fresh data
       if (existingPositions.length > 0) {
         await this.monitorPositions();
       } else {
@@ -360,9 +360,228 @@ class AITradingService {
     }
   }
 
+  /**
+   * 🚀 MOMENTUM RUN DETECTION
+   * Detects if a position is in a strong momentum run that should be allowed to continue
+   * Uses multiple timeframes: 1m, 5m, 15m for rapid momentum detection
+   */
+  private async detectMomentumRun(position: any, currentPrice: number, currentROE: number): Promise<{
+    isMomentum: boolean;
+    strength: number;
+    peakROE?: number;
+  }> {
+    try {
+      // Get multi-timeframe data for momentum analysis
+      const symbol = position.symbol;
+      const [ticker, klines1m, klines5m, klines15m] = await Promise.all([
+        asterDexService.getTicker(symbol),
+        this.getKlines(symbol, '1m', 10), // Last 10 minutes
+        this.getKlines(symbol, '5m', 6),  // Last 30 minutes
+        this.getKlines(symbol, '15m', 4)  // Last hour
+      ]);
+
+      if (!ticker) {
+        return { isMomentum: false, strength: 0 };
+      }
+
+      // Calculate momentum indicators across timeframes
+      const momentumData = {
+        // 1-minute momentum (ultra-short term)
+        momentum1m: this.calculateMomentum(klines1m, 1),
+        // 5-minute momentum (short term)
+        momentum5m: this.calculateMomentum(klines5m, 5),
+        // 15-minute momentum (medium term)
+        momentum15m: this.calculateMomentum(klines15m, 15),
+        // Current ticker data
+        current: {
+          priceChange24h: ticker.priceChangePercent || 0,
+          volume24h: ticker.volume || 0,
+          avgVolume: ticker.avgVolume || ticker.volume || 0,
+          volumeRatio: ticker.avgVolume ? ticker.volume / ticker.avgVolume : 1
+        }
+      };
+
+      // Enhanced momentum criteria with multi-timeframe analysis
+      const criteria = {
+        // ROE criteria
+        highROE: currentROE >= 12.0, // Lowered threshold for earlier detection
+        veryHighROE: currentROE >= 20.0, // Strong momentum indicator
+        
+        // Multi-timeframe trend alignment
+        trendAlignment: this.checkTrendAlignment(momentumData),
+        
+        // Volume surge detection (multiple timeframes)
+        volumeSurge1m: momentumData.momentum1m.volumeRatio >= 2.0, // 2x+ volume in 1m
+        volumeSurge5m: momentumData.momentum5m.volumeRatio >= 1.8, // 1.8x+ volume in 5m
+        volumeSurge15m: momentumData.momentum15m.volumeRatio >= 1.5, // 1.5x+ volume in 15m
+        
+        // Price momentum (rate of change)
+        priceMomentum1m: momentumData.momentum1m.priceChange >= 1.0, // 1%+ in 1 minute
+        priceMomentum5m: momentumData.momentum5m.priceChange >= 2.0, // 2%+ in 5 minutes
+        priceMomentum15m: momentumData.momentum15m.priceChange >= 3.0, // 3%+ in 15 minutes
+        
+        // Sustained momentum
+        sustainedMomentum: this.checkSustainedMomentum(momentumData),
+        
+        // Overall volume strength
+        strongVolume: momentumData.current.volumeRatio >= 1.5
+      };
+
+      // Calculate momentum strength (0-100) with weighted scoring
+      const strength = (
+        (criteria.highROE ? 15 : 0) +           // Base ROE requirement
+        (criteria.veryHighROE ? 10 : 0) +      // Bonus for very high ROE
+        (criteria.trendAlignment ? 15 : 0) +    // Multi-timeframe alignment
+        (criteria.volumeSurge1m ? 10 : 0) +     // 1m volume surge
+        (criteria.volumeSurge5m ? 8 : 0) +      // 5m volume surge
+        (criteria.volumeSurge15m ? 7 : 0) +     // 15m volume surge
+        (criteria.priceMomentum1m ? 10 : 0) +   // 1m price momentum
+        (criteria.priceMomentum5m ? 8 : 0) +    // 5m price momentum
+        (criteria.priceMomentum15m ? 7 : 0) +   // 15m price momentum
+        (criteria.sustainedMomentum ? 10 : 0) + // Sustained momentum bonus
+        (criteria.strongVolume ? 5 : 0)         // Overall volume strength
+      );
+
+      const isMomentum = strength >= 60; // Lowered threshold for faster detection
+
+      // Track peak ROE for trailing stops
+      const peakROE = isMomentum ? Math.max(currentROE, this.getPeakROE(position.symbol)) : undefined;
+      if (isMomentum && peakROE) {
+        this.setPeakROE(position.symbol, peakROE);
+      }
+
+      logger.info(`🔍 Enhanced Momentum Analysis: ${position.symbol}`, {
+        context: 'AITrading',
+        data: {
+          currentROE,
+          strength,
+          isMomentum,
+          peakROE,
+          criteria,
+          momentumData: {
+            '1m': momentumData.momentum1m,
+            '5m': momentumData.momentum5m,
+            '15m': momentumData.momentum15m
+          }
+        }
+      });
+
+      return { isMomentum, strength, peakROE };
+    } catch (error) {
+      logger.error('Failed to detect momentum run', error, { context: 'AITrading' });
+      return { isMomentum: false, strength: 0 };
+    }
+  }
+
+  /**
+   * Get klines (candlestick data) for momentum analysis
+   */
+  private async getKlines(symbol: string, interval: string, limit: number): Promise<any[]> {
+    try {
+      // Use Aster DEX klines endpoint
+      const response = await fetch(`https://fapi.asterdex.com/fapi/v1/klines?symbol=${symbol.replace('/', '')}&interval=${interval}&limit=${limit}`);
+      if (!response.ok) {
+        return [];
+      }
+      const data = await response.json();
+      return data || [];
+    } catch (error) {
+      logger.error(`Failed to get ${interval} klines for ${symbol}`, error, { context: 'AITrading' });
+      return [];
+    }
+  }
+
+  /**
+   * Calculate momentum metrics for a timeframe
+   */
+  private calculateMomentum(klines: any[], timeframeMinutes: number): {
+    priceChange: number;
+    volumeRatio: number;
+    avgVolume: number;
+    currentVolume: number;
+    trend: 'bullish' | 'bearish' | 'neutral';
+  } {
+    if (klines.length < 2) {
+      return {
+        priceChange: 0,
+        volumeRatio: 1,
+        avgVolume: 0,
+        currentVolume: 0,
+        trend: 'neutral'
+      };
+    }
+
+    const first = klines[0];
+    const last = klines[klines.length - 1];
+    
+    const openPrice = parseFloat(first[1]);
+    const closePrice = parseFloat(last[4]);
+    const priceChange = ((closePrice - openPrice) / openPrice) * 100;
+
+    // Calculate volume metrics
+    const volumes = klines.map(k => parseFloat(k[5]));
+    const currentVolume = volumes[volumes.length - 1];
+    const avgVolume = volumes.reduce((sum, vol) => sum + vol, 0) / volumes.length;
+    const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+
+    // Determine trend
+    let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+    if (priceChange > 0.5) trend = 'bullish';
+    else if (priceChange < -0.5) trend = 'bearish';
+
+    return {
+      priceChange,
+      volumeRatio,
+      avgVolume,
+      currentVolume,
+      trend
+    };
+  }
+
+  /**
+   * Check if all timeframes are aligned in the same direction
+   */
+  private checkTrendAlignment(momentumData: any): boolean {
+    const trends = [
+      momentumData.momentum1m.trend,
+      momentumData.momentum5m.trend,
+      momentumData.momentum15m.trend
+    ];
+    
+    // Count bullish vs bearish trends
+    const bullishCount = trends.filter(t => t === 'bullish').length;
+    const bearishCount = trends.filter(t => t === 'bearish').length;
+    
+    // Require at least 2/3 timeframes aligned
+    return bullishCount >= 2 || bearishCount >= 2;
+  }
+
+  /**
+   * Check for sustained momentum across timeframes
+   */
+  private checkSustainedMomentum(momentumData: any): boolean {
+    const momentum1m = momentumData.momentum1m.priceChange;
+    const momentum5m = momentumData.momentum5m.priceChange;
+    const momentum15m = momentumData.momentum15m.priceChange;
+
+    // All timeframes showing positive momentum
+    return momentum1m > 0 && momentum5m > 0 && momentum15m > 0;
+  }
+
+  // Simple in-memory storage for peak ROE tracking
+  private peakROECache = new Map<string, number>();
+
+  private getPeakROE(symbol: string): number {
+    return this.peakROECache.get(symbol) || 0;
+  }
+
+  private setPeakROE(symbol: string, roe: number): void {
+    this.peakROECache.set(symbol, roe);
+  }
+
   private async monitorPositions(): Promise<void> {
     try {
-      const positions = await asterDexService.getPositions();
+      const positions = await asterDexService.getPositions(true); // Bust cache for fresh data
       
       if (positions.length === 0) {
         logger.debug('📊 No positions to monitor', { context: 'AITrading' });
@@ -417,10 +636,49 @@ class AITradingService {
             shouldClose = true;
             reason = `🛑 STOP-LOSS: Margin down ${marginPnlPercent.toFixed(2)}% (threshold: -3.0%)`;
           }
-          // Take-profit at +6% of margin (better risk/reward ratio)
+          // 🚀 MOMENTUM RUN CONDITION: Enhanced profit-taking for strong trends
           else if (marginPnlPercent >= 6.0) {
-            shouldClose = true;
-            reason = `💰 TAKE-PROFIT: Margin up ${marginPnlPercent.toFixed(2)}% (threshold: +6.0%)`;
+            // Check if this is a momentum run (strong trend + high volume + high ROE)
+            const isMomentumRun = await this.detectMomentumRun(position, currentPrice, marginPnlPercent);
+            
+            if (isMomentumRun.isMomentum) {
+              // Dynamic trailing stop based on momentum strength
+              const peakROE = isMomentumRun.peakROE || marginPnlPercent;
+              const momentumStrength = isMomentumRun.strength;
+              
+              // More aggressive trailing for stronger momentum
+              let trailingDistance = 5.0; // Default 5% trailing
+              if (momentumStrength >= 80) {
+                trailingDistance = 3.0; // Tighter trailing for very strong momentum
+              } else if (momentumStrength >= 70) {
+                trailingDistance = 4.0; // Medium trailing
+              }
+              
+              const trailingStopLevel = Math.max(12.0, peakROE - trailingDistance);
+              
+              // Check if we should close due to trailing stop
+              if (marginPnlPercent <= trailingStopLevel) {
+                shouldClose = true;
+                reason = `🚀 MOMENTUM TRAILING STOP: ${marginPnlPercent.toFixed(2)}% (peak: ${peakROE.toFixed(2)}%, trailing: ${trailingStopLevel.toFixed(2)}%, strength: ${momentumStrength})`;
+              } else {
+                logger.info(`🚀 MOMENTUM RUN DETECTED: ${position.symbol} ${position.side} - Letting run continue`, {
+                  context: 'AITrading',
+                  data: {
+                    currentROE: marginPnlPercent,
+                    peakROE: peakROE,
+                    momentumStrength: momentumStrength,
+                    trailingStop: trailingStopLevel,
+                    trailingDistance: trailingDistance,
+                    timeframes: '1m/5m/15m analysis'
+                  }
+                });
+                return; // Skip closing, let momentum continue
+              }
+            } else {
+              // Normal take-profit at +6%
+              shouldClose = true;
+              reason = `💰 TAKE-PROFIT: Margin up ${marginPnlPercent.toFixed(2)}% (threshold: +6.0%)`;
+            }
           }
         
         if (shouldClose) {
