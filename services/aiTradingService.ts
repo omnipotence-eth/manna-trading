@@ -172,6 +172,26 @@ class AITradingService {
         }
       });
       
+      // 🧠 SEND SCANNING STATUS TO CHAT (so user can see Godspeed is working)
+      try {
+        const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+        const scanMessage = allSignals.length > 0
+          ? `🔍 SCAN COMPLETE\n📊 Analyzed ${analyzedCount} coins\n💡 Found ${allSignals.length} opportunities\n\n🎯 Best Signal: ${allSignals.sort((a, b) => b.confidence - a.confidence)[0].symbol} @ ${(allSignals.sort((a, b) => b.confidence - a.confidence)[0].confidence * 100).toFixed(1)}%`
+          : `🔍 SCAN COMPLETE\n📊 Analyzed ${analyzedCount} coins\n⚠️ No high-probability opportunities found\n💤 Market conditions not favorable`;
+        
+        await fetch(`${baseUrl}/api/model-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'Godspeed',
+            type: 'analysis',
+            message: scanMessage
+          }),
+        });
+      } catch (error) {
+        logger.error(`Failed to send scan status`, error, { context: 'AITrading' });
+      }
+      
       // 📊 DETAILED LOGGING: Show ALL opportunities found with confidence levels
       if (allSignals.length > 0) {
         const sortedByConfidence = [...allSignals].sort((a, b) => b.confidence - a.confidence);
@@ -182,7 +202,7 @@ class AITradingService {
               symbol: s.symbol,
               action: s.action,
               confidence: `${(s.confidence * 100).toFixed(1)}%`,
-              tradeable: s.confidence >= 0.50 ? '✅ YES' : '❌ NO (too low)',
+              tradeable: s.confidence >= 0.48 ? '✅ YES' : '❌ NO (too low)',
               reasoning: s.reasoning.substring(0, 120)
             }))
           }
