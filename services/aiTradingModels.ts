@@ -1,12 +1,146 @@
 import { TradingSignal, MarketData, AITradingModel } from '@/types/trading';
 import { logger } from '@/lib/logger';
+import { asterDexService } from './asterDexService';
 
 /**
  * Godspeed AI Trading Model
- * OPTIMIZED FOR PROFIT - Professional trading strategy
+ * OPTIMIZED FOR PROFIT - Professional trading strategy with 1-minute chart analysis
  */
 export class GodspeedModel implements AITradingModel {
   private modelName = 'Godspeed';
+
+  /**
+   * Analyze 1-minute candles for rapid volume and price changes
+   */
+  private async analyze1MinuteAction(symbol: string): Promise<{
+    volumeSpike: boolean;
+    sellVolume: boolean;
+    buyVolume: boolean;
+    rapidPriceChange: number;
+    avgVolume: number;
+    recentVolume: number;
+    action: 'BUY' | 'SELL' | 'NEUTRAL';
+    confidence: number;
+    reasoning: string;
+  }> {
+    try {
+      // Fetch last 15 1-minute candles
+      const klines = await asterDexService.getKlines(symbol, '1m', 15);
+      
+      if (!klines || klines.length < 10) {
+        return {
+          volumeSpike: false,
+          sellVolume: false,
+          buyVolume: false,
+          rapidPriceChange: 0,
+          avgVolume: 0,
+          recentVolume: 0,
+          action: 'NEUTRAL',
+          confidence: 0,
+          reasoning: 'Insufficient 1m data'
+        };
+      }
+
+      // Get most recent candles
+      const latestCandle = klines[klines.length - 1];
+      const recentCandles = klines.slice(-5); // Last 5 minutes
+      const olderCandles = klines.slice(0, -5); // Previous 10 minutes for baseline
+
+      // Calculate average volumes
+      const avgVolume = olderCandles.reduce((sum, k) => sum + k.volume, 0) / olderCandles.length;
+      const recentVolume = recentCandles.reduce((sum, k) => sum + k.volume, 0) / recentCandles.length;
+      const latestVolume = latestCandle.volume;
+
+      // Detect volume spike: Recent volume > 2x average
+      const volumeSpike = recentVolume > avgVolume * 2.0 || latestVolume > avgVolume * 2.5;
+
+      // Calculate rapid price change (last 5 minutes)
+      const fiveMinAgo = recentCandles[0].close;
+      const currentPrice = latestCandle.close;
+      const rapidPriceChange = ((currentPrice - fiveMinAgo) / fiveMinAgo) * 100;
+
+      // Detect buy vs sell pressure from candle patterns
+      let buyPressure = 0;
+      let sellPressure = 0;
+
+      recentCandles.forEach(candle => {
+        const bodySize = Math.abs(candle.close - candle.open);
+        const wickSize = candle.high - candle.low;
+        const isBullish = candle.close > candle.open;
+
+        if (isBullish) {
+          buyPressure += (bodySize / wickSize) * candle.volume;
+        } else {
+          sellPressure += (bodySize / wickSize) * candle.volume;
+        }
+      });
+
+      const totalPressure = buyPressure + sellPressure;
+      const buyVolumeRatio = totalPressure > 0 ? buyPressure / totalPressure : 0.5;
+      const sellVolumeRatio = 1 - buyVolumeRatio;
+
+      // Strong buy volume: More than 65% buy pressure
+      const buyVolume = buyVolumeRatio > 0.65 && volumeSpike;
+      
+      // Strong sell volume: More than 65% sell pressure  
+      const sellVolume = sellVolumeRatio > 0.65 && volumeSpike;
+
+      // Determine action based on 1-minute analysis
+      let action: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
+      let confidence = 0;
+      let reasoning = '';
+
+      // STRATEGY: Buy into large volume spikes with positive price action
+      if (buyVolume && rapidPriceChange > 0.3) {
+        action = 'BUY';
+        confidence = Math.min(0.75 + (rapidPriceChange / 10), 0.95);
+        reasoning = `🚀 BUY VOLUME SPIKE: ${buyVolumeRatio.toFixed(0)}% buy pressure, ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} vol, +${rapidPriceChange.toFixed(2)}% in 5min`;
+      }
+      // STRATEGY: Sell into sell volume quickly (dump detection)
+      else if (sellVolume && rapidPriceChange < -0.3) {
+        action = 'SELL';
+        confidence = Math.min(0.75 + (Math.abs(rapidPriceChange) / 10), 0.95);
+        reasoning = `📉 SELL VOLUME SPIKE: ${sellVolumeRatio.toFixed(0)}% sell pressure, ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} vol, ${rapidPriceChange.toFixed(2)}% in 5min`;
+      }
+      // STRATEGY: Catch early breakouts (volume spike + price rising)
+      else if (volumeSpike && rapidPriceChange > 0.5) {
+        action = 'BUY';
+        confidence = Math.min(0.65 + (rapidPriceChange / 15), 0.85);
+        reasoning = `⚡ RAPID BREAKOUT: ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} volume, +${rapidPriceChange.toFixed(2)}% surge in 5min`;
+      }
+      // STRATEGY: Catch dumps early (volume spike + price falling)
+      else if (volumeSpike && rapidPriceChange < -0.5) {
+        action = 'SELL';
+        confidence = Math.min(0.65 + (Math.abs(rapidPriceChange) / 15), 0.85);
+        reasoning = `⚡ RAPID DUMP: ${recentVolume.toFixed(0)}/${avgVolume.toFixed(0)} volume, ${rapidPriceChange.toFixed(2)}% drop in 5min`;
+      }
+
+      return {
+        volumeSpike,
+        sellVolume,
+        buyVolume,
+        rapidPriceChange,
+        avgVolume,
+        recentVolume,
+        action,
+        confidence,
+        reasoning
+      };
+    } catch (error) {
+      logger.error(`1-minute analysis failed for ${symbol}`, error, { context: 'Godspeed' });
+      return {
+        volumeSpike: false,
+        sellVolume: false,
+        buyVolume: false,
+        rapidPriceChange: 0,
+        avgVolume: 0,
+        recentVolume: 0,
+        action: 'NEUTRAL',
+        confidence: 0,
+        reasoning: 'Analysis error'
+      };
+    }
+  }
 
   /**
    * Calculate RSI (Relative Strength Index)
@@ -45,6 +179,31 @@ export class GodspeedModel implements AITradingModel {
 
   async analyze(symbol: string, marketData: MarketData): Promise<TradingSignal> {
     try {
+      // 🚀 PRIORITY 1: Check 1-minute chart for rapid volume spikes and price action
+      const oneMinAnalysis = await this.analyze1MinuteAction(symbol);
+      
+      // If 1-minute analysis finds a strong signal, use it immediately
+      if (oneMinAnalysis.confidence >= 0.65) {
+        logger.info(`🎯 1-MINUTE SIGNAL TRIGGERED: ${symbol}`, {
+          context: 'Godspeed',
+          data: {
+            action: oneMinAnalysis.action,
+            confidence: (oneMinAnalysis.confidence * 100).toFixed(1) + '%',
+            rapidChange: oneMinAnalysis.rapidPriceChange.toFixed(2) + '%',
+            volumeSpike: oneMinAnalysis.volumeSpike,
+            reasoning: oneMinAnalysis.reasoning
+          }
+        });
+
+        return {
+          symbol,
+          action: oneMinAnalysis.action,
+          confidence: oneMinAnalysis.confidence,
+          size: 1.0,
+          reasoning: `[${this.modelName}] ${oneMinAnalysis.reasoning}`
+        };
+      }
+
       // Extract market data
       const priceChange = marketData.priceChange;
       const volume = marketData.volume;
@@ -61,6 +220,13 @@ export class GodspeedModel implements AITradingModel {
       let confidence = 0;
       let reasoning = '';
       let signalScore = 0;
+
+      // 💡 BOOST: If 1-minute analysis shows moderate interest, boost the longer-term signal
+      let oneMinuteBoost = 0;
+      if (oneMinAnalysis.confidence > 0.4 && oneMinAnalysis.confidence < 0.65) {
+        oneMinuteBoost = oneMinAnalysis.confidence * 0.15; // Up to 10% boost
+        reasoning += ` [1m boost: +${(oneMinuteBoost * 100).toFixed(1)}%]`;
+      }
 
       // ===== PROFITABLE STRATEGY: MULTI-FACTOR CONFIRMATION =====
       
@@ -187,6 +353,12 @@ export class GodspeedModel implements AITradingModel {
         const oldConfidence = confidence;
         confidence = Math.min(confidence * (1 + momentumBoost), 0.95);
         reasoning += ` [🔥 Strong momentum boost: +${((confidence - oldConfidence) * 100).toFixed(1)}% for ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}% 24h move]`;
+      }
+
+      // 💥 1-MINUTE BOOST: Apply boost from 1-minute analysis if present
+      if (oneMinuteBoost > 0 && action !== 'HOLD') {
+        confidence = Math.min(confidence + oneMinuteBoost, 0.95);
+        reasoning += ` [⚡ 1min activity: ${oneMinAnalysis.rapidPriceChange.toFixed(2)}% in 5min]`;
       }
 
       const signal: TradingSignal = {
