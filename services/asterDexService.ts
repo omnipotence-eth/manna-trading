@@ -54,12 +54,12 @@ class AsterDexService {
   private requestQueue: Array<() => Promise<any>> = [];
   private isProcessingQueue: boolean = false;
   private lastRequestTime: number = 0;
-  private readonly MIN_REQUEST_DELAY = 100; // 100ms between requests = max 10 req/sec (very safe for exchanges)
-  private readonly BATCH_SIZE = 3; // Process 3 requests concurrently
+  private readonly MIN_REQUEST_DELAY = 50; // 50ms between requests = max 20 req/sec (aggressive but safe)
+  private readonly BATCH_SIZE = 5; // Process 5 requests concurrently for faster parallel fetching
   private requestCount: number = 0;
   private requestWindow: number = Date.now();
   private lastSuccessfulRequest: number = 0;
-  private readonly MAX_REQUESTS_PER_MINUTE = 300; // Conservative limit (most exchanges allow 1200+)
+  private readonly MAX_REQUESTS_PER_MINUTE = 600; // Increased limit for faster throughput (still safe for most exchanges)
   
   // Request deduplication to prevent concurrent identical requests
   private pendingRequests: Map<string, Promise<any>> = new Map();
@@ -804,8 +804,8 @@ class AsterDexService {
           closeTime: k[6],
         }));
         
-        // Cache for 30 seconds for short intervals, 60 seconds for longer
-        const cacheTTL = ['1m', '3m', '5m'].includes(interval) ? 30 : 60;
+        // Cache for 5-15 seconds depending on interval (ultra-fast for 1m)
+        const cacheTTL = interval === '1m' ? 5 : (['3m', '5m'].includes(interval) ? 10 : 15);
         apiCache.set(cacheKey, klines, cacheTTL);
         
         return klines;
@@ -959,8 +959,8 @@ class AsterDexService {
         availableBalance: Math.abs(availableBalance),
       };
 
-      // Cache for 500ms for ultra real-time updates
-      apiCache.set(cacheKey, accountInfo, 0.5);
+      // Cache for 250ms for ultra real-time updates
+      apiCache.set(cacheKey, accountInfo, 0.25);
       
       logger.debug('Fetched and cached account info', { context: 'AsterDex', data: accountInfo });
       return accountInfo;
