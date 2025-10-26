@@ -119,12 +119,44 @@ export default function NOF1Dashboard() {
       }
     };
 
+    // Start data updates every second
     updateData();
-    const intervalId = setInterval(updateData, 1000); // 1 second for real-time updates
+    const dataIntervalId = setInterval(updateData, 1000);
+
+    // 🤖 GODSPEED AUTO-TRADING: Trigger trading cycle every 60 seconds
+    // This ensures 24/7 trading even if Vercel cron fails
+    let tradingCycleCount = 0;
+    const runTradingCycle = async () => {
+      if (!isMounted) return;
+      try {
+        tradingCycleCount++;
+        console.log(`🔄 Godspeed Auto-Trading Cycle #${tradingCycleCount} starting...`);
+        
+        const response = await fetch('/api/test-cron', {
+          method: 'GET',
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ Godspeed cycle #${tradingCycleCount} completed:`, {
+            signals: data.cronResponse?.signals?.length || 0,
+            bestSignal: data.cronResponse?.bestSignal?.symbol || 'none',
+            confidence: data.cronResponse?.bestSignal?.confidence || 0,
+          });
+        }
+      } catch (error) {
+        console.error('❌ Godspeed trading cycle failed:', error);
+      }
+    };
+
+    // Run trading cycle immediately and then every 60 seconds
+    runTradingCycle();
+    const tradingIntervalId = setInterval(runTradingCycle, 60000);
 
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
+      clearInterval(dataIntervalId);
+      clearInterval(tradingIntervalId);
     };
   }, [setAccountValue, updatePosition, addTrade, addModelMessage]);
 
