@@ -12,13 +12,13 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'Godspeed trading started successfully',
       system: 'Godspeed AI',
-      features: [
-        '100% margin utilization',
-        'Maximum leverage per coin (20x-50x)',
-        'High confidence filtering (48%+)',
-        'Real-time market analysis (132 coins)',
-        'Risk management (2% stop-loss, 2% take-profit)'
-      ]
+        features: [
+          '100% margin utilization',
+          'Maximum leverage per coin (20x-50x)',
+          'High confidence filtering (48%+)',
+          'Real-time market analysis (132 coins)',
+          'Conservative risk management (1% stop-loss, 1% take-profit)'
+        ]
     });
     
   } catch (error) {
