@@ -138,7 +138,8 @@ class AITradingService {
             movingAverage: tickerData?.movingAverage || currentPrice,
             volume: tickerData?.volume || 0,
             averageVolume: tickerData?.averageVolume || 0,
-            priceChange: recentPriceChange, // ✅ NOW USING SHORT-TERM MOMENTUM!
+            priceChange: recentPriceChange, // ✅ SHORT-TERM MOMENTUM (5min)
+            priceChange24h: tickerData.priceChangePercent, // 24h change for comparison
             highPrice: tickerData?.highPrice || currentPrice,
             lowPrice: tickerData?.lowPrice || currentPrice,
             openPrice: tickerData?.openPrice || currentPrice,
