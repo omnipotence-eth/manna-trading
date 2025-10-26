@@ -349,16 +349,19 @@ class AITradingService {
           let shouldClose = false;
           let reason = '';
           
-          // POSITION-BASED RISK MANAGEMENT: Simple 2% stop-loss/take-profit
-          // Stop-loss at -2% position (price movement)
-          if (pricePnlPercent <= -2.0) {
+          // MARGIN-BASED RISK MANAGEMENT: 2% stop-loss/take-profit of margin
+          // Calculate P&L as percentage of margin used
+          const marginPnlPercent = (position.unrealizedPnl / marginUsed) * 100;
+          
+          // Stop-loss at -2% of margin
+          if (marginPnlPercent <= -2.0) {
             shouldClose = true;
-            reason = `🛑 STOP-LOSS: Position down ${pricePnlPercent.toFixed(2)}% (threshold: -2.0%)`;
+            reason = `🛑 STOP-LOSS: Margin down ${marginPnlPercent.toFixed(2)}% (threshold: -2.0%)`;
           }
-          // Take-profit at +2% position (price movement)
-          else if (pricePnlPercent >= 2.0) {
+          // Take-profit at +2% of margin
+          else if (marginPnlPercent >= 2.0) {
             shouldClose = true;
-            reason = `💰 TAKE-PROFIT: Position up ${pricePnlPercent.toFixed(2)}% (threshold: +2.0%)`;
+            reason = `💰 TAKE-PROFIT: Margin up ${marginPnlPercent.toFixed(2)}% (threshold: +2.0%)`;
           }
         
         if (shouldClose) {
