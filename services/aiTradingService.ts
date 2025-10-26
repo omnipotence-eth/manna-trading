@@ -38,7 +38,7 @@ class AITradingService {
       this.runTradingCycle();
     }, 30000); // Every 30 seconds for balanced frequency
 
-    logger.info('✅ GODSPEED ACTIVE [Cycle: 30s, Min Confidence: 55%, Leverage: MAX (20x-50x per coin), Margin: 100%, Risk/Reward: 1:3, Rapid Movement Detection: ON] 🚀', { context: 'AITrading' });
+    logger.info('✅ GODSPEED ACTIVE [Cycle: 30s, Min Confidence: 50% (AGGRESSIVE), Leverage: MAX (20x-50x per coin), Margin: 100%, Risk/Reward: 1:3, Strong Momentum Boost: ON] 🚀', { context: 'AITrading' });
   }
 
   async stop() {
@@ -162,20 +162,32 @@ class AITradingService {
         }
       }
       
-      logger.info(`📊 GODSPEED Analysis Complete: Analyzed ${analyzedCount} coins, Skipped ${skippedCount}, Found ${allSignals.length} trading opportunities`, {
+      logger.info(`📊 GODSPEED Analysis Complete: Analyzed ${analyzedCount} coins, Skipped ${skippedCount}, Found ${allSignals.length} opportunities`, {
         context: 'AITrading',
         data: {
           totalSymbols: symbols.length,
           analyzed: analyzedCount,
           skipped: skippedCount,
-          opportunities: allSignals.length,
-          sampleCoinsAnalyzed: symbols.slice(0, 20), // Show first 20 coins being analyzed
-          opportunitiesBySymbol: allSignals.reduce((acc: any, s) => {
-            acc[s.symbol] = (acc[s.symbol] || 0) + 1;
-            return acc;
-          }, {})
+          opportunities: allSignals.length
         }
       });
+      
+      // 📊 DETAILED LOGGING: Show ALL opportunities found with confidence levels
+      if (allSignals.length > 0) {
+        const sortedByConfidence = [...allSignals].sort((a, b) => b.confidence - a.confidence);
+        logger.info(`🔍 TOP 10 OPPORTUNITIES FOUND (sorted by confidence):`, {
+          context: 'AITrading',
+          data: sortedByConfidence.slice(0, 10).map(s => ({
+            symbol: s.symbol,
+            action: s.action,
+            confidence: `${(s.confidence * 100).toFixed(1)}%`,
+            tradeable: s.confidence >= 0.50 ? '✅ YES' : '❌ NO (too low)',
+            reasoning: s.reasoning.substring(0, 120)
+          }))
+        });
+      } else {
+        logger.info(`⚠️ NO OPPORTUNITIES FOUND - Market conditions not favorable`, { context: 'AITrading' });
+      }
 
       // Get current open positions to check which coins we're already trading
       const currentPositions = await asterDexService.getPositions();
@@ -373,27 +385,33 @@ class AITradingService {
       }
     });
     
-    // 🎯 KELLY CRITERION RESPECT: Only take HIGH CONFIDENCE trades (55%+)
-    // Adjusted from 60% to 55% to catch more rapid movement opportunities
-    // With 100% margin deployment, we MUST be selective on quality
-    if (bestSignal.confidence >= 0.55) {
-      bestSignal.size = 1.0; // 100% of available margin - HIGH CONFIDENCE ONLY
-      logger.info(`✅ HIGH CONFIDENCE TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}%`, {
-        context: 'AITrading'
-      });
-    } else {
-      // Reject low/medium confidence trades - wait for better opportunities
-      logger.info(`⏭️ SKIPPING - Need 55%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
-        context: 'AITrading',
-        data: {
-          symbol: bestSignal.symbol,
-          confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-          threshold: '55%',
-          reasoning: bestSignal.reasoning
-        }
-      });
-      return null;
-    }
+      // 🎯 AGGRESSIVE TRADING: Take MEDIUM+ confidence trades (50%+)
+      // Lowered from 55% to 50% to capture more opportunities
+      // With 100% margin deployment and strong risk management, we can be more aggressive
+      if (bestSignal.confidence >= 0.50) {
+        bestSignal.size = 1.0; // 100% of available margin - MEDIUM+ CONFIDENCE
+        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence`, {
+          context: 'AITrading',
+          data: {
+            symbol: bestSignal.symbol,
+            action: bestSignal.action,
+            confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
+            reasoning: bestSignal.reasoning
+          }
+        });
+      } else {
+        // Reject low confidence trades - wait for better opportunities
+        logger.info(`⏭️ SKIPPING - Need 50%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
+          context: 'AITrading',
+          data: {
+            symbol: bestSignal.symbol,
+            confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
+            threshold: '50%',
+            reasoning: bestSignal.reasoning
+          }
+        });
+        return null;
+      }
     
     logger.info(`🎯 GODSPEED SELECTED #1: ${bestSignal.symbol} ${bestSignal.action} @ ${(bestSignal.confidence * 100).toFixed(1)}% [FULL MARGIN: 100%]`, {
       context: 'AITrading',
