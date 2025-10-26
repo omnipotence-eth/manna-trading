@@ -64,25 +64,25 @@ export class GodspeedModel implements AITradingModel {
 
       // ===== PROFITABLE STRATEGY: MULTI-FACTOR CONFIRMATION =====
       
-      // 1. RSI CONDITIONS (Mean Reversion + Momentum)
-      const isOversold = rsi < 30; // Oversold = potential BUY
-      const isOverbought = rsi > 70; // Overbought = potential SELL
-      const isBullishMomentum = rsi > 50 && rsi < 70; // Healthy uptrend
-      const isBearishMomentum = rsi < 50 && rsi > 30; // Healthy downtrend
+      // 1. RSI CONDITIONS (AGGRESSIVE - Lower thresholds for low volatility markets)
+      const isOversold = rsi < 40; // AGGRESSIVE: Catch early oversold (was 30)
+      const isOverbought = rsi > 60; // AGGRESSIVE: Catch early overbought (was 70)
+      const isBullishMomentum = rsi > 50 && rsi < 75; // Wider bullish range
+      const isBearishMomentum = rsi < 50 && rsi > 25; // Wider bearish range
       
-      // 2. VOLUME CONFIRMATION (High volume = strong signal)
-      const hasHighVolume = volumeRatio > 1.5; // 50% above average
-      const hasVeryHighVolume = volumeRatio > 2.5; // 150% above average
+      // 2. VOLUME CONFIRMATION (AGGRESSIVE - Lower requirements)
+      const hasHighVolume = volumeRatio > 1.2; // AGGRESSIVE: 20% above average (was 1.5x)
+      const hasVeryHighVolume = volumeRatio > 2.0; // AGGRESSIVE: 100% above average (was 2.5x)
       
-      // 3. TREND CONFIRMATION
-      const isStrongTrend = trendAnalysis.strength > 0.7;
+      // 3. TREND CONFIRMATION (AGGRESSIVE - Accept weaker trends)
+      const isStrongTrend = trendAnalysis.strength > 0.6; // AGGRESSIVE: Accept slightly weaker trends (was 0.7)
       const isBullish = trendAnalysis.trend === 'BULL' || trendAnalysis.trend === 'STRONG_BULL';
       const isBearish = trendAnalysis.trend === 'BEAR' || trendAnalysis.trend === 'STRONG_BEAR';
       
-      // 4. VOLATILITY FILTER (Too much volatility = risky)
+      // 4. VOLATILITY FILTER (AGGRESSIVE - Be more tolerant of volatility)
       const isLowVolatility = volatility < 3;
-      const isMediumVolatility = volatility >= 3 && volatility < 8;
-      const isHighVolatility = volatility >= 8;
+      const isMediumVolatility = volatility >= 3 && volatility < 10; // AGGRESSIVE: Higher threshold (was 8)
+      const isHighVolatility = volatility >= 10; // AGGRESSIVE: Only penalize extreme volatility (was 8)
 
       // ===== DECISION LOGIC: QUALITY OVER QUANTITY =====
       
@@ -134,16 +134,29 @@ export class GodspeedModel implements AITradingModel {
         reasoning = `💥 BREAKDOWN: ${priceChange.toFixed(2)}% with ${volumeRatio.toFixed(1)}x volume spike, RSI ${rsi.toFixed(0)}`;
       }
       
-      // STRATEGY 4: Moderate Trend Following (Lower confidence)
-      else if (isBullish && isBullishMomentum && volumeRatio > 1.2) {
+      // STRATEGY 4: Moderate Trend Following (AGGRESSIVE - Higher base confidence)
+      else if (isBullish && isBullishMomentum && volumeRatio > 1.0) {
         action = 'BUY';
-        confidence = 0.45;
+        confidence = 0.52; // AGGRESSIVE: Above 50% threshold (was 0.45)
         reasoning = `📈 Moderate BUY: Bullish trend, RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, +${priceChange.toFixed(2)}%`;
       }
-      else if (isBearish && isBearishMomentum && volumeRatio > 1.2) {
+      else if (isBearish && isBearishMomentum && volumeRatio > 1.0) {
         action = 'SELL';
-        confidence = 0.45;
+        confidence = 0.52; // AGGRESSIVE: Above 50% threshold (was 0.45)
         reasoning = `📉 Moderate SELL: Bearish trend, RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, ${priceChange.toFixed(2)}%`;
+      }
+      
+      // STRATEGY 5: AGGRESSIVE Range Trading (NEW - for sideways markets)
+      else if ((rsi < 45 || rsi > 55) && volumeRatio > 0.8) {
+        if (rsi < 45 && priceChange < 0) {
+          action = 'BUY';
+          confidence = 0.51; // Just above threshold
+          reasoning = `🎯 RANGE BUY: RSI ${rsi.toFixed(0)} near support, ${priceChange.toFixed(2)}% pullback`;
+        } else if (rsi > 55 && priceChange > 0) {
+          action = 'SELL';
+          confidence = 0.51; // Just above threshold
+          reasoning = `🎯 RANGE SELL: RSI ${rsi.toFixed(0)} near resistance, +${priceChange.toFixed(2)}% extension`;
+        }
       }
       
       // DEFAULT: HOLD (No clear edge)
@@ -153,16 +166,16 @@ export class GodspeedModel implements AITradingModel {
         reasoning = `⏸️ HOLD: Mixed signals - RSI ${rsi.toFixed(0)}, Trend ${trendAnalysis.trend}, Vol ${volumeRatio.toFixed(1)}x, ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
       }
 
-      // RISK FILTER: Reject low confidence trades
-      if (confidence < 0.4 && action !== 'HOLD') {
+      // RISK FILTER: AGGRESSIVE - Lower rejection threshold
+      if (confidence < 0.35 && action !== 'HOLD') {
         action = 'HOLD';
         reasoning = `🛑 REJECTED: ${reasoning} [Confidence too low: ${(confidence * 100).toFixed(0)}%]`;
         confidence = 0.2;
       }
 
-      // VOLATILITY PENALTY: Reduce confidence in high volatility
+      // VOLATILITY PENALTY: AGGRESSIVE - Smaller penalty
       if (isHighVolatility && action !== 'HOLD') {
-        confidence *= 0.7; // 30% penalty
+        confidence *= 0.85; // AGGRESSIVE: Only 15% penalty (was 30%)
         reasoning += ` [High volatility warning: ${volatility.toFixed(1)}]`;
       }
 
