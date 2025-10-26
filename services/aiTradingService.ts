@@ -177,13 +177,15 @@ class AITradingService {
         const sortedByConfidence = [...allSignals].sort((a, b) => b.confidence - a.confidence);
         logger.info(`🔍 TOP 10 OPPORTUNITIES FOUND (sorted by confidence):`, {
           context: 'AITrading',
-          data: sortedByConfidence.slice(0, 10).map(s => ({
-            symbol: s.symbol,
-            action: s.action,
-            confidence: `${(s.confidence * 100).toFixed(1)}%`,
-            tradeable: s.confidence >= 0.50 ? '✅ YES' : '❌ NO (too low)',
-            reasoning: s.reasoning.substring(0, 120)
-          }))
+          data: {
+            opportunities: sortedByConfidence.slice(0, 10).map(s => ({
+              symbol: s.symbol,
+              action: s.action,
+              confidence: `${(s.confidence * 100).toFixed(1)}%`,
+              tradeable: s.confidence >= 0.50 ? '✅ YES' : '❌ NO (too low)',
+              reasoning: s.reasoning.substring(0, 120)
+            }))
+          }
         });
       } else {
         logger.info(`⚠️ NO OPPORTUNITIES FOUND - Market conditions not favorable`, { context: 'AITrading' });
