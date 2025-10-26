@@ -1183,29 +1183,9 @@ class AsterDexService {
     
     const requestPromise = (async () => {
       try {
-        // Call Aster DEX API directly instead of our own API route
-        const queryString = await this.buildSignedQuery({ timestamp: Date.now() - 1000 });
-        const url = `${this.baseUrl}/fapi/v1/positionRisk?${queryString}`;
-        
-        logger.debug('Fetching Aster positions directly', { context: 'AsterDex', data: { url: url.substring(0, 100) + '...' } });
-        
-        const response = await fetch(url, {
-          headers: {
-            'X-MBX-APIKEY': this.apiKey!,
-          },
-        });
-        
+        const response = await fetch(this.getApiUrl('/api/aster/positions'));
         if (!response.ok) {
-          const errorText = await response.text();
-          logger.error('Aster API positions fetch failed', undefined, {
-            context: 'AsterDex',
-            data: { 
-              status: response.status, 
-              error: errorText,
-              url: url.substring(0, 100) + '...'
-            },
-          });
-          throw new Error(`Aster API error: ${errorText}`);
+          throw new Error(`API returned ${response.status}`);
         }
         
         const data = await response.json();
