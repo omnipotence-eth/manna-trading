@@ -351,10 +351,26 @@ class AITradingService {
           // Close the position
           try {
             const closeSide = position.side === 'LONG' ? 'SELL' : 'BUY';
+            
+            // 🎯 FIX: Round close quantity to correct precision to avoid ReduceOnly rejection
+            let closeQuantity = Math.abs(position.size); // Ensure positive
+            const precisionInfo = await asterDexService.getSymbolPrecision(position.symbol);
+            if (precisionInfo) {
+              closeQuantity = asterDexService.roundQuantity(closeQuantity, precisionInfo.quantityPrecision);
+              logger.info(`🎯 Close quantity adjusted: ${position.size} → ${closeQuantity} (precision: ${precisionInfo.quantityPrecision})`, {
+                context: 'AITrading',
+                data: { 
+                  original: position.size, 
+                  rounded: closeQuantity, 
+                  precision: precisionInfo.quantityPrecision 
+                }
+              });
+            }
+            
             const closeOrder = await asterDexService.placeMarketOrder(
               position.symbol,
               closeSide,
-              position.size,
+              closeQuantity,
               leverage,
               true // reduceOnly
             );
