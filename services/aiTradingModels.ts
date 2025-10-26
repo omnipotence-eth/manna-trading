@@ -183,7 +183,7 @@ export class GodspeedModel implements AITradingModel {
       const oneMinAnalysis = await this.analyze1MinuteAction(symbol);
       
       // If 1-minute analysis finds a strong signal, use it immediately
-      if (oneMinAnalysis.confidence >= 0.65) {
+      if (oneMinAnalysis.confidence >= 0.65 && oneMinAnalysis.action !== 'NEUTRAL') {
         logger.info(`🎯 1-MINUTE SIGNAL TRIGGERED: ${symbol}`, {
           context: 'Godspeed',
           data: {
@@ -197,7 +197,7 @@ export class GodspeedModel implements AITradingModel {
 
         return {
           symbol,
-          action: oneMinAnalysis.action,
+          action: oneMinAnalysis.action as 'BUY' | 'SELL',
           confidence: oneMinAnalysis.confidence,
           size: 1.0,
           reasoning: `[${this.modelName}] ${oneMinAnalysis.reasoning}`
