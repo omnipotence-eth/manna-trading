@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch from database
     const result = await db.execute(
-      `SELECT * FROM model_messages ORDER BY timestamp DESC LIMIT ?`,
+      `SELECT * FROM model_messages ORDER BY timestamp DESC LIMIT $1`,
       [limit]
     );
 

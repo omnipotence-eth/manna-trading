@@ -211,24 +211,38 @@ class AITradingService {
         logger.info(`⚠️ NO OPPORTUNITIES FOUND - Market conditions not favorable`, { context: 'AITrading' });
       }
 
-      // Get current open positions to check which coins we're already trading
+      // ⚡ ONE POSITION AT A TIME STRATEGY ⚡
+      // Get current open positions - if we have any position open, DON'T open new ones
+      // This maximizes margin usage: 100% margin on ONE high-conviction trade
       const currentPositions = await asterDexService.getPositions();
-      const openSymbols = new Set(currentPositions.map(p => p.symbol));
       
-      // Filter out signals for coins we're already trading
-      const availableSignals = allSignals.filter(s => !openSymbols.has(s.symbol));
+      if (currentPositions.length > 0) {
+        logger.info(`🔒 POSITION MANAGEMENT: Already holding ${currentPositions.length} position(s). Monitoring for exit...`, {
+          context: 'AITrading',
+          data: {
+            openPositions: currentPositions.map(p => ({
+              symbol: p.symbol,
+              side: p.side,
+              pnl: p.unrealizedPnl.toFixed(2),
+              roe: ((p.unrealizedPnl / ((p.entryPrice * p.size) / (p.leverage || 20))) * 100).toFixed(2) + '%'
+            }))
+          }
+        });
+        
+        // Don't open new positions - let monitorPositions() handle exits
+        return { signals: allSignals, bestSignal: null };
+      }
       
-      logger.info(`🎯 Available opportunities (excluding ${openSymbols.size} open positions):`, {
+      logger.info(`✅ NO OPEN POSITIONS - Scanning for best entry opportunity...`, {
         context: 'AITrading',
         data: {
           totalOpportunities: allSignals.length,
-          alreadyTrading: openSymbols.size,
-          availableNow: availableSignals.length
+          strategy: 'ONE POSITION AT A TIME (100% MARGIN EACH)'
         }
       });
       
-      // HYPER-AGGRESSIVE: Select the BEST available trade (not already trading)
-      const bestSignal = this.selectMostProfitableSignal(availableSignals);
+      // HYPER-AGGRESSIVE: Select the BEST trade (we have no positions open)
+      const bestSignal = this.selectMostProfitableSignal(allSignals);
       
       if (bestSignal) {
         logger.trade(`🚀 HYPER-AGGRESSIVE BEST TRADE SELECTED: ${bestSignal.action} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence`, {
@@ -239,16 +253,17 @@ class AITradingService {
             size: bestSignal.size,
             confidence: bestSignal.confidence,
             reasoning: bestSignal.reasoning,
-            totalAnalyzed: availableSignals.length,
+            totalAnalyzed: allSignals.length,
             totalCoins: symbols.length,
-            currentPositions: openSymbols.size
+            currentPositions: 0,
+            marginUtilization: '100% (ONE POSITION STRATEGY)'
           }
         });
         
         // Execute the best available trade
         await this.executeTrade(bestSignal);
       } else {
-        logger.info(`😴 HYPER-AGGRESSIVE: No new profitable opportunities found among ${symbols.length} coins (${openSymbols.size} already trading)`, { context: 'AITrading' });
+        logger.info(`😴 HYPER-AGGRESSIVE: No new profitable opportunities found among ${symbols.length} coins`, { context: 'AITrading' });
       }
 
       return { signals: allSignals, bestSignal };
