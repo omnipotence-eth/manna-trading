@@ -130,7 +130,7 @@ export class GodspeedModel implements AITradingModel {
       }
 
       // 🔮 PREDICTIVE ANALYSIS: Calculate leading indicators
-      const leadingIndicators = await this.calculateLeadingIndicators(symbol, klines1m, klines5m, klines15m);
+      const leadingIndicators = await this.calculateLeadingIndicators(symbol, klines1m || [], klines5m || [], klines15m || []);
       
       // Determine predictive signal based on leading indicators
       const predictiveSignal = this.determinePredictiveSignal(leadingIndicators, analysis1m.trend, analysis5m.trend, analysis15m.trend);
