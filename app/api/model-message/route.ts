@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
-
-// In-memory storage for model messages (persists during server lifetime)
-let modelMessages: any[] = [];
+import { db } from '@/lib/db';
 
 /**
  * POST /api/model-message - Add a model message (from backend)
@@ -15,17 +13,16 @@ export async function POST(request: NextRequest) {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       model: payload.model || 'Godspeed',
       message: payload.message,
-      timestamp: Date.now(),
+      timestamp: new Date().toISOString(),
       type: payload.type || 'analysis',
     };
 
-    // Add to memory storage
-    modelMessages.unshift(message);
-    
-    // Keep only last 100 messages
-    if (modelMessages.length > 100) {
-      modelMessages = modelMessages.slice(0, 100);
-    }
+    // Save to database
+    await db.execute(
+      `INSERT INTO model_messages (id, model, message, timestamp, type) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [message.id, message.model, message.message, message.timestamp, message.type]
+    );
 
     logger.info(`💬 Model message added: ${message.model}`, {
       context: 'ModelMessageAPI',
@@ -57,10 +54,26 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 50;
 
+    // Fetch from database
+    const result = await db.execute(
+      `SELECT * FROM model_messages ORDER BY timestamp DESC LIMIT ?`,
+      [limit]
+    );
+
+    const messages = result.rows.map((row: any) => ({
+      id: row.id,
+      model: row.model,
+      message: row.message,
+      timestamp: new Date(row.timestamp).getTime(), // Convert back to timestamp for frontend
+      type: row.type,
+    }));
+
+    logger.debug(`📨 Fetched ${messages.length} model messages`, { context: 'ModelMessageAPI' });
+
     return NextResponse.json({
       success: true,
-      messages: modelMessages.slice(0, limit),
-      count: modelMessages.length,
+      messages,
+      count: messages.length,
     });
   } catch (error: any) {
     logger.error('Failed to get model messages', error, { context: 'ModelMessageAPI' });

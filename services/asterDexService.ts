@@ -820,9 +820,9 @@ class AsterDexService {
    * Get symbol precision info (quantity decimals, step size, etc.)
    * CACHED: 1 hour (exchange info rarely changes)
    */
-  async getSymbolPrecision(symbol: string): Promise<{ quantityPrecision: number; stepSize: string } | null> {
+  async getSymbolPrecision(symbol: string): Promise<{ quantityPrecision: number; stepSize: string; maxQty: number } | null> {
     const cacheKey = `symbolPrecision:${symbol}`;
-    const cached = apiCache.get(cacheKey) as { quantityPrecision: number; stepSize: string } | undefined;
+    const cached = apiCache.get(cacheKey) as { quantityPrecision: number; stepSize: string; maxQty: number } | undefined;
     if (cached) {
       return cached;
     }
@@ -842,26 +842,27 @@ class AsterDexService {
         return null;
       }
       
-      // Find the LOT_SIZE filter to get step size and precision
+      // Find the LOT_SIZE filter to get step size, precision, and max quantity
       const lotSizeFilter = symbolData.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
       const quantityPrecision = symbolData.quantityPrecision || 2; // Default to 2 decimals
       const stepSize = lotSizeFilter?.stepSize || '0.01'; // Default step size
+      const maxQty = lotSizeFilter?.maxQty ? parseFloat(lotSizeFilter.maxQty) : 1000000; // Default to high limit
       
-      const result = { quantityPrecision, stepSize };
+      const result = { quantityPrecision, stepSize, maxQty };
       
       // Cache for 1 hour (exchange info rarely changes)
       apiCache.set(cacheKey, result, 3600);
       
       logger.debug(`Symbol precision for ${symbol}`, { 
         context: 'AsterDex', 
-        data: { quantityPrecision, stepSize } 
+        data: { quantityPrecision, stepSize, maxQty } 
       });
       
       return result;
     } catch (error) {
       logger.error(`Failed to fetch symbol precision for ${symbol}`, error, { context: 'AsterDex' });
       // Return safe defaults
-      return { quantityPrecision: 2, stepSize: '0.01' };
+      return { quantityPrecision: 2, stepSize: '0.01', maxQty: 1000000 };
     }
   }
 
