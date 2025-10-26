@@ -396,8 +396,8 @@ class AITradingService {
         current: {
           priceChange24h: ticker.priceChangePercent || 0,
           volume24h: ticker.volume || 0,
-          avgVolume: ticker.avgVolume || ticker.volume || 0,
-          volumeRatio: ticker.avgVolume ? ticker.volume / ticker.avgVolume : 1
+          avgVolume: ticker.averageVolume || ticker.volume || 0,
+          volumeRatio: ticker.averageVolume ? ticker.volume / ticker.averageVolume : 1
         }
       };
 
