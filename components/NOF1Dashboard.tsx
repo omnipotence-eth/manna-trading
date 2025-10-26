@@ -8,6 +8,48 @@ import TradeJournal from './TradeJournal';
 import Positions from './Positions';
 import AIPerformanceChart from './AIPerformanceChart';
 
+// Chat Tab Component with reactive state
+function ChatTabContent() {
+  const modelMessages = useStore((state) => state.modelMessages);
+  
+  return (
+    <motion.div
+      key="chat"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}
+      className="flex-1 overflow-y-auto space-y-2 px-3 py-2"
+    >
+      {modelMessages.length === 0 ? (
+        <div className="text-center py-12 text-green-500/60">
+          <div className="text-3xl mb-2">🧠</div>
+          <div className="text-sm font-semibold">Godspeed is thinking...</div>
+          <div className="text-xs opacity-60 mt-1">Trading decisions will appear here</div>
+        </div>
+      ) : (
+        modelMessages.slice(0, 10).map((msg: any) => (
+          <div key={msg.id} className="p-3 border border-green-500/20 rounded bg-black/20">
+            <div className="flex items-center justify-between mb-2">
+              <span className={`text-xs px-2 py-0.5 rounded ${
+                msg.type === 'trade' ? 'bg-neon-blue/20 text-neon-blue' : 'bg-green-500/20 text-green-500'
+              }`}>
+                {msg.type === 'trade' ? '💼 TRADE' : '🔍 ANALYSIS'}
+              </span>
+              <span className="text-xs text-green-500/50">
+                {new Date(msg.timestamp).toLocaleTimeString()}
+              </span>
+            </div>
+            <div className="text-xs text-green-500 whitespace-pre-wrap leading-relaxed">
+              {msg.message}
+            </div>
+          </div>
+        ))
+      )}
+    </motion.div>
+  );
+}
+
 export default function NOF1Dashboard() {
   const [activeTab, setActiveTab] = useState<'trades' | 'chat' | 'positions' | 'readme'>('trades');
   const [timeRange, setTimeRange] = useState<'ALL' | '72H'>('ALL');
@@ -256,48 +298,64 @@ export default function NOF1Dashboard() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.2 }}
-                  className="flex-1 overflow-y-auto divide-y divide-green-500/20"
+                  className="flex-1 overflow-y-auto space-y-2 px-3 py-2"
                 >
-                  {/* Trade List Items - Compact */}
+                  {/* Trade List Items - Full Details */}
                   {trades.slice(-10).reverse().map((trade) => (
-                    <div key={trade.id} className="px-2 py-1 hover:bg-green-500/5 transition-colors">
-                      <div className="flex items-center justify-between gap-1 mb-0.5">
-                        <span className="text-neon-green text-xs font-bold truncate">
-                          Godspeed
-                        </span>
-                        <span className={`text-xs font-bold ${
-                          trade.side === 'LONG' ? 'text-green-500' : 'text-red-500'
-                        }`}>
-                          {trade.side}
-                        </span>
-                      </div>
-                      <div className="text-xs leading-tight">
-                        <div className="text-green-500/80 truncate">{trade.symbol}</div>
-                        <div className={`font-bold ${trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    <div key={trade.id} className="p-3 border border-green-500/20 rounded hover:border-green-500/40 transition-all bg-black/20">
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-500 font-bold text-sm">{trade.symbol}</span>
+                          <span className={`px-2 py-0.5 text-xs rounded font-semibold ${
+                            trade.side === 'LONG' ? 'bg-neon-green/20 text-neon-green' : 'bg-red-500/20 text-red-500'
+                          }`}>
+                            {trade.side}
+                          </span>
+                        </div>
+                        <div className={`text-sm font-bold ${trade.pnl >= 0 ? 'text-neon-green' : 'text-red-500'}`}>
                           {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
                         </div>
+                      </div>
+                      
+                      {/* Trade Details */}
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                        <div>
+                          <span className="text-green-500/60">Entry:</span>
+                          <span className="text-green-500 ml-1 font-semibold">${trade.entryPrice?.toFixed(2) || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-green-500/60">Exit:</span>
+                          <span className="text-green-500 ml-1 font-semibold">${trade.exitPrice?.toFixed(2) || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-green-500/60">Size:</span>
+                          <span className="text-green-500 ml-1 font-semibold">{trade.size?.toFixed(4) || 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-green-500/60">Leverage:</span>
+                          <span className="text-green-500 ml-1 font-semibold">{trade.leverage || 'N/A'}x</span>
+                        </div>
+                      </div>
+                      
+                      {/* Timestamp */}
+                      <div className="text-xs text-green-500/50 mt-2">
+                        {new Date(trade.timestamp).toLocaleString()}
                       </div>
                     </div>
                   ))}
                   {trades.length === 0 && (
-                    <div className="px-4 py-8 text-center text-green-500/60 text-sm">
-                      No completed trades yet
+                    <div className="text-center py-12 text-green-500/60">
+                      <div className="text-3xl mb-2">📊</div>
+                      <div className="text-sm font-semibold">No completed trades yet</div>
+                      <div className="text-xs opacity-60 mt-1">Godspeed will execute trades soon</div>
                     </div>
                   )}
                 </motion.div>
               )}
               
               {activeTab === 'chat' && (
-                <motion.div
-                  key="chat"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="flex-1 overflow-y-auto p-2"
-                >
-                  <ModelChat />
-                </motion.div>
+                <ChatTabContent />
               )}
               
               {activeTab === 'positions' && (

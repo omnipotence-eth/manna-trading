@@ -131,56 +131,24 @@ export async function GET(req: NextRequest) {
       let perpTotalValue = 0;
       let sourceField = '';
       
-      // Use availableBalance as the primary source (actual trading balance)
-      if (availableBalance > 0) {
-        perpTotalValue = availableBalance;
-        sourceField = 'availableBalance';
-      } else if (Math.abs(totalWalletBalance) > 0) {
-        perpTotalValue = Math.abs(totalWalletBalance);
-        sourceField = 'totalWalletBalance';
-      } else if (directBalance > 0) {
-        perpTotalValue = directBalance;
-        sourceField = 'directBalance';
-      } else if (responseBalance > 0) {
-        perpTotalValue = responseBalance;
-        sourceField = 'responseBalance';
-      } else if (finalBalance > 0) {
-        perpTotalValue = finalBalance;
-        sourceField = 'finalBalance';
-      } else if (accountBalance > 0) {
-        perpTotalValue = accountBalance;
-        sourceField = 'accountBalance';
-      } else if (apiAccountEquity > 0) {
-        perpTotalValue = apiAccountEquity;
-        sourceField = 'accountEquity';
-      } else if (apiTotalAccountValue > 0) {
-        perpTotalValue = apiTotalAccountValue;
-        sourceField = 'totalAccountValue';
-      } else if (apiTotalEquity > 0) {
-        perpTotalValue = apiTotalEquity;
-        sourceField = 'totalEquity';
-      } else if (apiTotalBalance > 0) {
-        perpTotalValue = apiTotalBalance;
-        sourceField = 'totalBalance';
-      } else if (apiNetBalance > 0) {
-        perpTotalValue = apiNetBalance;
-        sourceField = 'netBalance';
-      } else if (apiEquity > 0) {
-        perpTotalValue = apiEquity;
-        sourceField = 'equity';
-      } else {
-        // Fallback to calculation if no direct field found
-        logger.warn('💰 No direct balance field found, using calculation fallback', {
-          context: 'AsterAPI',
-          data: { 
-            availableBalance: availableBalance.toFixed(2),
-            totalPositionInitialMargin: totalPositionInitialMargin.toFixed(2),
-            totalUnrealizedProfit: totalUnrealizedProfit.toFixed(2)
-          }
-        });
-        perpTotalValue = availableBalance + totalPositionInitialMargin + totalUnrealizedProfit;
-        sourceField = 'calculated';
-      }
+      // CORRECT CALCULATION FOR ASTER DEX:
+      // Account value = available balance + margin locked in positions + unrealized PnL
+      // This matches what Aster DEX shows in their UI
+      const calculatedAccountValue = availableBalance + totalPositionInitialMargin + totalUnrealizedProfit;
+      
+      // Use the calculated value (this is what Aster DEX UI shows)
+      perpTotalValue = calculatedAccountValue;
+      sourceField = 'available + margin + unrealizedPnL';
+      
+      logger.info(`💰 Account value calculation:`, {
+        context: 'AsterAPI',
+        data: { 
+          availableBalance: availableBalance.toFixed(2),
+          positionMargin: totalPositionInitialMargin.toFixed(2),
+          unrealizedPnL: totalUnrealizedProfit.toFixed(2),
+          total: calculatedAccountValue.toFixed(2)
+        }
+      });
       
       if (sourceField !== 'calculated') {
         logger.info(`💰 Using ${sourceField} field from Aster API`, {

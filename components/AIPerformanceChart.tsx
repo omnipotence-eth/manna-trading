@@ -225,9 +225,9 @@ export default function AIPerformanceChart() {
         const interpolatedTimestamp = leftPoint.timestamp + ((rightPoint.timestamp - leftPoint.timestamp) * ratio);
         const lineY = getY(interpolatedValue);
         
-        // Only show tooltip if mouse is within 30px of the line
+        // Show tooltip if mouse is within 50px of the line (increased tolerance)
         const distanceFromLine = Math.abs(y - lineY);
-        if (distanceFromLine < 30) {
+        if (distanceFromLine < 50) {
           setHoveredPoint({
             x: x,
             y: lineY,
