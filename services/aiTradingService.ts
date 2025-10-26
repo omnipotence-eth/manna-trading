@@ -17,6 +17,7 @@ class AITradingService {
   private intervalId: NodeJS.Timeout | null = null
   private positionMonitorInterval: NodeJS.Timeout | null = null
   private entryDataMap: Map<string, any> = globalEntryDataMap; // Use global map for trade journal
+  private lastTradeTime: number = 0; // Track last trade time for cooling-off period
 
   constructor() {
     // Initialize Godspeed - our optimized trading strategy
@@ -46,17 +47,17 @@ class AITradingService {
     this.isRunning = true;
     logger.info('🚀 Starting GODSPEED trading service', { context: 'AITrading' });
 
-    // GODSPEED: Strategic trading frequency - balance between opportunity and quality
-    // 30 seconds = enough time for market movements to be meaningful
-    // Prevents overtrading and gives signals time to develop
+    // CONSERVATIVE: Longer trading frequency to prevent overtrading
+    // 2 minutes = enough time for market movements to be meaningful
+    // Prevents rapid-fire trading and reduces transaction costs
     this.intervalId = setInterval(() => {
       this.runTradingCycle();
-    }, 30000); // Every 30 seconds for balanced frequency
+    }, 120000); // Every 2 minutes for conservative frequency
 
     // 🔥 CRITICAL: Start high-frequency position monitoring
     this.startPositionMonitoring();
 
-    logger.info('✅ GODSPEED ACTIVE [Cycle: 30s, Min Confidence: 50% (AGGRESSIVE), Leverage: MAX (20x-50x per coin), Margin: 100%, Risk/Reward: 1:3, Strong Momentum Boost: ON] 🚀', { context: 'AITrading' });
+    logger.info('✅ CONSERVATIVE MODE ACTIVE [Cycle: 2min, Min Confidence: 65% (CONSERVATIVE), Leverage: MAX (20x-50x per coin), Margin: 25%, Risk/Reward: 1:2, Cooling-off: 5min] 🛡️', { context: 'AITrading' });
   }
 
   async stop() {
@@ -306,11 +307,29 @@ class AITradingService {
         }
       });
       
-      // HYPER-AGGRESSIVE: Select the BEST trade (we have no positions open)
+      // CONSERVATIVE: Check cooling-off period before selecting trades
+      const COOLING_OFF_PERIOD = 5 * 60 * 1000; // 5 minutes between trades
+      const timeSinceLastTrade = Date.now() - this.lastTradeTime;
+      
+      if (timeSinceLastTrade < COOLING_OFF_PERIOD) {
+        logger.info(`⏰ COOLING-OFF PERIOD: ${Math.round((COOLING_OFF_PERIOD - timeSinceLastTrade) / 1000)}s remaining before next trade`, {
+          context: 'AITrading',
+          data: {
+            timeSinceLastTrade: Math.round(timeSinceLastTrade / 1000),
+            coolingOffPeriod: Math.round(COOLING_OFF_PERIOD / 1000),
+            remaining: Math.round((COOLING_OFF_PERIOD - timeSinceLastTrade) / 1000)
+          }
+        });
+        return { signals: allSignals, bestSignal: null };
+      }
+      
+      // CONSERVATIVE: Select the BEST trade (we have no positions open)
       const bestSignal = this.selectMostProfitableSignal(allSignals);
       
       if (bestSignal) {
-        logger.trade(`🚀 HYPER-AGGRESSIVE BEST TRADE SELECTED: ${bestSignal.action} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence`, {
+        // Update last trade time
+        this.lastTradeTime = Date.now();
+        logger.trade(`🚀 CONSERVATIVE BEST TRADE SELECTED: ${bestSignal.action} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence`, {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
@@ -321,7 +340,7 @@ class AITradingService {
             totalAnalyzed: allSignals.length,
             totalCoins: symbols.length,
             currentPositions: 0,
-            marginUtilization: '100% (ONE POSITION STRATEGY)'
+            marginUtilization: '25% (CONSERVATIVE STRATEGY)'
           }
         });
 
@@ -331,12 +350,12 @@ class AITradingService {
         // Execute the best available trade
         await this.executeTrade(bestSignal);
       } else {
-        logger.info(`😴 HYPER-AGGRESSIVE: No new profitable opportunities found among ${symbols.length} coins`, { context: 'AITrading' });
+        logger.info(`😴 CONSERVATIVE: No new profitable opportunities found among ${symbols.length} coins`, { context: 'AITrading' });
       }
 
       return { signals: allSignals, bestSignal };
     } catch (error) {
-      logger.error('HYPER-AGGRESSIVE trading cycle failed', error, { context: 'AITrading' });
+      logger.error('CONSERVATIVE trading cycle failed', error, { context: 'AITrading' });
       return { signals: [], bestSignal: null };
     }
   }
@@ -392,15 +411,16 @@ class AITradingService {
           // Calculate P&L as percentage of margin used
           const marginPnlPercent = (position.unrealizedPnl / marginUsed) * 100;
           
-          // Stop-loss at -1% of margin (CONSERVATIVE)
-          if (marginPnlPercent <= -1.0) {
+          // CONSERVATIVE RISK MANAGEMENT: Wider stop-loss/take-profit to prevent rapid losses
+          // Stop-loss at -3% of margin (more room for normal volatility)
+          if (marginPnlPercent <= -3.0) {
             shouldClose = true;
-            reason = `🛑 STOP-LOSS: Margin down ${marginPnlPercent.toFixed(2)}% (threshold: -1.0%)`;
+            reason = `🛑 STOP-LOSS: Margin down ${marginPnlPercent.toFixed(2)}% (threshold: -3.0%)`;
           }
-          // Take-profit at +1% of margin (CONSERVATIVE)
-          else if (marginPnlPercent >= 1.0) {
+          // Take-profit at +6% of margin (better risk/reward ratio)
+          else if (marginPnlPercent >= 6.0) {
             shouldClose = true;
-            reason = `💰 TAKE-PROFIT: Margin up ${marginPnlPercent.toFixed(2)}% (threshold: +1.0%)`;
+            reason = `💰 TAKE-PROFIT: Margin up ${marginPnlPercent.toFixed(2)}% (threshold: +6.0%)`;
           }
         
         if (shouldClose) {
@@ -628,23 +648,22 @@ class AITradingService {
       }
     });
     
-      // 🎯 HYPER-AGGRESSIVE TRADING: Take ANY trade with 48%+ confidence
-      // With excellent trend analysis, volume spike detection, and strong risk management (2% stop-loss)
-      // We can be aggressive and let our risk management protect us
-      if (bestSignal.confidence >= 0.48) {
-        bestSignal.size = 1.0; // 100% of available margin - HYPER-AGGRESSIVE MODE
-        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence [HYPER-AGGRESSIVE]`, {
+      // 🎯 CONSERVATIVE TRADING: Only take HIGH-CONFIDENCE trades with 65%+ confidence
+      // This reduces the number of losing trades and focuses on quality opportunities
+      if (bestSignal.confidence >= 0.65) {
+        bestSignal.size = 0.25; // 25% of available margin - CONSERVATIVE MODE
+        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence [CONSERVATIVE]`, {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
             action: bestSignal.action,
             confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
             reasoning: bestSignal.reasoning,
-            mode: 'HYPER-AGGRESSIVE (48%+ threshold)'
+            mode: 'CONSERVATIVE (65%+ threshold, 25% margin)'
           }
         });
         
-        logger.info(`🎯 GODSPEED SELECTED #1: ${bestSignal.symbol} ${bestSignal.action} @ ${(bestSignal.confidence * 100).toFixed(1)}% [FULL MARGIN: 100%]`, {
+        logger.info(`🎯 CONSERVATIVE SELECTED #1: ${bestSignal.symbol} ${bestSignal.action} @ ${(bestSignal.confidence * 100).toFixed(1)}% [CONSERVATIVE: 25%]`, {
           context: 'AITrading',
           data: {
             winner: {
@@ -654,7 +673,7 @@ class AITradingService {
               reasoning: bestSignal.reasoning
             },
             totalOpportunities: signals.length,
-            positionSize: '100% (MAXIMUM)',
+            positionSize: '25% (CONSERVATIVE)',
             leverage: 'MAX (20x-50x per coin)',
             runnerUps: sortedSignals.slice(1, 4).map(s => ({ 
               symbol: s.symbol, 
@@ -668,12 +687,12 @@ class AITradingService {
         return bestSignal; // 🔥 CRITICAL FIX: Return the approved signal!
       } else {
         // Reject very low confidence trades
-        logger.info(`⏭️ SKIPPING - Need 48%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
+        logger.info(`⏭️ SKIPPING - Need 65%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
             confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-            threshold: '48%',
+            threshold: '65%',
             reasoning: bestSignal.reasoning
           }
         });
@@ -711,20 +730,20 @@ class AITradingService {
         return;
       }
       
-      // 🚀 GODSPEED MAXIMUM POWER: USE 100% OF AVAILABLE MARGIN EVERY TRADE
-      // No partial allocations - go ALL IN with max leverage on every opportunity
-      const allocationPercent = 1.0; // 100% - ALWAYS USE ALL AVAILABLE MARGIN
+      // CONSERVATIVE POSITION SIZING: Use only 25% of available margin to limit risk
+      // This prevents catastrophic losses from single trades
+      const allocationPercent = 0.25; // 25% - CONSERVATIVE POSITION SIZING
       
       // FUTURES TRADING CALCULATION:
       // availableBalance = margin available for new positions
       // positionValue = margin × leverage = total position size in USDT
       // quantity = positionValue / currentPrice = amount of base asset to buy
       
-      // 🛡️ CONSERVATIVE SAFETY BUFFER: Use 90% of available margin to account for:
+      // 🛡️ CONSERVATIVE SAFETY BUFFER: Use 95% of allocated margin to account for:
       // - Trading fees (~0.04% maker/taker)
       // - Price slippage during execution
       // - Exchange liquidation buffer requirements
-      const SAFETY_MARGIN_PERCENT = 0.90; // 90% of available margin for better utilization
+      const SAFETY_MARGIN_PERCENT = 0.95; // 95% of allocated margin for safety
       const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 90% of available margin
       const positionValue = marginToUse * maxLeverage; // Position size = margin × leverage
       let quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
@@ -818,14 +837,14 @@ class AITradingService {
       // Calculate margin efficiency
       const marginEfficiency = (positionValue / availableBalance) * 100;
       
-      logger.trade(`🚀 GODSPEED EXECUTING: ${signal.action} ${signal.symbol}
-💯 MARGIN: $${marginToUse.toFixed(2)} (98% of $${availableBalance.toFixed(2)} available - 2% safety buffer)
+      logger.trade(`🛡️ CONSERVATIVE EXECUTING: ${signal.action} ${signal.symbol}
+💯 MARGIN: $${marginToUse.toFixed(2)} (25% of $${availableBalance.toFixed(2)} available - conservative sizing)
 ⚡ LEVERAGE: ${maxLeverage}x (MAXIMUM for ${signal.symbol})
 💰 POSITION VALUE: $${positionValue.toFixed(2)} (${marginEfficiency.toFixed(0)}x leverage multiplier)
 🎯 CONFIDENCE: ${(signal.confidence * 100).toFixed(0)}%
 📦 QUANTITY: ${quantity} @ $${currentPrice.toFixed(2)}
 📊 CALCULATION: ${marginToUse.toFixed(2)} margin × ${maxLeverage}x leverage ÷ ${currentPrice.toFixed(2)} price = ${quantity} quantity
-🛡️ SAFETY BUFFER: 2% reserved for fees & slippage`, {
+🛡️ CONSERVATIVE: 25% margin usage, 5min cooling-off`, {
         context: 'AITrading',
         data: {
           symbol: signal.symbol,
