@@ -349,21 +349,16 @@ class AITradingService {
           let shouldClose = false;
           let reason = '';
           
-          // BALANCED RISK MANAGEMENT: 1:1 risk/reward for 24/7 trading
-          // Stop-loss at -2% ROE (balanced risk control)
-          if (roePnlPercent <= -2.0) {
+          // POSITION-BASED RISK MANAGEMENT: Simple 2% stop-loss/take-profit
+          // Stop-loss at -2% position (price movement)
+          if (pricePnlPercent <= -2.0) {
             shouldClose = true;
-            reason = `🛑 STOP-LOSS: ROE down ${roePnlPercent.toFixed(2)}% (threshold: -2.0%)`;
+            reason = `🛑 STOP-LOSS: Position down ${pricePnlPercent.toFixed(2)}% (threshold: -2.0%)`;
           }
-          // Take-profit at +2% ROE (quick profits for active trading)
-          else if (roePnlPercent >= 2.0) {
+          // Take-profit at +2% position (price movement)
+          else if (pricePnlPercent >= 2.0) {
             shouldClose = true;
-            reason = `💰 TAKE-PROFIT: ROE up ${roePnlPercent.toFixed(2)}% (threshold: +2.0%)`;
-          }
-          // Trailing stop for strong winners: If ROE > 3%, use tighter stop at +1.5%
-          else if (roePnlPercent >= 1.5 && position.unrealizedPnl > (marginUsed * 0.03)) {
-            shouldClose = true;
-            reason = `📈 TRAILING STOP: Securing profits at ROE ${roePnlPercent.toFixed(2)}% (was above +3%, trailing at +1.5%)`;
+            reason = `💰 TAKE-PROFIT: Position up ${pricePnlPercent.toFixed(2)}% (threshold: +2.0%)`;
           }
         
         if (shouldClose) {
