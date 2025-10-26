@@ -21,17 +21,30 @@ interface ModelPerformance {
 
 export default function AIPerformanceChart() {
   const [timeRange, setTimeRange] = useState<'ALL' | '72H'>('ALL');
-  const [displayMode, setDisplayMode] = useState<'$' | '%'>('$');
+  // Load display mode from localStorage, default to '$'
+  const [displayMode, setDisplayMode] = useState<'$' | '%'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('chartDisplayMode') as '$' | '%') || '$';
+    }
+    return '$';
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [hoveredPoint, setHoveredPoint] = useState<{x: number, y: number, value: number, timestamp: number} | null>(null);
   const accountValue = useStore((state) => state.accountValue);
   const trades = useStore((state) => state.trades);
 
+  // Persist display mode to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('chartDisplayMode', displayMode);
+    }
+  }, [displayMode]);
+
   // AI model performance data - will be populated with real trade data
   const [modelsPerformance, setModelsPerformance] = useState<ModelPerformance[]>([
     {
       name: 'Godspeed',
-      color: '#00ff88', // Softer, more pleasant green
+      color: '#00ff41', // Consistent neon green from theme
       data: [],
       currentValue: 0,
       change: 0,

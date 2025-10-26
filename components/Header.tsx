@@ -48,13 +48,16 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
           </nav>
 
           <div className="flex items-center gap-4">
-            <motion.button
-              className="px-6 py-2 border border-neon-blue text-neon-blue hover:bg-neon-blue/10 transition-all"
+            <motion.a
+              href="https://twitter.com/omnipotence_ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-6 py-2 border border-neon-blue text-neon-blue hover:bg-neon-blue/10 transition-all cursor-pointer"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              JOIN WAITLIST
-            </motion.button>
+              FOLLOW US
+            </motion.a>
           </div>
         </div>
       </div>
