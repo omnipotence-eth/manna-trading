@@ -107,13 +107,13 @@ class AITradingService {
           // ⚡ SPEED: Fetch ticker data only (includes current price)
           const tickerData = await asterDexService.getTicker(symbol);
           
-          if (!tickerData || !tickerData.currentPrice || tickerData.currentPrice === 0) {
+          if (!tickerData || !tickerData.price || tickerData.price === 0) {
             skippedCount++;
             logger.debug(`⏭️ Skipping ${symbol} - no ticker/price data`, { context: 'AITrading' });
             continue;
           }
           
-          const currentPrice = tickerData.currentPrice;
+          const currentPrice = tickerData.price;
           
           // ⚡ SPEED OPTIMIZATION: Use 24h data only to avoid slow klines API
           // The rapid movement boost logic in the model will still work with 24h data
