@@ -331,7 +331,35 @@ class AITradingService {
 
             // 💾 SAVE COMPLETED TRADE TO DATABASE
             if (closeOrder) {
+              // Get fresh account data to get the REAL P&L from exchange
+              const accountInfo = await asterDexService.getAccountInfo();
               const currentPrice = await asterDexService.getPrice(position.symbol);
+              
+              // Calculate ACTUAL P&L from entry/exit prices
+              // For SHORT: profit when price goes DOWN (entry - exit)
+              // For LONG: profit when price goes UP (exit - entry)
+              const priceDiff = position.side === 'SHORT' 
+                ? (position.entryPrice - currentPrice) // SHORT profits when price drops
+                : (currentPrice - position.entryPrice); // LONG profits when price rises
+              
+              const actualPnl = priceDiff * position.size;
+              const margin = (position.entryPrice * position.size) / (position.leverage || leverage);
+              const actualRoePnlPercent = margin > 0 ? (actualPnl / margin) * 100 : 0;
+              
+              logger.info(`💰 CALCULATED P&L: Price ${position.side === 'SHORT' ? 'dropped' : 'rose'} by $${Math.abs(priceDiff).toFixed(4)} × ${position.size.toFixed(2)} = $${actualPnl.toFixed(2)} (${actualRoePnlPercent.toFixed(2)}% ROE)`, {
+                context: 'AITrading',
+                data: { 
+                  symbol: position.symbol,
+                  side: position.side,
+                  entryPrice: position.entryPrice,
+                  exitPrice: currentPrice,
+                  priceDiff,
+                  size: position.size,
+                  actualPnl,
+                  positionUnrealizedPnl: position.unrealizedPnl
+                }
+              });
+              
               const completedTrade = {
                 id: `trade-close-${closeOrder.orderId}-${Date.now()}`,
                 symbol: position.symbol,
@@ -341,7 +369,7 @@ class AITradingService {
                 size: position.size,
                 timestamp: new Date().toISOString(),
                 leverage: position.leverage || leverage,
-                pnl: position.unrealizedPnl,
+                pnl: actualPnl, // Use calculated P&L instead of position.unrealizedPnl
                 status: 'completed' as const,
                 orderId: closeOrder.orderId,
                 model: 'Godspeed',
@@ -357,20 +385,23 @@ class AITradingService {
                 });
                 
                 if (response.ok) {
-                  logger.info(`💾 Completed trade saved to database: ${position.symbol} | P&L: $${position.unrealizedPnl.toFixed(2)}`, { context: 'AITrading' });
+                  logger.info(`💾 Completed trade saved to database: ${position.symbol} | P&L: $${actualPnl.toFixed(2)}`, { context: 'AITrading' });
+                } else {
+                  const errorText = await response.text();
+                  logger.error(`Failed to save trade: ${errorText}`, null, { context: 'AITrading' });
                 }
               } catch (error) {
                 logger.error(`Failed to save completed trade`, error, { context: 'AITrading' });
               }
 
-              // 🧠 SEND CLOSE MESSAGE TO FRONTEND
+              // 🧠 SEND CLOSE MESSAGE TO TRADES TAB (not chat - this is trade data)
               try {
                 const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
-                const pnlColor = position.unrealizedPnl >= 0 ? '💚' : '❤️';
+                const pnlColor = actualPnl >= 0 ? '💚' : '❤️';
                 const messagePayload = {
                   model: 'Godspeed',
                   type: 'trade',
-                  message: `${pnlColor} CLOSED ${position.symbol} ${position.side}\n💰 P&L: ${position.unrealizedPnl >= 0 ? '+' : ''}$${position.unrealizedPnl.toFixed(2)} (${roePnlPercent >= 0 ? '+' : ''}${roePnlPercent.toFixed(2)}% ROE)\n\n🚨 REASON:\n${reason}\n\n📊 Entry: $${position.entryPrice.toFixed(2)} → Exit: $${currentPrice.toFixed(2)}`,
+                  message: `${pnlColor} CLOSED ${position.symbol} ${position.side}\n💰 P&L: ${actualPnl >= 0 ? '+' : ''}$${actualPnl.toFixed(2)} (${actualRoePnlPercent >= 0 ? '+' : ''}${actualRoePnlPercent.toFixed(2)}% ROE)\n\n🚨 REASON:\n${reason}\n\n📊 Entry: $${position.entryPrice.toFixed(2)} → Exit: $${currentPrice.toFixed(2)}`,
                 };
 
                 await fetch(`${baseUrl}/api/model-message`, {
