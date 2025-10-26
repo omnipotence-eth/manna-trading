@@ -121,7 +121,7 @@ export default function NOF1Dashboard() {
 
     // Start data updates every 250ms for ultra real-time updates
     updateData();
-    const dataIntervalId = setInterval(updateData, 250); // 4x per second
+    const dataIntervalId = setInterval(updateData, 1000); // 1x per second (reduced from 250ms)
 
     // 🤖 GODSPEED AUTO-TRADING: Trigger trading cycle every 60 seconds
     // This ensures 24/7 trading even if Vercel cron fails
