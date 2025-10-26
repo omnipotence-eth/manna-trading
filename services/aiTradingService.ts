@@ -66,20 +66,20 @@ class AITradingService {
 
   /**
    * 🔥 HIGH-FREQUENCY POSITION MONITORING
-   * Monitors positions every 5 seconds for stop-loss/take-profit execution
+   * Monitors positions every 10 seconds for stop-loss/take-profit execution
    * This ensures positions are closed quickly when they hit risk levels
    */
   private startPositionMonitoring(): void {
-    // Monitor positions every 5 seconds (much faster than trading cycle)
+    // Monitor positions every 10 seconds (much faster than trading cycle)
     this.positionMonitorInterval = setInterval(async () => {
       try {
         await this.monitorPositions();
       } catch (error) {
         logger.error('Position monitoring error', error, { context: 'AITrading' });
       }
-    }, 5000); // Every 5 seconds
+    }, 10000); // Every 10 seconds (optimized for speed)
 
-    logger.info('🔥 High-frequency position monitoring started (5s intervals)', { 
+    logger.info('🔥 High-frequency position monitoring started (10s intervals)', { 
       context: 'AITrading' 
     });
   }
@@ -97,15 +97,20 @@ class AITradingService {
     const signals: TradingSignal[] = [];
     
     try {
-      // First, monitor existing positions for stop-loss/take-profit
-      await this.monitorPositions();
+      // ⚡ SPEED OPTIMIZATION: Skip position monitoring if no positions exist
+      const currentPositions = await asterDexService.getPositions();
+      if (currentPositions.length > 0) {
+        await this.monitorPositions();
+      } else {
+        logger.debug(`⚡ No positions to monitor, skipping position monitoring for speed`, { context: 'AITrading' });
+      }
 
       // Get all available trading pairs from Aster DEX
       const allSymbols = await asterDexService.getAllTradingPairs();
       
-      // ⚡ PERFORMANCE OPTIMIZATION: Analyze top 50 by 24h volume to avoid serverless timeout
-      // This ensures we scan the most liquid/active markets first
-      const symbols = allSymbols.slice(0, 50);
+      // ⚡ ULTRA-FAST OPTIMIZATION: Analyze top 20 by 24h volume for sub-30s execution
+      // This ensures we scan the most liquid/active markets in minimal time
+      const symbols = allSymbols.slice(0, 20);
       
       logger.info(`📊 GODSPEED FAST SCAN: Analyzing top ${symbols.length} of ${allSymbols.length} pairs by volume`, { 
         context: 'AITrading',
@@ -117,77 +122,96 @@ class AITradingService {
       });
 
       // GODSPEED: Analyze top coins to find the single best opportunity
-      const allSignals: TradingSignal[] = [];
       let analyzedCount = 0;
       let skippedCount = 0;
       
       // Track execution time to avoid serverless timeout
       const startTime = Date.now();
-      const MAX_EXECUTION_TIME = 4.5 * 60 * 1000; // 4.5 minutes (leave 30s buffer)
+      const MAX_EXECUTION_TIME = 25 * 1000; // 25 seconds (ultra-fast for Vercel)
       
-      // Analyze each symbol to find the absolute best trade
-      for (const symbol of symbols) {
+      // ⚡ PARALLEL PROCESSING: Analyze symbols in batches for maximum speed
+      const BATCH_SIZE = 5; // Process 5 symbols at once
+      const allSignals: TradingSignal[] = [];
+      let analyzedCount = 0;
+      let skippedCount = 0;
+      
+      // Process symbols in parallel batches
+      for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
         // Check if we're approaching timeout
         if (Date.now() - startTime > MAX_EXECUTION_TIME) {
           logger.warn(`⚠️ Approaching timeout, stopping analysis at ${analyzedCount} coins`, { context: 'AITrading' });
           break;
         }
-        try {
-          // ⚡ SPEED: Fetch ticker data only (includes current price)
-          const tickerData = await asterDexService.getTicker(symbol);
-          
-          if (!tickerData || !tickerData.price || tickerData.price === 0) {
-            skippedCount++;
-            logger.debug(`⏭️ Skipping ${symbol} - no ticker/price data`, { context: 'AITrading' });
-            continue;
-          }
-          
-          const currentPrice = tickerData.price;
-          
-          // ⚡ SPEED OPTIMIZATION: Use 24h data only to avoid slow klines API
-          // The rapid movement boost logic in the model will still work with 24h data
-          const recentPriceChange = tickerData.priceChangePercent;
-          
-          const marketData: MarketData = {
-            currentPrice: currentPrice,
-            previousPrice: tickerData?.previousPrice || currentPrice,
-            movingAverage: tickerData?.movingAverage || currentPrice,
-            volume: tickerData?.volume || 0,
-            averageVolume: tickerData?.averageVolume || 0,
-            priceChange: recentPriceChange, // ✅ SHORT-TERM MOMENTUM (5min)
-            priceChange24h: tickerData.priceChangePercent, // 24h change for comparison
-            highPrice: tickerData?.highPrice || currentPrice,
-            lowPrice: tickerData?.lowPrice || currentPrice,
-            openPrice: tickerData?.openPrice || currentPrice,
-            trades: tickerData?.trades || 0,
-            quoteVolume: tickerData?.quoteVolume || 0,
-          };
-
-          analyzedCount++;
-
-          // Analyze this symbol with Godspeed
-          const signal = await this.model.analyze(symbol, marketData);
-          
-          // Only consider actionable signals (not HOLD)
-          if (signal.action !== 'HOLD') {
-            allSignals.push(signal);
+        
+        const batch = symbols.slice(i, i + BATCH_SIZE);
+        
+        // Process batch in parallel
+        const batchPromises = batch.map(async (symbol) => {
+          try {
+            // ⚡ SPEED: Fetch ticker data only (includes current price)
+            const tickerData = await asterDexService.getTicker(symbol);
             
-            logger.info(`🔍 Godspeed found opportunity [${symbol}]: ${signal.action} @ ${(signal.confidence * 100).toFixed(1)}% confidence`, {
-              context: 'AITrading',
-              data: { 
-                symbol,
-                action: signal.action, 
-                confidence: signal.confidence,
-                priceChange: marketData.priceChange,
-                volume: marketData.volume,
-                reasoning: signal.reasoning.substring(0, 100) + '...'
-              },
-            });
+            if (!tickerData || !tickerData.price || tickerData.price === 0) {
+              return { symbol, skipped: true, reason: 'no ticker/price data' };
+            }
+            
+            const currentPrice = tickerData.price;
+            
+            // ⚡ SPEED OPTIMIZATION: Use 24h data only to avoid slow klines API
+            const recentPriceChange = tickerData.priceChangePercent;
+            
+            const marketData: MarketData = {
+              currentPrice: currentPrice,
+              previousPrice: tickerData?.previousPrice || currentPrice,
+              movingAverage: tickerData?.movingAverage || currentPrice,
+              volume: tickerData?.volume || 0,
+              averageVolume: tickerData?.averageVolume || 0,
+              priceChange: recentPriceChange,
+              priceChange24h: tickerData.priceChangePercent,
+              highPrice: tickerData?.highPrice || currentPrice,
+              lowPrice: tickerData?.lowPrice || currentPrice,
+              openPrice: tickerData?.openPrice || currentPrice,
+              trades: tickerData?.trades || 0,
+              quoteVolume: tickerData?.quoteVolume || 0,
+            };
+
+            // Analyze this symbol with Godspeed
+            const signal = await this.model.analyze(symbol, marketData);
+            
+            return { symbol, signal, marketData };
+          } catch (error) {
+            return { symbol, skipped: true, reason: error.message };
           }
-        } catch (error) {
-          skippedCount++;
-          logger.warn(`Failed to analyze ${symbol}: ${error}`, { context: 'AITrading' });
-          continue;
+        });
+        
+        // Wait for batch to complete
+        const batchResults = await Promise.all(batchPromises);
+        
+        // Process results
+        for (const result of batchResults) {
+          if (result.skipped) {
+            skippedCount++;
+            logger.debug(`⏭️ Skipping ${result.symbol} - ${result.reason}`, { context: 'AITrading' });
+          } else {
+            analyzedCount++;
+            
+            // Only consider actionable signals (not HOLD)
+            if (result.signal.action !== 'HOLD') {
+              allSignals.push(result.signal);
+              
+              logger.info(`🔍 Godspeed found opportunity [${result.symbol}]: ${result.signal.action} @ ${(result.signal.confidence * 100).toFixed(1)}% confidence`, {
+                context: 'AITrading',
+                data: { 
+                  symbol: result.symbol,
+                  action: result.signal.action, 
+                  confidence: result.signal.confidence,
+                  priceChange: result.marketData.priceChange,
+                  volume: result.marketData.volume,
+                  reasoning: result.signal.reasoning.substring(0, 100) + '...'
+                },
+              });
+            }
+          }
         }
       }
       
