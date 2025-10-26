@@ -88,15 +88,14 @@ export default function ModelChat() {
                       {msg.type === 'trade' ? '💼' : msg.type === 'analysis' ? '🔍' : '💭'}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
-                        <span className="text-xs font-bold text-neon-blue">{msg.model}</span>
-                        <span className="text-xs text-green-500/50">
+                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                        <span className="text-xs text-green-500/60">
                           {new Date(msg.timestamp).toLocaleTimeString()}
                         </span>
                       </div>
-                             <div className="text-xs text-green-500 whitespace-pre-wrap break-words leading-snug max-w-full overflow-hidden word-break">
-                               {msg.message}
-                             </div>
+                      <div className="text-xs text-green-500 whitespace-pre-wrap break-words leading-relaxed max-w-full overflow-hidden">
+                        {msg.message}
+                      </div>
                     </div>
                   </div>
                 </motion.div>

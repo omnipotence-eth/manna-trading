@@ -186,7 +186,7 @@ export default function TradeJournal() {
             <div className="text-6xl mb-4">📊</div>
             <div className="text-green-500/40 text-xl mb-2 font-bold">No Trades Yet</div>
             <div className="text-green-500/60 text-sm max-w-md mx-auto">
-              DeepSeek R1 is analyzing markets and will execute trades when high-confidence opportunities emerge. 
+              Godspeed is analyzing markets and will execute trades when high-confidence opportunities emerge. 
               All trades will be logged here with detailed entry/exit analysis.
             </div>
             <div className="mt-6 p-4 bg-neon-blue/5 border border-neon-blue/30 rounded-lg text-left max-w-md mx-auto">
@@ -219,16 +219,15 @@ export default function TradeJournal() {
                     {entry.side === 'LONG' ? '▲' : '▼'}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-neon-blue font-bold text-lg">{entry.model}</span>
-                      <span className="text-green-500 font-bold text-lg">{entry.symbol}</span>
-                      <span className={`px-2 py-1 text-xs rounded ${
+                    <div className="flex items-center gap-3">
+                      <span className="text-green-500 font-bold text-xl">{entry.symbol}</span>
+                      <span className={`px-3 py-1 text-xs rounded font-semibold ${
                         entry.side === 'LONG' ? 'bg-neon-green/20 text-neon-green' : 'bg-red-500/20 text-red-500'
                       }`}>
                         {entry.side}
                       </span>
                     </div>
-                    <div className="text-xs text-green-500/60 mt-1">
+                    <div className="text-xs text-green-500/60 mt-1.5">
                       {new Date(entry.timestamp).toLocaleString()} • Duration: {entry.duration}m
                     </div>
                   </div>
