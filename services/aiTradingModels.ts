@@ -394,7 +394,7 @@ export class GodspeedModel implements AITradingModel {
 
       // Calculate technical indicators
       const rsi = this.calculateRSI(priceChange, volatility);
-      const trendAnalysis = this.getTrendStrength(currentPrice, movingAverage, priceChange);
+      const longTermTrend = this.getTrendStrength(currentPrice, movingAverage, priceChange);
       
       let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
       let confidence = 0;
@@ -410,7 +410,6 @@ export class GodspeedModel implements AITradingModel {
 
       // 📊 TREND BOOST: If short-term trends align, boost the signal
       let trendBoost = 0;
-      const chartTrendAnalysis = trendAnalysis; // Rename to avoid confusion with getTrendStrength
 
       // ===== PROFITABLE STRATEGY: MULTI-FACTOR CONFIRMATION =====
       
@@ -425,9 +424,9 @@ export class GodspeedModel implements AITradingModel {
       const hasVeryHighVolume = volumeRatio > 2.0; // AGGRESSIVE: 100% above average (was 2.5x)
       
       // 3. TREND CONFIRMATION (AGGRESSIVE - Accept weaker trends)
-      const isStrongTrend = trendAnalysis.strength > 0.6; // AGGRESSIVE: Accept slightly weaker trends (was 0.7)
-      const isBullish = trendAnalysis.trend === 'BULL' || trendAnalysis.trend === 'STRONG_BULL';
-      const isBearish = trendAnalysis.trend === 'BEAR' || trendAnalysis.trend === 'STRONG_BEAR';
+      const isStrongTrend = longTermTrend.strength > 0.6; // AGGRESSIVE: Accept slightly weaker trends (was 0.7)
+      const isBullish = longTermTrend.trend === 'BULL' || longTermTrend.trend === 'STRONG_BULL';
+      const isBearish = longTermTrend.trend === 'BEAR' || longTermTrend.trend === 'STRONG_BEAR';
       
       // 4. VOLATILITY FILTER (AGGRESSIVE - Be more tolerant of volatility)
       const isLowVolatility = volatility < 3;
@@ -444,7 +443,7 @@ export class GodspeedModel implements AITradingModel {
         signalScore += isStrongTrend ? 15 : 0; // Trend strength
         signalScore += Math.abs(priceChange) * 2; // Price momentum
         confidence = Math.min(signalScore / 100, 0.95);
-        reasoning = `🚀 STRONG BUY: Bullish trend (${trendAnalysis.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, +${priceChange.toFixed(2)}%`;
+        reasoning = `🚀 STRONG BUY: Bullish trend (${longTermTrend.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, +${priceChange.toFixed(2)}%`;
       } 
       else if (isBearish && hasHighVolume && isBearishMomentum && !isHighVolatility) {
         action = 'SELL';
@@ -453,7 +452,7 @@ export class GodspeedModel implements AITradingModel {
         signalScore += isStrongTrend ? 15 : 0; // Trend strength
         signalScore += Math.abs(priceChange) * 2; // Price momentum
         confidence = Math.min(signalScore / 100, 0.95);
-        reasoning = `📉 STRONG SELL: Bearish trend (${trendAnalysis.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, ${priceChange.toFixed(2)}%`;
+        reasoning = `📉 STRONG SELL: Bearish trend (${longTermTrend.trend}), RSI ${rsi.toFixed(0)}, Volume ${volumeRatio.toFixed(1)}x, ${priceChange.toFixed(2)}%`;
       }
       
       // STRATEGY 2: Mean Reversion (Oversold/Overbought Bounce)
@@ -513,7 +512,7 @@ export class GodspeedModel implements AITradingModel {
       else {
         action = 'HOLD';
         confidence = 0.2;
-        reasoning = `⏸️ HOLD: Mixed signals - RSI ${rsi.toFixed(0)}, Trend ${trendAnalysis.trend}, Vol ${volumeRatio.toFixed(1)}x, ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
+        reasoning = `⏸️ HOLD: Mixed signals - RSI ${rsi.toFixed(0)}, Trend ${longTermTrend.trend}, Vol ${volumeRatio.toFixed(1)}x, ${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
       }
 
       // RISK FILTER: AGGRESSIVE - Lower rejection threshold
@@ -546,14 +545,14 @@ export class GodspeedModel implements AITradingModel {
       }
 
       // 📈 CHART TREND BOOST: Apply boost if multi-timeframe trends align with our signal
-      if (action === 'BUY' && (chartTrendAnalysis.trendAlignment === 'BULLISH')) {
-        trendBoost = chartTrendAnalysis.confidence * 0.12; // Up to 12% boost
+      if (action === 'BUY' && (trendAnalysis.trendAlignment === 'BULLISH')) {
+        trendBoost = trendAnalysis.confidence * 0.12; // Up to 12% boost
         confidence = Math.min(confidence + trendBoost, 0.95);
-        reasoning += ` [📈 Trend aligned: ${chartTrendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
-      } else if (action === 'SELL' && (chartTrendAnalysis.trendAlignment === 'BEARISH')) {
-        trendBoost = chartTrendAnalysis.confidence * 0.12; // Up to 12% boost
+        reasoning += ` [📈 Trend aligned: ${trendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
+      } else if (action === 'SELL' && (trendAnalysis.trendAlignment === 'BEARISH')) {
+        trendBoost = trendAnalysis.confidence * 0.12; // Up to 12% boost
         confidence = Math.min(confidence + trendBoost, 0.95);
-        reasoning += ` [📉 Trend aligned: ${chartTrendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
+        reasoning += ` [📉 Trend aligned: ${trendAnalysis.trendAlignment} +${(trendBoost * 100).toFixed(1)}%]`;
       }
 
       const signal: TradingSignal = {
@@ -570,8 +569,8 @@ export class GodspeedModel implements AITradingModel {
           action, 
           confidence: (confidence * 100).toFixed(1) + '%', 
           rsi: rsi.toFixed(0), 
-          trend: trendAnalysis.trend, 
-          chartTrends: `1m:${chartTrendAnalysis.trend1m} 5m:${chartTrendAnalysis.trend5m} 15m:${chartTrendAnalysis.trend15m}`,
+          longTermTrend: longTermTrend.trend, 
+          chartTrends: `1m:${trendAnalysis.trend1m} 5m:${trendAnalysis.trend5m} 15m:${trendAnalysis.trend15m}`,
           reasoning 
         }
       });
