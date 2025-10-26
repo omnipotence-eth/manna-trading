@@ -178,7 +178,7 @@ class AITradingService {
             
             return { symbol, signal, marketData };
           } catch (error) {
-            return { symbol, skipped: true, reason: error.message };
+            return { symbol, skipped: true, reason: error instanceof Error ? error.message : String(error) };
           }
         });
         
