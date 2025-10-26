@@ -17,6 +17,7 @@ export default function NOF1Dashboard() {
   const setAccountValue = useStore((state) => state.setAccountValue);
   const updatePosition = useStore((state) => state.updatePosition);
   const addTrade = useStore((state) => state.addTrade);
+  const addModelMessage = useStore((state) => state.addModelMessage);
   const initRef = useRef(false);
 
   useEffect(() => {
@@ -56,6 +57,18 @@ export default function NOF1Dashboard() {
             });
           }
         }
+
+        // Fetch model messages (chat)
+        const messagesResponse = await fetch('/api/model-message?limit=50');
+        if (messagesResponse.ok) {
+          const messagesData = await messagesResponse.json();
+          if (isMounted && messagesData.success && messagesData.messages) {
+            // Add messages to store (newest first)
+            messagesData.messages.forEach((message: any) => {
+              addModelMessage(message);
+            });
+          }
+        }
       } catch (error) {
         console.error('Error fetching data:', error);
       }
@@ -68,7 +81,7 @@ export default function NOF1Dashboard() {
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [setAccountValue, updatePosition, addTrade]);
+  }, [setAccountValue, updatePosition, addTrade, addModelMessage]);
 
   // Calculate real PnL and account metrics
   const totalPnL = positions.reduce((sum, pos) => sum + (pos.pnl || 0), 0);

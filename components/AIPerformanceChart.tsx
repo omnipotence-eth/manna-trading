@@ -83,11 +83,30 @@ export default function AIPerformanceChart() {
       });
     });
     
-    // Add current point if last trade is old
-    const lastTradeTime = points[points.length - 1].timestamp;
-    if (now - lastTradeTime > 60000) { // If last trade was >1 minute ago
-      points.push({ timestamp: now, value: currentAccountValue });
+    // ALWAYS add current point to show real-time account value changes
+    // This ensures the chart updates live as open positions gain/lose value
+    const lastTradeTime = points[points.length - 1]?.timestamp || now;
+    
+    // Add intermediate points every minute between last trade and now for smooth line
+    const timeSinceLastTrade = now - lastTradeTime;
+    if (timeSinceLastTrade > 60000) {
+      // Add points every minute to show the progression
+      const minutesSinceLastTrade = Math.floor(timeSinceLastTrade / 60000);
+      const valueChange = currentAccountValue - runningBalance;
+      
+      // Add up to 10 intermediate points for smooth progression
+      const numIntermediatePoints = Math.min(minutesSinceLastTrade, 10);
+      for (let i = 1; i <= numIntermediatePoints; i++) {
+        const ratio = i / (numIntermediatePoints + 1);
+        points.push({
+          timestamp: lastTradeTime + (timeSinceLastTrade * ratio),
+          value: runningBalance + (valueChange * ratio)
+        });
+      }
     }
+    
+    // Always add the most recent point with current account value
+    points.push({ timestamp: now, value: currentAccountValue });
     
     return points;
   }

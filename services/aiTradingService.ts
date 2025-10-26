@@ -316,7 +316,7 @@ class AITradingService {
           // Close the position
           try {
             const closeSide = position.side === 'LONG' ? 'SELL' : 'BUY';
-            await asterDexService.placeMarketOrder(
+            const closeOrder = await asterDexService.placeMarketOrder(
               position.symbol,
               closeSide,
               position.size,
@@ -328,6 +328,60 @@ class AITradingService {
               context: 'AITrading',
               data: { symbol: position.symbol, side: position.side, reason }
             });
+
+            // 💾 SAVE COMPLETED TRADE TO DATABASE
+            if (closeOrder) {
+              const currentPrice = await asterDexService.getPrice(position.symbol);
+              const completedTrade = {
+                id: `trade-close-${closeOrder.orderId}-${Date.now()}`,
+                symbol: position.symbol,
+                side: position.side === 'LONG' ? 'BUY' : 'SELL', // Original side
+                entryPrice: position.entryPrice,
+                exitPrice: currentPrice,
+                size: position.size,
+                timestamp: new Date().toISOString(),
+                leverage: position.leverage || leverage,
+                pnl: position.unrealizedPnl,
+                status: 'completed' as const,
+                orderId: closeOrder.orderId,
+                model: 'Godspeed',
+                exitReason: reason,
+              };
+
+              try {
+                const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+                const response = await fetch(`${baseUrl}/api/trades`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(completedTrade),
+                });
+                
+                if (response.ok) {
+                  logger.info(`💾 Completed trade saved to database: ${position.symbol} | P&L: $${position.unrealizedPnl.toFixed(2)}`, { context: 'AITrading' });
+                }
+              } catch (error) {
+                logger.error(`Failed to save completed trade`, error, { context: 'AITrading' });
+              }
+
+              // 🧠 SEND CLOSE MESSAGE TO FRONTEND
+              try {
+                const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+                const pnlColor = position.unrealizedPnl >= 0 ? '💚' : '❤️';
+                const messagePayload = {
+                  model: 'Godspeed',
+                  type: 'trade',
+                  message: `${pnlColor} CLOSED ${position.symbol} ${position.side}\n💰 P&L: ${position.unrealizedPnl >= 0 ? '+' : ''}$${position.unrealizedPnl.toFixed(2)} (${roePnlPercent >= 0 ? '+' : ''}${roePnlPercent.toFixed(2)}% ROE)\n\n🚨 REASON:\n${reason}\n\n📊 Entry: $${position.entryPrice.toFixed(2)} → Exit: $${currentPrice.toFixed(2)}`,
+                };
+
+                await fetch(`${baseUrl}/api/model-message`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(messagePayload),
+                });
+              } catch (error) {
+                logger.error(`Failed to send close message`, error, { context: 'AITrading' });
+              }
+            }
           } catch (error) {
             logger.error(`Failed to close position ${position.symbol}`, error, { context: 'AITrading' });
           }
@@ -561,6 +615,59 @@ class AITradingService {
               mode: '100% MARGIN + MAX LEVERAGE'
             }
           });
+
+          // 🎯 SAVE TRADE ENTRY TO DATABASE (for trade journal and tracking)
+          const tradeRecord = {
+            id: `trade-${order.orderId}-${Date.now()}`,
+            symbol: signal.symbol,
+            side: signal.action,
+            entryPrice: currentPrice,
+            size: quantity,
+            timestamp: new Date().toISOString(),
+            leverage: maxLeverage,
+            pnl: 0, // Will be updated when position closes
+            status: 'open' as const,
+            orderId: order.orderId,
+            model: 'Godspeed',
+            confidence: signal.confidence,
+            reasoning: signal.reasoning,
+          };
+
+          // Save to database via API
+          try {
+            const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+            const response = await fetch(`${baseUrl}/api/trades`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(tradeRecord),
+            });
+            
+            if (response.ok) {
+              logger.info(`💾 Trade entry saved to database: ${signal.symbol}`, { context: 'AITrading' });
+            } else {
+              logger.warn(`⚠️ Failed to save trade entry to database`, { context: 'AITrading' });
+            }
+          } catch (error) {
+            logger.error(`Failed to save trade entry`, error, { context: 'AITrading' });
+          }
+
+          // 🧠 SEND TRADE DECISION TO FRONTEND (Model Chat)
+          try {
+            const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+            const messagePayload = {
+              model: 'Godspeed',
+              type: 'trade',
+              message: `🚀 ${signal.action} ${signal.symbol}\n💰 ${maxLeverage}x Leverage | $${positionValue.toFixed(2)} Position\n🎯 Confidence: ${(signal.confidence * 100).toFixed(0)}%\n\n📊 REASONING:\n${signal.reasoning}\n\n📈 Entry: $${currentPrice.toFixed(2)} | Qty: ${quantity.toFixed(4)}\n💼 Margin Used: $${marginToUse.toFixed(2)} (100%)`,
+            };
+
+            await fetch(`${baseUrl}/api/model-message`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(messagePayload),
+            });
+          } catch (error) {
+            logger.error(`Failed to send model message`, error, { context: 'AITrading' });
+          }
       } else {
         logger.error(`❌ Failed to execute trade: ${signal.action} ${signal.symbol}`, { context: 'AITrading' });
       }
