@@ -1,25 +1,49 @@
 /**
  * Database connection and schema for Neon/Supabase PostgreSQL
- * Stores trade history permanently
+ * Stores trade history permanently with optimized connection pooling
  */
 
 import { Pool } from 'pg';
 import { logger } from './logger';
+import { dbConfig } from './configService';
+import { circuitBreakers } from './circuitBreaker';
+import { PerformanceMonitor } from './performanceMonitor';
 
-// Create database connection pool
+// Create optimized database connection pool for Neon PostgreSQL
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  connectionString: dbConfig.connectionString,
+  ssl: dbConfig.ssl ? { 
+    rejectUnauthorized: false
+  } : false,
+  max: dbConfig.maxConnections, // Maximum number of clients in the pool
+  idleTimeoutMillis: dbConfig.idleTimeout, // Close idle clients after 30 seconds
+  connectionTimeoutMillis: dbConfig.connectionTimeout, // Return an error after 10 seconds if connection could not be established
+  allowExitOnIdle: true, // Allow the pool to close all connections and exit
+  // Additional Neon-specific options
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 0,
 });
 
-// Helper function to execute SQL queries
+// Enhanced SQL execution with circuit breaker protection and performance monitoring
 async function sql(query: string, params: any[] = []) {
-  const client = await pool.connect();
+  const timer = PerformanceMonitor.startTimer('database:query');
+  
   try {
-    const result = await client.query(query, params);
-    return { rows: result.rows, rowCount: result.rowCount };
+    return await circuitBreakers.database.execute(async () => {
+      const client = await pool.connect();
+      try {
+        const result = await client.query(query, params);
+        PerformanceMonitor.recordCounter('database:query:success');
+        return { rows: result.rows, rowCount: result.rowCount };
+      } finally {
+        client.release();
+      }
+    });
+  } catch (error) {
+    PerformanceMonitor.recordCounter('database:query:error');
+    throw error;
   } finally {
-    client.release();
+    timer.end();
   }
 }
 

@@ -3,6 +3,10 @@ import { logger } from '@/lib/logger';
 import { asterDexService } from './asterDexService';
 import { GodspeedModel } from './aiTradingModels';
 import { AITradingModel } from '@/types/trading';
+import { asterConfig } from '@/lib/configService';
+import { PerformanceMonitor } from '@/lib/performanceMonitor';
+import { circuitBreakers } from '@/lib/circuitBreaker';
+import { AppError, ErrorType } from '@/lib/errorHandler';
 
 // Global entry data map for trade journal
 const globalEntryDataMap = new Map<string, any>();
@@ -20,7 +24,7 @@ class AITradingService {
   constructor() {
     // Initialize Godspeed - our optimized trading strategy
     this.model = new GodspeedModel();
-    logger.info('✅ Godspeed AI trading model initialized', { context: 'AITrading' });
+    logger.info('Godspeed AI trading model initialized', { context: 'AITrading' });
   }
 
   async start() {
@@ -30,19 +34,25 @@ class AITradingService {
     }
 
     this.isRunning = true;
-    logger.info('🚀 Starting GODSPEED trading service', { context: 'AITrading' });
+    logger.info('Starting Godspeed trading service', { context: 'AITrading' });
 
-    // GODSPEED: Strategic trading frequency - balance between opportunity and quality
-    // 30 seconds = enough time for market movements to be meaningful
-    // Prevents overtrading and gives signals time to develop
+    // Strategic trading frequency - balance between opportunity and quality
     this.intervalId = setInterval(() => {
       this.runTradingCycle();
-    }, 30000); // Every 30 seconds for balanced frequency
+    }, asterConfig.monitoring.tradingCycleInterval);
 
-    // 🔥 CRITICAL: Start high-frequency position monitoring
+    // Start high-frequency position monitoring
     this.startPositionMonitoring();
 
-    logger.info('✅ GODSPEED ACTIVE [Cycle: 30s, Min Confidence: 50% (AGGRESSIVE), Leverage: MAX (20x-50x per coin), Margin: 100%, Risk/Reward: 1:3, Strong Momentum Boost: ON] 🚀', { context: 'AITrading' });
+    logger.info('Godspeed active', { 
+      context: 'AITrading',
+      data: {
+        cycleInterval: asterConfig.monitoring.tradingCycleInterval,
+        confidenceThreshold: asterConfig.trading.confidenceThreshold,
+        stopLoss: asterConfig.trading.stopLossPercent,
+        takeProfit: asterConfig.trading.takeProfitPercent
+      }
+    });
   }
 
   async stop() {
@@ -65,22 +75,21 @@ class AITradingService {
   }
 
   /**
-   * 🔥 HIGH-FREQUENCY POSITION MONITORING
-   * Monitors positions every 10 seconds for stop-loss/take-profit execution
-   * This ensures positions are closed quickly when they hit risk levels
+   * High-frequency position monitoring
+   * Monitors positions for stop-loss/take-profit execution
    */
   private startPositionMonitoring(): void {
-    // Monitor positions every 10 seconds (much faster than trading cycle)
     this.positionMonitorInterval = setInterval(async () => {
       try {
         await this.monitorPositions();
       } catch (error) {
         logger.error('Position monitoring error', error, { context: 'AITrading' });
       }
-    }, 10000); // Every 10 seconds (optimized for speed)
+    }, asterConfig.monitoring.positionCheckInterval);
 
-    logger.info('🔥 High-frequency position monitoring started (10s intervals)', { 
-      context: 'AITrading' 
+    logger.info('Position monitoring started', { 
+      context: 'AITrading',
+      data: { interval: asterConfig.monitoring.positionCheckInterval }
     });
   }
 
@@ -94,59 +103,50 @@ class AITradingService {
   }
 
   private async runTradingCycle(): Promise<{ signals: TradingSignal[], bestSignal: TradingSignal | null }> {
+    const timer = PerformanceMonitor.startTimer('trading:cycle:duration');
     const signals: TradingSignal[] = [];
     
     try {
-      // ⚡ SPEED OPTIMIZATION: Skip position monitoring if no positions exist
+      // Skip position monitoring if no positions exist
       const existingPositions = await asterDexService.getPositions();
       if (existingPositions.length > 0) {
         await this.monitorPositions();
-      } else {
-        logger.debug(`⚡ No positions to monitor, skipping position monitoring for speed`, { context: 'AITrading' });
       }
 
-      // Get all available trading pairs from Aster DEX
+      // Get trading pairs and analyze top symbols by volume
       const allSymbols = await asterDexService.getAllTradingPairs();
+      const symbols = allSymbols.slice(0, asterConfig.trading.maxSymbolsPerCycle);
       
-      // ⚡ ULTRA-FAST OPTIMIZATION: Analyze top 20 by 24h volume for sub-30s execution
-      // This ensures we scan the most liquid/active markets in minimal time
-      const symbols = allSymbols.slice(0, 20);
-      
-      logger.info(`📊 GODSPEED FAST SCAN: Analyzing top ${symbols.length} of ${allSymbols.length} pairs by volume`, { 
+      logger.info('Trading cycle started', { 
         context: 'AITrading',
         data: { 
-          totalAvailable: allSymbols.length,
-          analyzing: symbols.length,
-          sample: symbols.slice(0, 10)
+          totalSymbols: allSymbols.length,
+          analyzing: symbols.length
         }
       });
 
-      // GODSPEED: Analyze top coins to find the single best opportunity
+      // Analyze symbols in parallel batches for maximum speed
       let analyzedCount = 0;
       let skippedCount = 0;
-      
-      // Track execution time to avoid serverless timeout
       const startTime = Date.now();
-      const MAX_EXECUTION_TIME = 25 * 1000; // 25 seconds (ultra-fast for Vercel)
-      
-      // ⚡ PARALLEL PROCESSING: Analyze symbols in batches for maximum speed
-      const BATCH_SIZE = 5; // Process 5 symbols at once
       const allSignals: TradingSignal[] = [];
       
       // Process symbols in parallel batches
-      for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-        // Check if we're approaching timeout
-        if (Date.now() - startTime > MAX_EXECUTION_TIME) {
-          logger.warn(`⚠️ Approaching timeout, stopping analysis at ${analyzedCount} coins`, { context: 'AITrading' });
+      for (let i = 0; i < symbols.length; i += asterConfig.trading.batchSize) {
+        // Check execution time limit
+        if (Date.now() - startTime > asterConfig.trading.maxExecutionTime) {
+          logger.warn('Approaching timeout, stopping analysis', { 
+            context: 'AITrading',
+            data: { analyzedCount, maxTime: asterConfig.trading.maxExecutionTime }
+          });
           break;
         }
         
-        const batch = symbols.slice(i, i + BATCH_SIZE);
+        const batch = symbols.slice(i, i + asterConfig.trading.batchSize);
         
         // Process batch in parallel
         const batchPromises = batch.map(async (symbol) => {
           try {
-            // ⚡ SPEED: Fetch ticker data only (includes current price)
             const tickerData = await asterDexService.getTicker(symbol);
             
             if (!tickerData || !tickerData.price || tickerData.price === 0) {
@@ -154,8 +154,6 @@ class AITradingService {
             }
             
             const currentPrice = tickerData.price;
-            
-            // ⚡ SPEED OPTIMIZATION: Use 24h data only to avoid slow klines API
             const recentPriceChange = tickerData.priceChangePercent;
             
             const marketData: MarketData = {
@@ -173,9 +171,7 @@ class AITradingService {
               quoteVolume: tickerData?.quoteVolume || 0,
             };
 
-            // Analyze this symbol with Godspeed
             const signal = await this.model.analyze(symbol, marketData);
-            
             return { symbol, signal, marketData };
           } catch (error) {
             return { symbol, skipped: true, reason: error instanceof Error ? error.message : String(error) };
@@ -189,7 +185,6 @@ class AITradingService {
         for (const result of batchResults) {
           if (result.skipped) {
             skippedCount++;
-            logger.debug(`⏭️ Skipping ${result.symbol} - ${result.reason}`, { context: 'AITrading' });
           } else {
             analyzedCount++;
             
@@ -197,38 +192,37 @@ class AITradingService {
             if (result.signal && result.signal.action !== 'HOLD') {
               allSignals.push(result.signal);
               
-              logger.info(`🔍 Godspeed found opportunity [${result.symbol}]: ${result.signal.action} @ ${(result.signal.confidence * 100).toFixed(1)}% confidence`, {
-                context: 'AITrading',
-                data: { 
-                  symbol: result.symbol,
-                  action: result.signal.action, 
-                  confidence: result.signal.confidence,
-                  priceChange: result.marketData.priceChange,
-                  volume: result.marketData.volume,
-                  reasoning: result.signal.reasoning.substring(0, 100) + '...'
-                },
-              });
+              // Only log high-confidence signals to reduce verbosity
+              if (result.signal.confidence >= asterConfig.trading.confidenceThreshold) {
+                logger.info('High-confidence signal found', {
+                  context: 'AITrading',
+                  data: { 
+                    symbol: result.symbol,
+                    action: result.signal.action, 
+                    confidence: result.signal.confidence
+                  }
+                });
+              }
             }
           }
         }
       }
       
-      logger.info(`📊 GODSPEED Analysis Complete: Analyzed ${analyzedCount} coins, Skipped ${skippedCount}, Found ${allSignals.length} opportunities`, {
+      logger.info('Analysis complete', {
         context: 'AITrading',
         data: {
-          totalSymbols: symbols.length,
           analyzed: analyzedCount,
           skipped: skippedCount,
           opportunities: allSignals.length
         }
       });
       
-      // 🧠 SEND SCANNING STATUS TO CHAT (so user can see Godspeed is working)
+      // Send scanning status to chat
       try {
         const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
         const scanMessage = allSignals.length > 0
-          ? `🔍 SCAN COMPLETE\n📊 Analyzed ${analyzedCount} coins\n💡 Found ${allSignals.length} opportunities\n\n🎯 Best Signal: ${allSignals.sort((a, b) => b.confidence - a.confidence)[0].symbol} @ ${(allSignals.sort((a, b) => b.confidence - a.confidence)[0].confidence * 100).toFixed(1)}%`
-          : `🔍 SCAN COMPLETE\n📊 Analyzed ${analyzedCount} coins\n⚠️ No high-probability opportunities found\n💤 Market conditions not favorable`;
+          ? `Scan Complete\nAnalyzed ${analyzedCount} coins\nFound ${allSignals.length} opportunities\n\nBest Signal: ${allSignals.sort((a, b) => b.confidence - a.confidence)[0].symbol} @ ${(allSignals.sort((a, b) => b.confidence - a.confidence)[0].confidence * 100).toFixed(1)}%`
+          : `Scan Complete\nAnalyzed ${analyzedCount} coins\nNo high-probability opportunities found`;
         
         await fetch(`${baseUrl}/api/model-message`, {
           method: 'POST',
@@ -240,86 +234,55 @@ class AITradingService {
           }),
         });
       } catch (error) {
-        logger.error(`Failed to send scan status`, error, { context: 'AITrading' });
-      }
-      
-      // 📊 DETAILED LOGGING: Show ALL opportunities found with confidence levels
-      if (allSignals.length > 0) {
-        const sortedByConfidence = [...allSignals].sort((a, b) => b.confidence - a.confidence);
-        logger.info(`🔍 TOP 10 OPPORTUNITIES FOUND (sorted by confidence):`, {
-          context: 'AITrading',
-          data: {
-            opportunities: sortedByConfidence.slice(0, 10).map(s => ({
-              symbol: s.symbol,
-              action: s.action,
-              confidence: `${(s.confidence * 100).toFixed(1)}%`,
-              tradeable: s.confidence >= 0.48 ? '✅ YES' : '❌ NO (too low)',
-              reasoning: s.reasoning.substring(0, 120)
-            }))
-          }
-        });
-      } else {
-        logger.info(`⚠️ NO OPPORTUNITIES FOUND - Market conditions not favorable`, { context: 'AITrading' });
+        logger.error('Failed to send scan status', error, { context: 'AITrading' });
       }
 
-      // ⚡ ONE POSITION AT A TIME STRATEGY ⚡
-      // Get current open positions - if we have any position open, DON'T open new ones
-      // This maximizes margin usage: 100% margin on ONE high-conviction trade
+      // One position at a time strategy
       const openPositions = await asterDexService.getPositions();
       
       if (openPositions.length > 0) {
-        logger.info(`🔒 POSITION MANAGEMENT: Already holding ${openPositions.length} position(s). Monitoring for exit...`, {
+        logger.info('Position management active', {
           context: 'AITrading',
           data: {
-            openPositions: openPositions.map(p => ({
-              symbol: p.symbol,
-              side: p.side,
-              pnl: p.unrealizedPnl.toFixed(2),
-              roe: ((p.unrealizedPnl / ((p.entryPrice * p.size) / (p.leverage || 20))) * 100).toFixed(2) + '%'
-            }))
+            openPositions: openPositions.length,
+            strategy: 'ONE_POSITION_AT_A_TIME'
           }
         });
         
-        // Don't open new positions - let monitorPositions() handle exits
         return { signals: allSignals, bestSignal: null };
       }
       
-      logger.info(`✅ NO OPEN POSITIONS - Scanning for best entry opportunity...`, {
-        context: 'AITrading',
-        data: {
-          totalOpportunities: allSignals.length,
-          strategy: 'ONE POSITION AT A TIME (100% MARGIN EACH)'
-        }
-      });
-      
-      // HYPER-AGGRESSIVE: Select the BEST trade (we have no positions open)
+      // Select best trade opportunity
       const bestSignal = this.selectMostProfitableSignal(allSignals);
       
       if (bestSignal) {
-        logger.trade(`🚀 HYPER-AGGRESSIVE BEST TRADE SELECTED: ${bestSignal.action} ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence`, {
+        logger.info('Best trade selected', {
           context: 'AITrading',
           data: {
             symbol: bestSignal.symbol,
             action: bestSignal.action,
-            size: bestSignal.size,
             confidence: bestSignal.confidence,
-            reasoning: bestSignal.reasoning,
-            totalAnalyzed: allSignals.length,
-            totalCoins: symbols.length,
-            currentPositions: 0,
-            marginUtilization: '100% (ONE POSITION STRATEGY)'
+            totalOpportunities: allSignals.length
           }
         });
         
-        // Execute the best available trade
         await this.executeTrade(bestSignal);
       } else {
-        logger.info(`😴 HYPER-AGGRESSIVE: No new profitable opportunities found among ${symbols.length} coins`, { context: 'AITrading' });
+        logger.info('No profitable opportunities found', { 
+          context: 'AITrading',
+          data: { totalAnalyzed: symbols.length }
+        });
       }
 
+      const duration = timer.end();
+      PerformanceMonitor.recordCounter('trading:cycle:completed');
+      PerformanceMonitor.recordGauge('trading:cycle:signals_found', allSignals.length);
+      
       return { signals: allSignals, bestSignal };
     } catch (error) {
-      logger.error('HYPER-AGGRESSIVE trading cycle failed', error, { context: 'AITrading' });
+      timer.end();
+      PerformanceMonitor.recordCounter('trading:cycle:error');
+      logger.error('Trading cycle failed', error, { context: 'AITrading' });
       return { signals: [], bestSignal: null };
     }
   }
@@ -329,13 +292,12 @@ class AITradingService {
       const positions = await asterDexService.getPositions();
       
       if (positions.length === 0) {
-        logger.debug('📊 No positions to monitor', { context: 'AITrading' });
         return;
       }
 
-      logger.info(`📊 Monitoring ${positions.length} positions for stop-loss/take-profit`, { 
+      logger.debug('Monitoring positions', { 
         context: 'AITrading',
-        data: { positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
+        data: { count: positions.length }
       });
 
       for (const position of positions) {
@@ -356,38 +318,25 @@ class AITradingService {
           pricePnlPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
         }
         
-        logger.info(`🔍 Position Analysis: ${position.symbol} ${position.side}`, {
-          context: 'AITrading',
-          data: {
-            entryPrice,
-            currentPrice,
-            leverage,
-            roePnlPercent,
-            pricePnlPercent,
-            unrealizedPnl: position.unrealizedPnl
-          }
-        });
+        let shouldClose = false;
+        let reason = '';
         
-          let shouldClose = false;
-          let reason = '';
-          
-          // MARGIN-BASED RISK MANAGEMENT: 1% stop-loss/take-profit of margin (CONSERVATIVE)
-          // Calculate P&L as percentage of margin used
-          const marginPnlPercent = (position.unrealizedPnl / marginUsed) * 100;
-          
-          // Stop-loss at -1% of margin (CONSERVATIVE)
-          if (marginPnlPercent <= -1.0) {
-            shouldClose = true;
-            reason = `🛑 STOP-LOSS: Margin down ${marginPnlPercent.toFixed(2)}% (threshold: -1.0%)`;
-          }
-          // Take-profit at +1% of margin (CONSERVATIVE)
-          else if (marginPnlPercent >= 1.0) {
-            shouldClose = true;
-            reason = `💰 TAKE-PROFIT: Margin up ${marginPnlPercent.toFixed(2)}% (threshold: +1.0%)`;
-          }
+        // Margin-based risk management
+        const marginPnlPercent = (position.unrealizedPnl / marginUsed) * 100;
+        
+        // Stop-loss at configured threshold
+        if (marginPnlPercent <= -asterConfig.trading.stopLossPercent) {
+          shouldClose = true;
+          reason = `Stop-loss: Margin down ${marginPnlPercent.toFixed(2)}% (threshold: -${asterConfig.trading.stopLossPercent}%)`;
+        }
+        // Take-profit at configured threshold
+        else if (marginPnlPercent >= asterConfig.trading.takeProfitPercent) {
+          shouldClose = true;
+          reason = `Take-profit: Margin up ${marginPnlPercent.toFixed(2)}% (threshold: +${asterConfig.trading.takeProfitPercent}%)`;
+        }
         
         if (shouldClose) {
-          logger.trade(`🚨 CLOSING POSITION: ${position.symbol} ${position.side} - ${reason}`, {
+          logger.info('Closing position', {
             context: 'AITrading',
             data: {
               symbol: position.symbol,
@@ -399,33 +348,25 @@ class AITradingService {
           
           // Close the position
           try {
-            // 🔍 TIER 3: Double-check position still exists on exchange before closing
-            const freshPositions = await asterDexService.getPositions(true); // Bust cache for freshest data
+            // Double-check position still exists on exchange before closing
+            const freshPositions = await asterDexService.getPositions(true);
             const positionStillExists = freshPositions.some(p => p.symbol === position.symbol && p.side === position.side);
             
             if (!positionStillExists) {
-              logger.warn(`⚠️ Position ${position.symbol} ${position.side} already closed on exchange. Skipping close order.`, {
+              logger.warn('Position already closed on exchange', {
                 context: 'AITrading',
                 data: { symbol: position.symbol, side: position.side }
               });
-              return; // Exit early - position already closed
+              return;
             }
             
             const closeSide = position.side === 'LONG' ? 'SELL' : 'BUY';
             
-            // 🎯 FIX: Round close quantity to correct precision to avoid ReduceOnly rejection
-            let closeQuantity = Math.abs(position.size); // Ensure positive
+            // Round close quantity to correct precision
+            let closeQuantity = Math.abs(position.size);
             const precisionInfo = await asterDexService.getSymbolPrecision(position.symbol);
             if (precisionInfo) {
               closeQuantity = asterDexService.roundQuantity(closeQuantity, precisionInfo.quantityPrecision);
-              logger.info(`🎯 Close quantity adjusted: ${position.size} → ${closeQuantity} (precision: ${precisionInfo.quantityPrecision})`, {
-                context: 'AITrading',
-                data: { 
-                  original: position.size, 
-                  rounded: closeQuantity, 
-                  precision: precisionInfo.quantityPrecision 
-                }
-              });
             }
             
             const closeOrder = await asterDexService.placeMarketOrder(
@@ -436,7 +377,7 @@ class AITradingService {
               true // reduceOnly
             );
             
-            logger.trade(`✅ Position closed: ${position.symbol} ${position.side}`, {
+            logger.info('Position closed', {
               context: 'AITrading',
               data: { symbol: position.symbol, side: position.side, reason }
             });
@@ -568,100 +509,57 @@ class AITradingService {
 
   private selectMostProfitableSignal(signals: TradingSignal[]): TradingSignal | null {
     if (signals.length === 0) {
-      logger.info(`❌ No trading opportunities found - all coins returned HOLD signals`, { context: 'AITrading' });
+      logger.info('No trading opportunities found', { context: 'AITrading' });
       return null;
     }
 
-    // GODSPEED MAXIMUM POWER: Select best trade with 100% margin utilization
-    // Sort by confidence (highest first) to get the absolute best opportunity
+    // Sort by confidence (highest first) to get the best opportunity
     const sortedSignals = signals.sort((a, b) => b.confidence - a.confidence);
     const bestSignal = sortedSignals[0];
     
-    // Analyze confidence distribution to understand why only certain coins trade
+    // Analyze confidence distribution
     const confidenceRanges = {
       high: sortedSignals.filter(s => s.confidence >= 0.55).length,
       medium: sortedSignals.filter(s => s.confidence >= 0.4 && s.confidence < 0.55).length,
       low: sortedSignals.filter(s => s.confidence < 0.4).length
     };
     
-    logger.info(`📊 Confidence Distribution Analysis:`, {
+    logger.info('Signal analysis complete', {
       context: 'AITrading',
       data: {
         total: sortedSignals.length,
-        highConfidence: `${confidenceRanges.high} (55%+) ✅ TRADEABLE`,
-        mediumConfidence: `${confidenceRanges.medium} (40-55%) ⚠️ TOO RISKY`,
-        lowConfidence: `${confidenceRanges.low} (<40%) ❌ REJECTED`,
+        highConfidence: confidenceRanges.high,
+        mediumConfidence: confidenceRanges.medium,
+        lowConfidence: confidenceRanges.low,
         bestConfidence: (bestSignal.confidence * 100).toFixed(1) + '%'
       }
     });
     
-    // Log top 10 opportunities for analysis
-    const top10 = sortedSignals.slice(0, 10);
-    logger.info(`🏆 Top 10 Trading Opportunities (by confidence):`, {
+    // Only trade if confidence meets threshold
+    if (bestSignal.confidence >= asterConfig.trading.confidenceThreshold) {
+      bestSignal.size = 1.0; // 100% of available margin
+      logger.info('High-confidence signal selected', {
+        context: 'AITrading',
+        data: {
+          symbol: bestSignal.symbol,
+          action: bestSignal.action,
+          confidence: bestSignal.confidence,
+          threshold: asterConfig.trading.confidenceThreshold,
+          reasoning: bestSignal.reasoning.substring(0, 100)
+        }
+      });
+      return bestSignal;
+    }
+    
+    logger.info('No signals meet confidence threshold', {
       context: 'AITrading',
       data: {
-        opportunities: top10.map((s, i) => ({
-          rank: i + 1,
-          symbol: s.symbol,
-          action: s.action,
-          confidence: (s.confidence * 100).toFixed(1) + '%',
-          tradeable: s.confidence >= 0.55 ? '✅ YES' : '❌ NO',
-          reasoning: s.reasoning.substring(0, 80) + '...'
-        }))
+        bestConfidence: bestSignal.confidence,
+        threshold: asterConfig.trading.confidenceThreshold
       }
     });
     
-      // 🎯 HYPER-AGGRESSIVE TRADING: Take ANY trade with 48%+ confidence
-      // With excellent trend analysis, volume spike detection, and strong risk management (2% stop-loss)
-      // We can be aggressive and let our risk management protect us
-      if (bestSignal.confidence >= 0.48) {
-        bestSignal.size = 1.0; // 100% of available margin - HYPER-AGGRESSIVE MODE
-        logger.info(`✅ TRADE APPROVED: ${bestSignal.symbol} @ ${(bestSignal.confidence * 100).toFixed(1)}% confidence [HYPER-AGGRESSIVE]`, {
-          context: 'AITrading',
-          data: {
-            symbol: bestSignal.symbol,
-            action: bestSignal.action,
-            confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-            reasoning: bestSignal.reasoning,
-            mode: 'HYPER-AGGRESSIVE (48%+ threshold)'
-          }
-        });
-        
-        logger.info(`🎯 GODSPEED SELECTED #1: ${bestSignal.symbol} ${bestSignal.action} @ ${(bestSignal.confidence * 100).toFixed(1)}% [FULL MARGIN: 100%]`, {
-          context: 'AITrading',
-          data: {
-            winner: {
-              symbol: bestSignal.symbol,
-              action: bestSignal.action,
-              confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-              reasoning: bestSignal.reasoning
-            },
-            totalOpportunities: signals.length,
-            positionSize: '100% (MAXIMUM)',
-            leverage: 'MAX (20x-50x per coin)',
-            runnerUps: sortedSignals.slice(1, 4).map(s => ({ 
-              symbol: s.symbol, 
-              action: s.action, 
-              confidence: (s.confidence * 100).toFixed(1) + '%',
-              reason: 'Lower confidence than winner'
-            }))
-          }
-        });
-        
-        return bestSignal; // 🔥 CRITICAL FIX: Return the approved signal!
-      } else {
-        // Reject very low confidence trades
-        logger.info(`⏭️ SKIPPING - Need 48%+ confidence (got ${(bestSignal.confidence * 100).toFixed(1)}%): ${bestSignal.symbol} ${bestSignal.action}`, {
-          context: 'AITrading',
-          data: {
-            symbol: bestSignal.symbol,
-            confidence: (bestSignal.confidence * 100).toFixed(1) + '%',
-            threshold: '48%',
-            reasoning: bestSignal.reasoning
-          }
-        });
-        return null;
-      }
+    return null;
   }
 
   private async executeTrade(signal: TradingSignal): Promise<void> {
@@ -679,10 +577,10 @@ class AITradingService {
       }
       
       // Additional validation for negative wallet balance scenarios
-      if (availableBalance < 5) { // Minimum 5 USDT required for trading
-        logger.warn(`⚠️ Insufficient available balance for trading: ${availableBalance} USDT (minimum: 5 USDT)`, { 
+      if (availableBalance < 10) { // Minimum 10 USDT required for meaningful trading (was 5)
+        logger.warn(`⚠️ Insufficient available balance for trading: ${availableBalance} USDT (minimum: 10 USDT)`, { 
           context: 'AITrading',
-          data: { availableBalance, minimum: 5 }
+          data: { availableBalance, minimum: 10 }
         });
         return;
       }
@@ -703,14 +601,28 @@ class AITradingService {
       // positionValue = margin × leverage = total position size in USDT
       // quantity = positionValue / currentPrice = amount of base asset to buy
       
-      // 🛡️ CONSERVATIVE SAFETY BUFFER: Use 90% of available margin to account for:
-      // - Trading fees (~0.04% maker/taker)
-      // - Price slippage during execution
-      // - Exchange liquidation buffer requirements
-      const SAFETY_MARGIN_PERCENT = 0.90; // 90% of available margin for better utilization
-      const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 90% of available margin
+      // 🛡️ ENHANCED SAFETY BUFFER: Use 85% of available margin to account for:
+      // - Trading fees (~0.1% maker/taker on Aster DEX)
+      // - Price slippage during execution (~0.05%)
+      // - Exchange liquidation buffer requirements (~0.05%)
+      // - Total buffer: ~0.2% + safety margin = 15%
+      const TRADING_FEE_PERCENT = 0.001; // 0.1% trading fee
+      const SLIPPAGE_PERCENT = 0.0005; // 0.05% slippage
+      const SAFETY_MARGIN_PERCENT = 0.85; // 85% of available margin (increased buffer for fees)
+      const marginToUse = availableBalance * allocationPercent * SAFETY_MARGIN_PERCENT; // 85% of available margin
       const positionValue = marginToUse * maxLeverage; // Position size = margin × leverage
       let quantity = positionValue / currentPrice; // Convert USDT position to base asset quantity
+      
+      // Calculate estimated fees for this trade
+      const estimatedFees = positionValue * TRADING_FEE_PERCENT;
+      logger.info(`💰 Fee Calculation: $${positionValue.toFixed(2)} position × 0.1% = $${estimatedFees.toFixed(4)} estimated fees`, {
+        context: 'AITrading',
+        data: {
+          positionValue: positionValue.toFixed(2),
+          tradingFeePercent: TRADING_FEE_PERCENT * 100,
+          estimatedFees: estimatedFees.toFixed(4)
+        }
+      });
       
       // 🎯 PRECISION FIX: Round quantity and cap at maximum to match exchange requirements
       const precisionInfo = await asterDexService.getSymbolPrecision(signal.symbol);
@@ -721,19 +633,19 @@ class AITradingService {
         // Round to precision first
         quantity = asterDexService.roundQuantity(quantity, precisionInfo.quantityPrecision);
         
-        // 🚨 MINIMUM ORDER SIZE CHECK: Ensure notional value is at least $5
+        // 🚨 MINIMUM ORDER SIZE CHECK: Ensure notional value is at least $20 (increased from $5)
         const notionalValue = quantity * currentPrice;
-        if (notionalValue < 5.0) {
-          logger.warn(`⚠️ Order notional ${notionalValue.toFixed(2)} below $5 minimum for ${signal.symbol}, adjusting quantity`, {
+        if (notionalValue < 20.0) { // Increased minimum to $20 for meaningful positions
+          logger.warn(`⚠️ Order notional ${notionalValue.toFixed(2)} below $20 minimum for ${signal.symbol}, adjusting quantity`, {
             context: 'AITrading',
             data: {
               notionalValue: notionalValue.toFixed(2),
-              minimum: 5.0,
+              minimum: 20.0,
               symbol: signal.symbol
             }
           });
-          // Calculate minimum quantity needed for $5 notional
-          const minQuantity = 5.0 / currentPrice;
+          // Calculate minimum quantity needed for $20 notional
+          const minQuantity = 20.0 / currentPrice;
           quantity = asterDexService.roundQuantity(minQuantity, precisionInfo.quantityPrecision);
           
           // Recalculate position value with adjusted quantity

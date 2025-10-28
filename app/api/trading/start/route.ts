@@ -15,9 +15,9 @@ export async function POST(request: NextRequest) {
         features: [
           '100% margin utilization',
           'Maximum leverage per coin (20x-50x)',
-          'High confidence filtering (48%+)',
+          'High confidence filtering (50%+)',
           'Real-time market analysis (132 coins)',
-          'Conservative risk management (1% stop-loss, 1% take-profit)'
+          'Balanced risk management (3% stop-loss, 5% take-profit)'
         ]
     });
     
