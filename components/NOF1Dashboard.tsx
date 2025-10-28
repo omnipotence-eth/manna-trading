@@ -7,51 +7,12 @@ import ModelChat from './ModelChat';
 import TradeJournal from './TradeJournal';
 import Positions from './Positions';
 import AIPerformanceChart from './AIPerformanceChart';
-
-// Chat Tab Component with reactive state
-function ChatTabContent() {
-  const modelMessages = useStore((state) => state.modelMessages);
-  
-  return (
-    <motion.div
-      key="chat"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
-      className="flex-1 overflow-y-auto space-y-2 px-3 py-2"
-    >
-      {modelMessages.length === 0 ? (
-        <div className="text-center py-12 text-green-500/60 px-4">
-          <div className="text-4xl mb-3">🧠</div>
-          <div className="text-sm font-semibold mb-2">Analyzing Markets</div>
-          <div className="text-xs opacity-75 leading-relaxed">
-            Godspeed is scanning all Aster DEX markets.<br/>
-            Trade decisions will appear here when executed.
-          </div>
-        </div>
-      ) : (
-        modelMessages.slice(0, 10).map((msg: any) => (
-          <div key={msg.id} className="p-3 border border-green-500/20 rounded bg-black/20">
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-xs px-2 py-0.5 rounded ${
-                msg.type === 'trade' ? 'bg-neon-blue/20 text-neon-blue' : 'bg-green-500/20 text-green-500'
-              }`}>
-                {msg.type === 'trade' ? '💼 TRADE' : '🔍 ANALYSIS'}
-              </span>
-              <span className="text-xs text-green-500/50">
-                {new Date(msg.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-            <div className="text-xs text-green-500 whitespace-pre-wrap leading-relaxed">
-              {msg.message}
-            </div>
-          </div>
-        ))
-      )}
-    </motion.div>
-  );
-}
+import InteractiveChart from './InteractiveChart';
+import EnhancedAIChat from './EnhancedAIChat';
+import { frontendLogger } from '@/lib/frontendLogger';
+import { frontendErrorHandler } from '@/lib/frontendErrorHandler';
+import { frontendPerformanceMonitor } from '@/lib/frontendPerformanceMonitor';
+import { frontendCaches, cacheKeys } from '@/lib/frontendCache';
 
 export default function NOF1Dashboard() {
   const [activeTab, setActiveTab] = useState<'trades' | 'chat' | 'positions' | 'readme'>('trades');
@@ -73,13 +34,20 @@ export default function NOF1Dashboard() {
 
     const updateData = async () => {
       if (!isMounted) return;
+      
+      const timer = frontendPerformanceMonitor.startComponentTimer('NOF1Dashboard:updateData');
+      
       try {
-        // Fetch account data and positions
-        const accountResponse = await fetch('/api/optimized-data');
-        if (accountResponse.ok) {
-          const data = await accountResponse.json();
-          if (isMounted && data.success) {
-            const { accountValue, positions } = data.data;
+        frontendLogger.debug('Starting data update cycle', { component: 'NOF1Dashboard' });
+        
+        // Fetch account data and positions with caching
+        const accountCacheKey = cacheKeys.api('optimized-data');
+        const cachedAccountData = frontendCaches.api.get(accountCacheKey);
+        
+        if (cachedAccountData) {
+          frontendLogger.debug('Using cached account data', { component: 'NOF1Dashboard' });
+          const { accountValue, positions } = cachedAccountData;
+          if (isMounted) {
             setAccountValue(accountValue);
             if (positions && Array.isArray(positions) && positions.length > 0) {
               positions.forEach((position: any) => {
@@ -89,33 +57,96 @@ export default function NOF1Dashboard() {
               });
             }
           }
+        } else {
+          const accountResponse = await frontendPerformanceMonitor.measureApiCall(
+            'optimized-data',
+            () => fetch('/api/optimized-data')
+          );
+          
+          if (accountResponse.ok) {
+            const data = await accountResponse.json();
+            if (isMounted && data.success) {
+              const { accountValue, positions } = data.data;
+              setAccountValue(accountValue);
+              if (positions && Array.isArray(positions) && positions.length > 0) {
+                positions.forEach((position: any) => {
+                  if (position && typeof position === 'object') {
+                    updatePosition(position);
+                  }
+                });
+              }
+              // Cache the response
+              frontendCaches.api.set(accountCacheKey, data.data);
+            }
+          }
         }
         
-        // Fetch completed trades
-        const tradesResponse = await fetch('/api/trades?limit=100');
-        if (tradesResponse.ok) {
-          const tradesData = await tradesResponse.json();
-          if (isMounted && tradesData.success && tradesData.trades) {
-            // Add trades to store (only if they're not already there)
-            tradesData.trades.forEach((trade: any) => {
+        // Fetch completed trades with caching
+        const tradesCacheKey = cacheKeys.api('trades', { limit: 100 });
+        const cachedTradesData = frontendCaches.api.get(tradesCacheKey);
+        
+        if (cachedTradesData) {
+          frontendLogger.debug('Using cached trades data', { component: 'NOF1Dashboard' });
+          if (isMounted) {
+            cachedTradesData.trades.forEach((trade: any) => {
               addTrade(trade);
             });
           }
+        } else {
+          const tradesResponse = await frontendPerformanceMonitor.measureApiCall(
+            'trades',
+            () => fetch('/api/trades?limit=100')
+          );
+          
+          if (tradesResponse.ok) {
+            const tradesData = await tradesResponse.json();
+            if (isMounted && tradesData.success && tradesData.trades) {
+              tradesData.trades.forEach((trade: any) => {
+                addTrade(trade);
+              });
+              // Cache the response
+              frontendCaches.api.set(tradesCacheKey, tradesData);
+            }
+          }
         }
 
-        // Fetch model messages (chat)
-        const messagesResponse = await fetch('/api/model-message?limit=50');
-        if (messagesResponse.ok) {
-          const messagesData = await messagesResponse.json();
-          if (isMounted && messagesData.success && messagesData.messages) {
-            // Add messages to store (newest first)
-            messagesData.messages.forEach((message: any) => {
+        // Fetch model messages with caching
+        const messagesCacheKey = cacheKeys.api('model-message', { limit: 50 });
+        const cachedMessagesData = frontendCaches.api.get(messagesCacheKey);
+        
+        if (cachedMessagesData) {
+          frontendLogger.debug('Using cached messages data', { component: 'NOF1Dashboard' });
+          if (isMounted) {
+            cachedMessagesData.messages.forEach((message: any) => {
               addModelMessage(message);
             });
           }
+        } else {
+          const messagesResponse = await frontendPerformanceMonitor.measureApiCall(
+            'model-message',
+            () => fetch('/api/model-message?limit=50')
+          );
+          
+          if (messagesResponse.ok) {
+            const messagesData = await messagesResponse.json();
+            if (isMounted && messagesData.success && messagesData.messages) {
+              messagesData.messages.forEach((message: any) => {
+                addModelMessage(message);
+              });
+              // Cache the response
+              frontendCaches.api.set(messagesCacheKey, messagesData);
+            }
+          }
         }
+        
+        frontendLogger.info('Data update cycle completed successfully', { component: 'NOF1Dashboard' });
       } catch (error) {
-        console.error('Error fetching data:', error);
+        frontendErrorHandler.handleError(error as Error, 'NOF1Dashboard', {
+          maxRetries: 3,
+          retryDelay: 2000,
+        });
+      } finally {
+        timer();
       }
     };
 
@@ -128,24 +159,40 @@ export default function NOF1Dashboard() {
     let tradingCycleCount = 0;
     const runTradingCycle = async () => {
       if (!isMounted) return;
+      
+      const timer = frontendPerformanceMonitor.startComponentTimer('NOF1Dashboard:tradingCycle');
+      
       try {
         tradingCycleCount++;
-        console.log(`🔄 Godspeed Auto-Trading Cycle #${tradingCycleCount} starting...`);
-        
-        const response = await fetch('/api/test-cron', {
-          method: 'GET',
+        frontendLogger.info(`Godspeed Auto-Trading Cycle #${tradingCycleCount} starting`, {
+          component: 'NOF1Dashboard',
+          data: { cycleNumber: tradingCycleCount }
         });
+        
+        const response = await frontendPerformanceMonitor.measureApiCall(
+          'test-cron',
+          () => fetch('/api/test-cron', { method: 'GET' })
+        );
         
         if (response.ok) {
           const data = await response.json();
-          console.log(`✅ Godspeed cycle #${tradingCycleCount} completed:`, {
-            signals: data.cronResponse?.signals?.length || 0,
-            bestSignal: data.cronResponse?.bestSignal?.symbol || 'none',
-            confidence: data.cronResponse?.bestSignal?.confidence || 0,
+          frontendLogger.info(`Godspeed cycle #${tradingCycleCount} completed`, {
+            component: 'NOF1Dashboard',
+            data: {
+              cycleNumber: tradingCycleCount,
+              signals: data.cronResponse?.signals?.length || 0,
+              bestSignal: data.cronResponse?.bestSignal?.symbol || 'none',
+              confidence: data.cronResponse?.bestSignal?.confidence || 0,
+            }
           });
         }
       } catch (error) {
-        console.error('❌ Godspeed trading cycle failed:', error);
+        frontendErrorHandler.handleError(error as Error, 'NOF1Dashboard:tradingCycle', {
+          maxRetries: 2,
+          retryDelay: 5000,
+        });
+      } finally {
+        timer();
       }
     };
 
@@ -191,9 +238,28 @@ export default function NOF1Dashboard() {
   }
 
   return (
-    <div className="h-full overflow-hidden">
+    <div className="h-full overflow-hidden relative">
+      {/* Futuristic Background Effects */}
+      <div className="absolute inset-0 opacity-5">
+        {/* Terminal Grid */}
+        <div className="absolute inset-0" style={{
+          backgroundImage: `
+            linear-gradient(rgba(74, 222, 128, 0.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(74, 222, 128, 0.05) 1px, transparent 1px)
+          `,
+          backgroundSize: '50px 50px',
+          animation: 'grid-move 30s linear infinite'
+        }}></div>
+        
+        {/* Corner Brackets */}
+        <div className="absolute top-4 left-4 w-8 h-8 border-l-2 border-t-2 border-green-400/20"></div>
+        <div className="absolute top-4 right-4 w-8 h-8 border-r-2 border-t-2 border-green-400/20"></div>
+        <div className="absolute bottom-4 left-4 w-8 h-8 border-l-2 border-b-2 border-green-400/20"></div>
+        <div className="absolute bottom-4 right-4 w-8 h-8 border-r-2 border-b-2 border-green-400/20"></div>
+      </div>
+      
       {/* Main Layout - Perfect Fit, No Scroll */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-2 px-2 py-2 h-full">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-2 px-2 py-2 h-full relative z-10">
         
         {/* LEFT SIDE: MASSIVE Chart Area - Uses All Available Width */}
         <div className="relative h-full min-w-0">
@@ -201,63 +267,41 @@ export default function NOF1Dashboard() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="glass-effect rounded-lg border border-green-500/30 overflow-hidden h-full flex flex-col"
+            className="glass-effect rounded-lg border border-green-400/30 overflow-hidden h-full flex flex-col relative"
           >
-            {/* Minimal Header: TOTAL ACCOUNT VALUE */}
-            <div className="bg-black/50 border-b border-green-500/30 px-4 py-1.5 flex items-center justify-between shrink-0">
-              <div className="text-xs text-green-500/60 uppercase tracking-wider">
+            {/* Futuristic Terminal Header */}
+            <div className="bg-black/50 border-b border-green-400/30 px-4 py-1.5 flex items-center justify-center shrink-0 relative">
+              <div className="text-xs text-green-400/60 uppercase tracking-wider">
                 TOTAL ACCOUNT VALUE
-              </div>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => setTimeRange('ALL')}
-                  className={`px-3 py-1 text-xs font-bold border transition-all ${
-                    timeRange === 'ALL'
-                      ? 'border-green-500 bg-green-500/20 text-green-500'
-                      : 'border-green-500/30 text-green-500/60 hover:border-green-500/60'
-                  }`}
-                >
-                  ALL
-                </button>
-                <button
-                  onClick={() => setTimeRange('72H')}
-                  className={`px-3 py-1 text-xs font-bold border transition-all ${
-                    timeRange === '72H'
-                      ? 'border-green-500 bg-green-500/20 text-green-500'
-                      : 'border-green-500/30 text-green-500/60 hover:border-green-500/60'
-                  }`}
-                >
-                  72H
-                </button>
               </div>
             </div>
 
-            {/* MASSIVE Chart Area - Fills All Available Height */}
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <AIPerformanceChart />
+            {/* Chart Area - Fixed Height */}
+            <div className="overflow-hidden">
+              <InteractiveChart initialBalance={accountValue} />
             </div>
 
             {/* Stats Bar - Ultra Compact */}
-            <div className="border-t border-green-500/30 px-4 py-1.5 bg-black/50 flex items-center justify-between shrink-0">
+            <div className="border-t border-green-400/30 px-4 py-1.5 bg-black/50 flex items-center justify-between shrink-0">
               <div className="flex items-baseline gap-3">
-                <div className="text-xl font-bold text-neon-green">
+                <div className="text-xl font-bold text-green-400">
                   ${accountValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div className={`text-lg font-bold ${pnlPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                <div className={`text-lg font-bold ${pnlPercent >= 0 ? 'text-green-400' : 'text-red-500'}`}>
                   {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
                 </div>
               </div>
               <div className="flex gap-4 text-xs">
                 <div>
-                  <span className="text-green-500/60 uppercase">24h High: </span>
-                  <span className="text-green-500 font-bold">${highestValue.toFixed(2)}</span>
+                  <span className="text-green-400/60 uppercase">24h High: </span>
+                  <span className="text-green-400 font-bold">${highestValue.toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="text-green-500/60 uppercase">24h Low: </span>
+                  <span className="text-green-400/60 uppercase">24h Low: </span>
                   <span className="text-red-500 font-bold">${lowestValue.toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="text-green-500/60 uppercase">Open Positions: </span>
+                  <span className="text-green-400/60 uppercase">Open Positions: </span>
                   <span className="text-neon-blue font-bold">{positions.length}</span>
                 </div>
               </div>
@@ -266,45 +310,48 @@ export default function NOF1Dashboard() {
         </div>
 
         {/* RIGHT SIDEBAR: Rounded, Fits Without Scroll */}
-        <div className="flex flex-col glass-effect rounded-lg border border-green-500/30 overflow-hidden h-full">
-          {/* Top: Tab Buttons - Ultra Compact */}
-          <div className="flex border-b border-green-500/30 bg-black/50 shrink-0">
+        <div className="flex flex-col glass-effect rounded-lg border border-green-400/30 overflow-hidden h-full relative">
+          {/* Futuristic Terminal Header */}
+          <div className="flex border-b border-green-400/30 bg-black/50 shrink-0 relative">
+            {/* Terminal Status Line */}
+            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-400/60 to-transparent animate-pulse"></div>
+            
             <button
               onClick={() => setActiveTab('trades')}
-              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-500/30 transition-all ${
+              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all relative ${
                 activeTab === 'trades'
-                  ? 'bg-green-500/10 text-green-500 border-b-2 border-b-green-500'
-                  : 'text-green-500/60 hover:text-green-500 hover:bg-green-500/5'
+                  ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
+                  : 'text-green-400/60 hover:text-green-400 hover:bg-green-400/5'
               }`}
             >
               TRADES
             </button>
             <button
               onClick={() => setActiveTab('chat')}
-              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-500/30 transition-all ${
+              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all ${
                 activeTab === 'chat'
-                  ? 'bg-green-500/10 text-green-500 border-b-2 border-b-green-500'
-                  : 'text-green-500/60 hover:text-green-500 hover:bg-green-500/5'
+                  ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
+                  : 'text-green-400/60 hover:text-green-400 hover:bg-green-400/5'
               }`}
             >
               CHAT
             </button>
             <button
               onClick={() => setActiveTab('positions')}
-              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-500/30 transition-all ${
+              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all ${
                 activeTab === 'positions'
-                  ? 'bg-green-500/10 text-green-500 border-b-2 border-b-green-500'
-                  : 'text-green-500/60 hover:text-green-500 hover:bg-green-500/5'
+                  ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
+                  : 'text-green-400/60 hover:text-green-400 hover:bg-green-400/5'
               }`}
             >
               POS
             </button>
             <button
               onClick={() => setActiveTab('readme')}
-              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight transition-all ${
+              className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all ${
                 activeTab === 'readme'
-                  ? 'bg-green-500/10 text-green-500 border-b-2 border-b-green-500'
-                  : 'text-green-500/60 hover:text-green-500 hover:bg-green-500/5'
+                  ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
+                  : 'text-green-400/60 hover:text-green-400 hover:bg-green-400/5'
               }`}
             >
               SYSTEM
@@ -313,12 +360,12 @@ export default function NOF1Dashboard() {
 
           {/* Filter Header (for trades) */}
           {activeTab === 'trades' && (
-            <div className="px-3 py-1 bg-black/50 border-b border-green-500/30 flex items-center justify-between shrink-0">
-              <div className="text-xs text-green-500 uppercase font-bold">
+            <div className="px-3 py-1 bg-black/50 border-b border-green-400/30 flex items-center justify-between shrink-0">
+              <div className="text-xs text-green-400 uppercase font-bold">
                 GODSPEED TRADES
               </div>
-              <div className="text-xs text-green-500/60">
-                Last 500
+              <div className="text-xs text-green-400/60">
+                Last 777
               </div>
             </div>
           )}
@@ -393,7 +440,16 @@ export default function NOF1Dashboard() {
               )}
               
               {activeTab === 'chat' && (
-                <ChatTabContent />
+                <motion.div
+                  key="chat"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex-1 overflow-hidden"
+                >
+                  <EnhancedAIChat />
+                </motion.div>
               )}
               
               {activeTab === 'positions' && (
@@ -418,66 +474,68 @@ export default function NOF1Dashboard() {
                   transition={{ duration: 0.2 }}
                   className="flex-1 overflow-y-auto p-2"
                 >
-                  <div className="text-green-500 text-xs space-y-3">
-                    <div className="text-sm font-bold text-neon-green border-b border-green-500/30 pb-2">
+                  <div className="text-green-400 text-xs space-y-3">
+                    <div className="text-sm font-bold text-green-400 border-b border-green-400/30 pb-2">
                       GODSPEED SYSTEM INFORMATION
                     </div>
                     
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-green-500/60">Status</span>
-                        <span className="text-green-500 font-bold">● ACTIVE</span>
+                        <span className="text-green-400/60">Status</span>
+                        <span className="text-green-400 font-bold">● ACTIVE</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-green-500/60">Trading Mode</span>
+                        <span className="text-green-400/60">Trading Mode</span>
                         <span className="text-neon-blue font-bold">MAXIMUM POWER</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-green-500/60">Account Value</span>
-                        <span className="text-green-500 font-bold">${accountValue.toFixed(2)}</span>
+                        <span className="text-green-400/60">Account Value</span>
+                        <span className="text-green-400 font-bold">${accountValue.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-green-500/60">Active Positions</span>
+                        <span className="text-green-400/60">Active Positions</span>
                         <span className="text-neon-blue font-bold">{positions.length}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-green-500/60">Completed Trades</span>
-                        <span className="text-green-500 font-bold">{completedTrades.length}</span>
+                        <span className="text-green-400/60">Completed Trades</span>
+                        <span className="text-green-400 font-bold">{completedTrades.length}</span>
                       </div>
                     </div>
                     
-                    <div className="border-t border-green-500/30 pt-2 space-y-1.5">
-                      <div className="text-xs font-bold text-green-500/80">TRADING PARAMETERS</div>
+                    <div className="border-t border-green-400/30 pt-2 space-y-1.5">
+                      <div className="text-xs font-bold text-green-400/80">TRADING PARAMETERS</div>
                       <div className="flex justify-between text-xs">
-                        <span className="text-green-500/60">Analysis Frequency</span>
-                        <span className="text-green-500">30 seconds</span>
+                        <span className="text-green-400/60">Analysis Frequency</span>
+                        <span className="text-green-400">30 seconds</span>
                       </div>
                       <div className="flex justify-between text-xs">
-                        <span className="text-green-500/60">Capital Deployment</span>
-                        <span className="text-green-500">100% (Full Margin)</span>
+                        <span className="text-green-400/60">Capital Deployment</span>
+                        <span className="text-green-400">100% (Full Margin)</span>
                       </div>
                       <div className="flex justify-between text-xs">
-                        <span className="text-green-500/60">Leverage Range</span>
-                        <span className="text-green-500">Dynamic (20x-50x)</span>
+                        <span className="text-green-400/60">Leverage Range</span>
+                        <span className="text-green-400">Dynamic (20x-50x)</span>
                       </div>
                       <div className="flex justify-between text-xs">
-                        <span className="text-green-500/60">Stop Loss</span>
+                        <span className="text-green-400/60">Stop Loss</span>
                         <span className="text-red-500">-2.0% ROE</span>
                       </div>
                       <div className="flex justify-between text-xs">
-                        <span className="text-green-500/60">Take Profit</span>
-                        <span className="text-green-500">+6.0% ROE</span>
+                        <span className="text-green-400/60">Take Profit</span>
+                        <span className="text-green-400">+6.0% ROE</span>
                       </div>
                     </div>
                     
-                    <div className="border-t border-green-500/30 pt-2 text-xs text-green-500/60">
-                      <div className="font-bold text-green-500/80 mb-1">EXCHANGE</div>
+                    <div className="border-t border-green-400/30 pt-2 text-xs text-green-400/60">
+                      <div className="font-bold text-green-400/80 mb-1">EXCHANGE</div>
                       <div>Aster DEX Perpetual Futures</div>
                       <div>All USDT trading pairs</div>
                     </div>
                   </div>
                 </motion.div>
               )}
+              
+              
             </AnimatePresence>
           </div>
         </div>

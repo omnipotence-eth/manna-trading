@@ -38,3 +38,30 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# audit and temp docs
+*AUDIT*.md
+*IMPLEMENTATION*.md
+*FIX*.md
+*EXPLANATION*.md
+SINGLETON_PATTERN_FIX.md
+DATABASE_ERROR_EXPLANATION.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Cache
+.cache/
+.temp/

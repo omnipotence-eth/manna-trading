@@ -187,18 +187,20 @@ class OptimizedDataService {
       const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
       const response = await fetch(`${baseUrl}/api/aster/account`);
       if (response.ok) {
-        const data = await response.json();
-        // Use the pre-calculated balance field from the API (this is the correct ~$59.87 value)
-        const balance = parseFloat(data.balance || 0);
+        const result = await response.json();
+        // The API returns { success: true, data: { balance: 42, ... } }
+        const accountData = result.data || result;
+        const balance = parseFloat(accountData.balance || 0);
         
         logger.debug('Account value from API', { 
           context: 'OptimizedData', 
           data: { 
             balance: balance,
-            accountEquity: data.accountEquity,
-            totalMarginBalance: data.totalMarginBalance,
-            totalWalletBalance: data.totalWalletBalance,
-            totalUnrealizedProfit: data.totalUnrealizedProfit
+            accountEquity: accountData.accountEquity,
+            totalMarginBalance: accountData.totalMarginBalance,
+            totalWalletBalance: accountData.totalWalletBalance,
+            totalUnrealizedProfit: accountData.totalUnrealizedProfit,
+            availableBalance: accountData.availableBalance
           }
         });
         return balance;

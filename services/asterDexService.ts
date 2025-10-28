@@ -3,6 +3,7 @@ import { logger } from '@/lib/logger';
 import { TRADING_CONSTANTS, ERROR_MESSAGES } from '@/constants';
 import type { WebSocketMessage } from '@/types/trading';
 import { apiCache } from './apiCache';
+import { generateSignature } from '@/lib/asterAuth';
 
 export interface AsterMarket {
   symbol: string;
@@ -99,17 +100,29 @@ class AsterDexService {
     this.WS_BASE_URL = 'wss://fstream.asterdex.com/stream';
     
     // Load API credentials from environment variables
+    // Server-side: use ASTER_API_KEY and ASTER_SECRET_KEY
+    // Client-side: use NEXT_PUBLIC_ASTER_API_KEY (no secret on client)
     if (typeof window !== 'undefined') {
+      // Client-side (browser)
       this.apiKey = process.env.NEXT_PUBLIC_ASTER_API_KEY || null;
-      logger.info('🔄 Using Aster DEX API directly', {
-        context: 'AsterDex',
-        data: { 
-          baseUrl: this.baseUrl,
-          wsUrl: this.WS_BASE_URL,
-          note: 'Real Aster DEX market data - no geo-restrictions'
-        },
-      });
+      this.secretKey = null; // Never expose secret key to client
+    } else {
+      // Server-side (API routes)
+      this.apiKey = process.env.ASTER_API_KEY || null;
+      this.secretKey = process.env.ASTER_SECRET_KEY || null;
     }
+    
+    logger.info('🔄 Aster DEX Service initialized', {
+      context: 'AsterDex',
+      data: { 
+        baseUrl: this.baseUrl,
+        wsUrl: this.WS_BASE_URL,
+        hasApiKey: !!this.apiKey,
+        hasSecretKey: !!this.secretKey,
+        environment: typeof window !== 'undefined' ? 'client' : 'server',
+        note: 'Real Aster DEX market data'
+      },
+    });
   }
 
   /**
@@ -877,6 +890,104 @@ class AsterDexService {
   /**
    * Get all available trading pairs from Aster DEX
    */
+  async getExchangeInfo(): Promise<any> {
+    try {
+      const url = `${this.baseUrl}/exchangeInfo`;
+      
+      logger.debug('Fetching exchange info from Aster DEX', { context: 'AsterDex', data: { url } });
+      
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      // Validate response structure
+      if (!data || !data.symbols || !Array.isArray(data.symbols)) {
+        logger.error('Invalid exchange info response structure', null, { 
+          context: 'AsterDex', 
+          data: { 
+            hasData: !!data,
+            hasSymbols: !!(data && data.symbols),
+            isArray: !!(data && data.symbols && Array.isArray(data.symbols)),
+            keys: data ? Object.keys(data) : []
+          }
+        });
+        throw new Error('Invalid exchange info response - missing symbols array');
+      }
+      
+      logger.info(`Found ${data.symbols.length} trading pairs`, { context: 'AsterDex' });
+      
+      // Get 24hr ticker data for volume information
+      const tickerUrl = `${this.baseUrl}/ticker/24hr`;
+      logger.debug('Fetching 24hr ticker data', { context: 'AsterDex', data: { url: tickerUrl } });
+      
+      const tickerResponse = await fetch(tickerUrl);
+      let tickerData: any = {};
+      
+      if (tickerResponse.ok) {
+        const tickerJson = await tickerResponse.json();
+        // Convert array to object for faster lookup
+        if (Array.isArray(tickerJson)) {
+          tickerData = tickerJson.reduce((acc: any, ticker: any) => {
+            acc[ticker.symbol] = ticker;
+            return acc;
+          }, {});
+          logger.info(`Loaded 24hr ticker data for ${Object.keys(tickerData).length} pairs`, { context: 'AsterDex' });
+        } else {
+          tickerData = tickerJson;
+        }
+      } else {
+        logger.warn('Failed to fetch 24hr ticker data', { context: 'AsterDex', data: { status: tickerResponse.status } });
+      }
+      
+      // Combine exchange info with volume data
+      const symbolsWithVolume = data.symbols.map((symbol: any) => {
+        const ticker = tickerData[symbol.symbol];
+          
+        return {
+          ...symbol,
+          volume24h: ticker ? parseFloat(ticker.volume || 0) : 0,
+          quoteVolume24h: ticker ? parseFloat(ticker.quoteVolume || 0) : 0,
+          priceChange24h: ticker ? parseFloat(ticker.priceChange || 0) : 0,
+          priceChangePercent24h: ticker ? parseFloat(ticker.priceChangePercent || 0) : 0,
+          lastPrice: ticker ? parseFloat(ticker.lastPrice || 0) : 0
+        };
+      });
+      
+      // Sort by volume (highest first)
+      symbolsWithVolume.sort((a: any, b: any) => b.quoteVolume24h - a.quoteVolume24h);
+      
+      // Filter for TRADING status only
+      const tradingPairs = symbolsWithVolume.filter((s: any) => s.status === 'TRADING');
+      
+      logger.info('Exchange info retrieved successfully', { 
+        context: 'AsterDex', 
+        data: { 
+          totalSymbols: tradingPairs.length,
+          totalPairs: data.symbols.length,
+          topVolumeSymbols: tradingPairs.slice(0, 10).map((s: any) => ({
+            symbol: s.symbol,
+            volume: `$${(s.quoteVolume24h / 1000000).toFixed(2)}M`
+          }))
+        }
+      });
+      
+      return {
+        symbols: tradingPairs,
+        allSymbols: symbolsWithVolume,
+        totalSymbols: tradingPairs.length,
+        topSymbolsByVolume: tradingPairs.slice(0, 20), // Top 20 by volume
+        serverTime: data.serverTime,
+        timezone: data.timezone
+      };
+    } catch (error) {
+      logger.error('Failed to fetch exchange info', error, { context: 'AsterDex' });
+      throw error;
+    }
+  }
+
   async getAllTradingPairs(): Promise<string[]> {
     try {
       const url = `${this.baseUrl}/exchangeInfo`;
@@ -910,15 +1021,8 @@ class AsterDexService {
       
       return usdtPairs;
     } catch (error) {
-      logger.error('Failed to fetch trading pairs, using fallback list', error, { context: 'AsterDex' });
-      // Fallback to a known list of major pairs
-      return [
-        'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT',
-        'ADA/USDT', 'DOGE/USDT', 'MATIC/USDT', 'DOT/USDT', 'AVAX/USDT',
-        'LINK/USDT', 'UNI/USDT', 'ATOM/USDT', 'LTC/USDT', 'BCH/USDT',
-        'NEAR/USDT', 'APT/USDT', 'ARB/USDT', 'OP/USDT', 'SUI/USDT',
-        'ASTER/USDT', 'ZEC/USDT'
-      ];
+      logger.error('Failed to fetch trading pairs', error, { context: 'AsterDex' });
+      throw error; // Re-throw to fail the operation
     }
   }
 
@@ -937,9 +1041,21 @@ class AsterDexService {
     }
     
     try {
-      const response = await fetch(this.getApiUrl('/api/aster/account'), {
+      // Call Aster API directly, not our internal API route
+      const url = `${this.baseUrl}/account`;
+      const timestamp = Date.now();
+      const queryString = `timestamp=${timestamp}`;
+      
+      // Generate signature using the imported function
+      if (!this.secretKey) {
+        throw new Error('Secret key not configured');
+      }
+      const signature = await generateSignature(queryString, this.secretKey);
+      
+      const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
         method: 'GET',
         headers: {
+          'X-MBX-APIKEY': this.apiKey || '',
           'Content-Type': 'application/json',
         },
       });
@@ -1028,22 +1144,37 @@ class AsterDexService {
    */
   async setLeverage(symbol: string, leverage: number): Promise<boolean> {
     try {
-      const response = await fetch(this.getApiUrl('/api/aster/leverage'), {
+      // Call Aster API directly
+      const url = `${this.baseUrl}/leverage`;
+      const timestamp = Date.now();
+      
+      // Build query parameters
+      const params = new URLSearchParams({
+        symbol: symbol.replace('/', ''), // Remove slash for API
+        leverage: leverage.toString(),
+        timestamp: timestamp.toString()
+      });
+      
+      const queryString = params.toString();
+      
+      if (!this.secretKey) {
+        throw new Error('Secret key not configured');
+      }
+      const signature = await generateSignature(queryString, this.secretKey);
+      
+      const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
         method: 'POST',
         headers: {
+          'X-MBX-APIKEY': this.apiKey || '',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          symbol,
-          leverage
-        }),
       });
       
       if (!response.ok) {
-        const error = await response.text();
+        const errorText = await response.text();
         logger.error(`Failed to set leverage for ${symbol}`, undefined, { 
           context: 'AsterDex', 
-          data: { symbol, leverage, error } 
+          data: { symbol, leverage, error: errorText } 
         });
         return false;
       }
@@ -1083,24 +1214,37 @@ class AsterDexService {
         }
       }
       
-      const orderPayload: any = { 
-        symbol, 
-        side, 
-        type: 'MARKET', 
-        quantity: size
-      };
+      // Call Aster API directly
+      const url = `${this.baseUrl}/order`;
+      const timestamp = Date.now();
+      
+      // Build query parameters
+      const params = new URLSearchParams({
+        symbol: symbol.replace('/', ''), // Remove slash for API (e.g., BTC/USDT -> BTCUSDT)
+        side,
+        type: 'MARKET',
+        quantity: size.toString(),
+        timestamp: timestamp.toString()
+      });
       
       // Add reduceOnly flag for closing positions
       if (reduceOnly) {
-        orderPayload.reduceOnly = true;
+        params.append('reduceOnly', 'true');
       }
       
-      const response = await fetch(this.getApiUrl('/api/aster/order'), {
+      const queryString = params.toString();
+      
+      if (!this.secretKey) {
+        throw new Error('Secret key not configured');
+      }
+      const signature = await generateSignature(queryString, this.secretKey);
+      
+      const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
         method: 'POST',
         headers: {
+          'X-MBX-APIKEY': this.apiKey || '',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(orderPayload),
       });
       
       if (!response.ok) {
@@ -1183,9 +1327,27 @@ class AsterDexService {
     
     const requestPromise = (async () => {
       try {
-        const response = await fetch(this.getApiUrl('/api/aster/positions'));
+        // Call Aster API directly
+        const url = `${this.baseUrl}/positionRisk`;
+        const timestamp = Date.now();
+        const queryString = `timestamp=${timestamp}`;
+        
+        if (!this.secretKey) {
+          throw new Error('Secret key not configured');
+        }
+        const signature = await generateSignature(queryString, this.secretKey);
+        
+        const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
+          method: 'GET',
+          headers: {
+            'X-MBX-APIKEY': this.apiKey || '',
+            'Content-Type': 'application/json',
+          },
+        });
+        
         if (!response.ok) {
-          throw new Error(`API returned ${response.status}`);
+          const errorText = await response.text();
+          throw new Error(`API returned ${response.status}: ${errorText}`);
         }
         
         const data = await response.json();
@@ -1314,7 +1476,7 @@ class AsterDexService {
       if (balance <= 0 || isNaN(balance)) {
         balance = totalPositionInitialMargin + (totalUnrealizedProfit || 0);
         if (balance <= 0) {
-          balance = 100; // Ultimate fallback
+          throw new Error('Invalid balance data from Aster API');
         }
       }
       

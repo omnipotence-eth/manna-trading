@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { frontendLogger } from '@/lib/frontendLogger';
+import { frontendPerformanceMonitor } from '@/lib/frontendPerformanceMonitor';
 
 interface Trade {
   id: string;
@@ -100,7 +102,7 @@ export const useStore = create<AppState>((set) => ({
   trades: [],
   positions: [],
   modelStats: [],
-  accountValue: 100,
+  accountValue: 0,
   livePrices: {},
   modelMessages: [],
 
@@ -117,27 +119,77 @@ export const useStore = create<AppState>((set) => ({
 
   addTrade: (trade) =>
     set((state) => {
-      // Check if trade already exists (by ID)
-      const existingIndex = state.trades.findIndex((t) => t.id === trade.id);
-      if (existingIndex >= 0) {
-        // Trade already exists, don't add duplicate
-        return state;
+      const timer = frontendPerformanceMonitor.startComponentTimer('Store:addTrade');
+      
+      try {
+        // Check if trade already exists (by ID)
+        const existingIndex = state.trades.findIndex((t) => t.id === trade.id);
+        if (existingIndex >= 0) {
+          // Trade already exists, don't add duplicate
+          frontendLogger.debug('Trade already exists, skipping duplicate', {
+            component: 'Store',
+            data: { tradeId: trade.id }
+          });
+          return state;
+        }
+        
+        // Add new trade and keep last 100
+        const newState = {
+          trades: [trade, ...state.trades.slice(0, 99)],
+        };
+        
+        frontendLogger.info('Trade added to store', {
+          component: 'Store',
+          data: { 
+            tradeId: trade.id, 
+            symbol: trade.symbol, 
+            pnl: trade.pnl,
+            totalTrades: newState.trades.length 
+          }
+        });
+        
+        return newState;
+      } finally {
+        timer();
       }
-      // Add new trade and keep last 100
-      return {
-        trades: [trade, ...state.trades.slice(0, 99)],
-      };
     }),
 
   updatePosition: (position) =>
     set((state) => {
-      const existingIndex = state.positions.findIndex((p) => p.id === position.id);
-      if (existingIndex >= 0) {
-        const newPositions = [...state.positions];
-        newPositions[existingIndex] = position;
-        return { positions: newPositions };
+      const timer = frontendPerformanceMonitor.startComponentTimer('Store:updatePosition');
+      
+      try {
+        const existingIndex = state.positions.findIndex((p) => p.id === position.id);
+        if (existingIndex >= 0) {
+          const newPositions = [...state.positions];
+          newPositions[existingIndex] = position;
+          
+          frontendLogger.debug('Position updated in store', {
+            component: 'Store',
+            data: { 
+              positionId: position.id, 
+              symbol: position.symbol, 
+              pnl: position.pnl 
+            }
+          });
+          
+          return { positions: newPositions };
+        }
+        
+        frontendLogger.info('New position added to store', {
+          component: 'Store',
+          data: { 
+            positionId: position.id, 
+            symbol: position.symbol, 
+            side: position.side,
+            totalPositions: state.positions.length + 1 
+          }
+        });
+        
+        return { positions: [...state.positions, position] };
+      } finally {
+        timer();
       }
-      return { positions: [...state.positions, position] };
     }),
 
   removePosition: (id) =>

@@ -1,620 +1,325 @@
-# 🚀 GODSPEED AI Trading System
+# 🤖 AI Trading System for Aster DEX
+**Autonomous 24/7 Crypto Trading Bot with Multi-Agent Intelligence**
 
-> **Enterprise-grade AI trading system powered by advanced technical analysis and real-time market data**
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Next.js](https://img.shields.io/badge/Next.js-15.0-black)](https://nextjs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
-
----
-
-## 📋 Table of Contents
-
-- [Overview](#overview)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Getting Started](#getting-started)
-- [Configuration](#configuration)
-- [Deployment](#deployment)
-- [Trading System](#trading-system)
-- [API Documentation](#api-documentation)
-- [Monitoring](#monitoring)
-- [Development](#development)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-- [License](#license)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/manna-ai-arena)
 
 ---
 
 ## 🎯 Overview
 
-**Godspeed** is an advanced AI-powered trading system built for the Aster DEX futures market. It combines sophisticated technical analysis, risk management, and real-time market monitoring to execute profitable trades 24/7.
+An intelligent, autonomous cryptocurrency trading system that uses multi-agent AI to analyze markets, make decisions, and execute trades on Aster DEX (Binance-compatible API). Built with Next.js, TypeScript, and LLM-powered agents.
 
-### Key Stats
-- **Trading Mode**: Fully Automated 24/7
-- **Exchange**: Aster DEX Futures
-- **Leverage**: Dynamic 20x-100x (per coin)
-- **Capital Allocation**: 100% margin utilization
-- **Confidence Threshold**: 50%+ (Aggressive Mode)
-- **Risk Management**: 2% stop-loss, 6% take-profit, trailing stops
+### Key Features
 
----
-
-## ✨ Features
-
-### 🤖 AI Trading Engine
-- **Multi-Strategy Approach**: RSI, Trend Following, Mean Reversion, Breakout Detection
-- **Real-Time Analysis**: Scans top 50 coins by volume every minute
-- **Aggressive Confidence Thresholds**: 50%+ trades for high opportunity capture
-- **Dynamic Leverage**: Automatically uses maximum leverage per coin (20x-100x)
-- **100% Margin Utilization**: Every trade uses all available margin for maximum efficiency
-
-### 📊 Risk Management
-- **Stop-Loss**: -2% ROE (Return on Equity)
-- **Take-Profit**: +6% ROE (3:1 risk/reward ratio)
-- **Trailing Stop**: +4% ROE after hitting +8% (protect big wins)
-- **Position Monitoring**: Every minute via Vercel Cron
-- **Single Position Limit**: One trade at a time for maximum focus
-
-### 🎨 Professional Dashboard
-- **Real-Time Account Balance**: Updates every 2 seconds
-- **Live Performance Chart**: Tracks account value with smooth interpolation
-- **Trade Journal**: Complete history of all executed trades
-- **Model Chat**: Live feed of Godspeed's trading decisions and reasoning
-- **Open Positions**: Real-time P&L tracking for active trades
-- **Interactive Charts**: Hover to see exact values, toggle between $ and %
-
-### 🔒 Enterprise Features
-- **Vercel Cron Jobs**: 24/7 trading even when browser is closed
-- **Serverless Architecture**: Scalable and cost-effective
-- **API Caching**: Optimized for speed and rate-limit compliance
-- **Error Handling**: Comprehensive logging and error recovery
-- **Precision Handling**: Automatic quantity rounding per exchange requirements
+- 🤖 **Multi-Agent AI System** - Technical analysts, risk managers, and execution specialists
+- 📊 **Real-Time Analysis** - RSI, Moving Averages, Volume, Momentum calculations
+- 🛡️ **Risk Management** - Dynamic position sizing, stop-loss, take-profit
+- 🔄 **24/7 Trading** - Continuous market scanning and opportunity detection
+- 📈 **Position Monitoring** - Automatic trade management with trailing stops
+- 📉 **Performance Tracking** - Win rate, P&L, Sharpe ratio, drawdown metrics
 
 ---
 
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     FRONTEND (Next.js)                       │
-├─────────────────────────────────────────────────────────────┤
-│  • Real-time Dashboard (React + Zustand)                    │
-│  • Performance Charts (Interactive SVG)                     │
-│  • Trade Journal & Model Chat                               │
-│  • WebSocket Price Tickers                                  │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│                   API ROUTES (Next.js API)                   │
-├─────────────────────────────────────────────────────────────┤
-│  • /api/cron/trading → Vercel Cron (every minute)          │
-│  • /api/trades → Trade history & persistence               │
-│  • /api/model-message → Chat messages                      │
-│  • /api/aster/* → Aster DEX proxy endpoints                │
-│  • /api/optimized-data → Cached account/position data      │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│                  TRADING SERVICES (TypeScript)               │
-├─────────────────────────────────────────────────────────────┤
-│  • aiTradingService → Core trading logic                   │
-│  • aiTradingModels → Godspeed analysis model               │
-│  • asterDexService → Exchange API integration              │
-│  • optimizedDataService → Data aggregation & caching       │
-└─────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────┐
-│                   ASTER DEX FUTURES API                      │
-├─────────────────────────────────────────────────────────────┤
-│  • Market Data (Prices, Volume, Klines)                    │
-│  • Account Info (Balance, Positions, Orders)               │
-│  • Order Execution (Market, Limit, Leverage)               │
-│  • Position Management (Open, Close, Monitor)              │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🚀 Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Node.js**: 18.x or higher
-- **npm** or **yarn**
-- **Aster DEX Account**: With API credentials
-- **Vercel Account**: For deployment (optional for local dev)
+- Node.js 18+ and npm
+- PostgreSQL database (or Neon/Supabase)
+- Aster DEX API credentials
+- Ollama (for local LLM) or OpenAI API key
 
-### Installation
+### 1. Clone & Install
 
-1. **Clone the repository**
 ```bash
-git clone https://github.com/your-username/godspeed-trading.git
-cd godspeed-trading
-```
-
-2. **Install dependencies**
-```bash
+git clone https://github.com/yourusername/manna-ai-arena.git
+cd manna-ai-arena
 npm install
 ```
 
-3. **Configure environment variables**
+### 2. Environment Setup
 
-Create a `.env.local` file in the root directory:
+Create `.env.local`:
 
 ```env
-# Aster DEX API Credentials
-ASTER_API_KEY=your_aster_api_key_here
-ASTER_SECRET_KEY=your_aster_secret_key_here
+# Aster DEX API (Required)
+ASTER_API_KEY=your_api_key_here
+ASTER_SECRET_KEY=your_secret_key_here
+ASTER_BASE_URL=https://fapi.asterdex.com
 
-# Optional: Database (for trade persistence)
-DATABASE_URL=postgresql://user:password@host:port/database
+# Database (Required)
+DATABASE_URL=postgresql://user:password@host:5432/database
 
-# Optional: Cron Job Security
+# LLM Configuration (Choose one)
+# Option 1: Local Ollama (Recommended for cost)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Option 2: OpenAI (Cloud-based, costs apply)
+# OPENAI_API_KEY=sk-...
+# USE_OPENAI=true
+
+# Cron Secret (For automated trading)
 CRON_SECRET=your_random_secret_here
 
-# Optional: Vercel URL (auto-set in production)
-VERCEL_URL=
+# Trading Configuration (Optional - defaults shown)
+TRADING_CONFIDENCE_THRESHOLD=0.25
+TRADING_MIN_BALANCE=10
+TRADING_STOP_LOSS=3.0
+TRADING_TAKE_PROFIT=5.0
 ```
 
-4. **Run development server**
+### 3. Database Setup
+
 ```bash
+# The app will auto-create tables on first run
+# Or manually create them:
+npm run setup:db
+```
+
+### 4. Run Locally
+
+```bash
+# Development
 npm run dev
-```
 
-5. **Open browser**
-```
-http://localhost:3000
-```
-
----
-
-## ⚙️ Configuration
-
-### Trading Parameters
-
-All trading parameters are optimized and hardcoded in `services/aiTradingService.ts`:
-
-```typescript
-// Capital Allocation
-const allocationPercent = 1.0; // 100% of available margin
-
-// Confidence Threshold
-const MIN_CONFIDENCE = 0.50; // 50% minimum (Aggressive Mode)
-
-// Risk Management
-const STOP_LOSS_ROE = -2.0;      // -2% ROE
-const TAKE_PROFIT_ROE = 6.0;     // +6% ROE
-const TRAILING_STOP_ROE = 4.0;   // +4% ROE (after +8%)
-```
-
-### Model Configuration
-
-Godspeed's analysis model in `services/aiTradingModels.ts`:
-
-```typescript
-// RSI Thresholds (Aggressive)
-const isOversold = rsi < 40;    // Was 30
-const isOverbought = rsi > 60;  // Was 70
-
-// Volume Requirements (Aggressive)
-const hasHighVolume = volumeRatio > 1.2;     // 20% above average
-const hasVeryHighVolume = volumeRatio > 2.0; // 100% above average
-
-// Trend Strength (Aggressive)
-const isStrongTrend = trendAnalysis.strength > 0.6; // Was 0.7
-```
-
----
-
-## 🌐 Deployment
-
-### Vercel Deployment (Recommended)
-
-1. **Install Vercel CLI**
-```bash
-npm install -g vercel
-```
-
-2. **Login to Vercel**
-```bash
-vercel login
-```
-
-3. **Deploy to production**
-```bash
-vercel --prod
-```
-
-4. **Set environment variables** in Vercel Dashboard
-   - Go to your project → Settings → Environment Variables
-   - Add `ASTER_API_KEY`, `ASTER_SECRET_KEY`, `CRON_SECRET`
-
-5. **Verify cron job** is running
-   - Check `/api/cron/trading` endpoint
-   - Monitor logs: `vercel logs your-deployment-url`
-
-### Cron Job Configuration
-
-The `vercel.json` file configures automatic trading:
-
-```json
-{
-  "crons": [
-    {
-      "path": "/api/cron/trading",
-      "schedule": "*/1 * * * *"
-    }
-  ]
-}
-```
-
-This runs Godspeed's trading cycle **every minute, 24/7**.
-
----
-
-## 🤖 Trading System
-
-### How Godspeed Works
-
-1. **Market Scan** (Every Minute)
-   - Fetches top 50 coins by 24h volume
-   - Retrieves price, volume, and technical data
-   - Calculates RSI, moving averages, volatility
-
-2. **Signal Generation**
-   - Analyzes each coin using multi-strategy approach
-   - Generates BUY/SELL/HOLD signals with confidence scores
-   - Filters signals below 50% confidence
-
-3. **Trade Selection**
-   - Selects highest confidence signal
-   - Checks for existing positions (max 1 at a time)
-   - Validates account balance and leverage limits
-
-4. **Trade Execution**
-   - Calculates position size: `margin × leverage / price`
-   - Rounds quantity to exchange precision
-   - Sets leverage via API
-   - Places market order
-   - Saves trade to database
-   - Sends decision to Model Chat
-
-5. **Position Monitoring** (Every Minute)
-   - Calculates ROE (Return on Equity)
-   - Checks stop-loss (-2%), take-profit (+6%), trailing stop (+4%)
-   - Closes positions automatically when thresholds hit
-   - Saves completed trade with P&L
-
-### Trading Strategies
-
-**Strategy 1: High Confidence Breakout**
-- RSI > 50, Strong bullish trend, Very high volume (2x+)
-- Confidence: 70%+
-
-**Strategy 2: Mean Reversion**
-- RSI < 40 (oversold) or > 60 (overbought)
-- High volume confirmation (1.2x+)
-- Confidence: 62%+
-
-**Strategy 3: Strong Trend Following**
-- Strong trend + RSI momentum + High volume
-- Confidence: 65%+
-
-**Strategy 4: Moderate Trend Following**
-- Bullish/Bearish trend + RSI momentum + Normal volume
-- Confidence: 52%+
-
-**Strategy 5: Aggressive Range Trading** (NEW)
-- RSI 45-55, Decent volume (0.8x+)
-- Confidence: 51%+
-
-### Risk Management Rules
-
-| Scenario | ROE Threshold | Action | Reason |
-|----------|---------------|--------|--------|
-| **Stop-Loss** | -2% | Close immediately | Cut losses fast |
-| **Take-Profit** | +6% | Close immediately | Lock in 3:1 win |
-| **Trailing Stop** | +4% (after +8%) | Close if drops back | Protect big gains |
-
----
-
-## 📡 API Documentation
-
-### Public Endpoints
-
-#### GET `/api/trades`
-Fetch trade history
-
-**Query Parameters:**
-- `symbol` (optional): Filter by trading pair
-- `model` (optional): Filter by model name
-- `limit` (optional): Number of trades (default: 100)
-
-**Response:**
-```json
-{
-  "success": true,
-  "trades": [
-    {
-      "id": "trade-12345-1234567890",
-      "symbol": "BTC/USDT",
-      "side": "BUY",
-      "entryPrice": 50000,
-      "exitPrice": 51000,
-      "size": 0.1,
-      "leverage": 20,
-      "pnl": 20,
-      "status": "completed",
-      "timestamp": "2025-01-01T12:00:00Z",
-      "model": "Godspeed"
-    }
-  ],
-  "stats": {
-    "totalTrades": 100,
-    "wins": 65,
-    "losses": 35,
-    "winRate": 65,
-    "totalPnL": 500,
-    "avgPnL": 5
-  }
-}
-```
-
-#### POST `/api/trades`
-Add a new trade (internal use)
-
-#### GET `/api/model-message`
-Fetch model chat messages
-
-**Query Parameters:**
-- `limit` (optional): Number of messages (default: 50)
-
-**Response:**
-```json
-{
-  "success": true,
-  "messages": [
-    {
-      "id": "msg-abc123",
-      "model": "Godspeed",
-      "message": "🚀 BUY BTC/USDT\n💰 20x Leverage...",
-      "timestamp": 1234567890,
-      "type": "trade"
-    }
-  ]
-}
-```
-
-#### GET `/api/optimized-data`
-Get cached account and position data
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "accountValue": 1000,
-    "positions": [
-      {
-        "symbol": "BTC/USDT",
-        "side": "LONG",
-        "size": 0.1,
-        "entryPrice": 50000,
-        "currentPrice": 51000,
-        "pnl": 100,
-        "leverage": 20
-      }
-    ]
-  }
-}
-```
-
-### Internal Endpoints (Vercel Cron)
-
-#### GET `/api/cron/trading`
-Triggers Godspeed's trading cycle
-
-**Headers:**
-```
-Authorization: Bearer YOUR_CRON_SECRET
-```
-
----
-
-## 📊 Monitoring
-
-### Vercel Logs
-
-View real-time logs:
-```bash
-vercel logs ai.omnipotence.art
-```
-
-Filter for trading activity:
-```bash
-vercel logs ai.omnipotence.art | grep "EXECUTING\|Trade executed\|CLOSED"
-```
-
-### Key Log Messages
-
-| Message | Meaning |
-|---------|---------|
-| `⏰ Cron job triggered` | Trading cycle started |
-| `🔍 Analyzing 50 symbols` | Market scan in progress |
-| `✅ TRADE APPROVED` | High confidence signal found |
-| `🚀 GODSPEED EXECUTING` | Trade being placed |
-| `✅ GODSPEED TRADE EXECUTED` | Order filled successfully |
-| `🚨 CLOSING POSITION` | Stop-loss/take-profit triggered |
-| `💾 Trade entry saved` | Trade recorded in database |
-
-### Dashboard Metrics
-
-- **Account Balance**: Updates every 2 seconds
-- **Performance Chart**: Real-time account value tracking
-- **Trades Tab**: Complete trade history with P&L
-- **Model Chat**: Live feed of trading decisions
-- **Positions Tab**: Open positions with current P&L
-
----
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-godspeed-trading/
-├── app/
-│   ├── api/              # API routes
-│   │   ├── cron/         # Vercel cron handlers
-│   │   ├── trades/       # Trade persistence
-│   │   ├── aster/        # Exchange API proxy
-│   │   └── model-message/# Chat messages
-│   ├── globals.css       # Global styles
-│   ├── layout.tsx        # Root layout
-│   └── page.tsx          # Main page
-├── components/           # React components
-│   ├── AIPerformanceChart.tsx
-│   ├── NOF1Dashboard.tsx
-│   ├── ModelChat.tsx
-│   └── ...
-├── services/             # Core trading logic
-│   ├── aiTradingService.ts
-│   ├── aiTradingModels.ts
-│   ├── asterDexService.ts
-│   └── optimizedDataService.ts
-├── store/                # State management (Zustand)
-│   └── useStore.ts
-├── types/                # TypeScript types
-│   └── trading.ts
-├── lib/                  # Utilities
-│   ├── logger.ts
-│   ├── db.ts
-│   └── tradeMemory.ts
-├── vercel.json           # Vercel configuration
-└── package.json          # Dependencies
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm test -- --watch
-
-# Run tests with coverage
-npm test -- --coverage
-```
-
-### Linting
-
-```bash
-# Check for errors
-npm run lint
-
-# Fix auto-fixable issues
-npm run lint -- --fix
-```
-
-### Building
-
-```bash
-# Build for production
+# Production
 npm run build
-
-# Start production server
 npm start
 ```
 
+Visit `http://localhost:3000`
+
 ---
 
-## 🐛 Troubleshooting
+## 🌐 Vercel Deployment
 
-### Common Issues
+### **IMPORTANT: LLM Configuration for Cloud Deployment**
 
-#### 1. **Cron job not executing trades**
-- Check Vercel logs: `vercel logs your-url`
-- Verify `CRON_SECRET` is set in environment variables
-- Ensure `/api/cron/trading` path is correct in `vercel.json`
+Since Ollama runs locally, you have 3 options for Vercel:
 
-#### 2. **"Precision is over the maximum defined" error**
-- This is fixed automatically via `getSymbolPrecision` and `roundQuantity`
-- Verify exchange info is cached properly
+#### Option 1: Use OpenAI API (Recommended for Vercel)
+```env
+# .env in Vercel
+OPENAI_API_KEY=sk-your-key-here
+USE_OPENAI=true
+```
 
-#### 3. **Account balance not updating**
-- Check frontend polling: Should update every 2 seconds
-- Verify `/api/optimized-data` endpoint returns correct data
-- Check cache TTLs in `optimizedDataService.ts`
+**Cost**: ~$0.002 per analysis (~$0.02-0.10 per day with moderate trading)
 
-#### 4. **Chart not moving**
-- Chart updates automatically with `accountValue` changes
-- Verify Zustand store is receiving updates
-- Check browser console for errors
+#### Option 2: Deploy Ollama to Cloud
+- Deploy Ollama on a VPS (DigitalOcean, AWS EC2, etc.)
+- Expose via secure endpoint
+- Set `OLLAMA_BASE_URL=https://your-ollama-server.com`
 
-#### 5. **Trades not showing in UI**
-- Verify `/api/trades` endpoint returns data
-- Check database or memory storage initialization
-- Look for errors in Vercel logs
+#### Option 3: Hybrid Approach
+- Use local Ollama for development
+- Switch to OpenAI for production Vercel deployment
 
-### Debug Mode
-
-Enable detailed logging by checking Vercel logs:
+### Deploy to Vercel
 
 ```bash
-vercel logs your-url --follow
+# Install Vercel CLI
+npm i -g vercel
+
+# Deploy
+vercel
+
+# Set environment variables
+vercel env add ASTER_API_KEY
+vercel env add ASTER_SECRET_KEY
+vercel env add DATABASE_URL
+vercel env add OPENAI_API_KEY  # If using OpenAI
+vercel env add CRON_SECRET
+
+# Deploy to production
+vercel --prod
+```
+
+### 24/7 Trading with Vercel Cron
+
+Vercel has limitations for 24/7 processes, so we use **Vercel Cron Jobs**:
+
+#### 1. Add to `vercel.json`:
+```json
+{
+  "crons": [{
+    "path": "/api/cron/trading",
+    "schedule": "*/5 * * * *"
+  }]
+}
+```
+
+This runs trading analysis every 5 minutes.
+
+#### 2. Protect Cron Endpoint
+
+The endpoint checks for `CRON_SECRET`:
+
+```bash
+# Vercel will call:
+https://your-app.vercel.app/api/cron/trading?secret=YOUR_CRON_SECRET
+```
+
+#### 3. Alternative: External Cron Services
+
+For more control, use external cron services:
+
+**EasyCron** (Free tier available):
+```
+URL: https://your-app.vercel.app/api/cron/trading?secret=YOUR_SECRET
+Frequency: Every 5 minutes
+```
+
+**Uptime Robot** (Free):
+- Monitor endpoint + trigger trading
+- Interval: 5 minutes
+
+---
+
+## 📊 How It Works
+
+### Trading Workflow
+
+1. **Market Scanning** - Scans all Aster DEX pairs for opportunities
+2. **Technical Analysis** - Calculates RSI, MA, volatility from real-time data
+3. **AI Decision** - Multi-agent system analyzes and makes BUY/SELL/HOLD decision
+4. **Risk Assessment** - Validates balance, confidence, position sizing
+5. **Trade Execution** - Places market order with retry logic
+6. **Position Monitoring** - Manages stop-loss, take-profit, trailing stops
+7. **Performance Tracking** - Records metrics and results
+
+### Multi-Agent System
+
+- **Technical Analyst** - Analyzes price action, indicators, patterns
+- **Chief Analyst** - Makes final trading decision based on all data
+- **Risk Manager** - Validates trade safety and position sizing
+- **Execution Specialist** - Handles order placement and timing
+
+---
+
+## 🔒 Security Best Practices
+
+1. **Never commit `.env` files** - Keep API keys secret
+2. **Use read-only API keys** for testing (if available)
+3. **Start with small balance** - Test with $10-50 initially
+4. **Monitor actively** - Check positions regularly
+5. **Set stop-losses** - Always protect capital
+6. **Use strong secrets** - For CRON_SECRET, use long random strings
+
+---
+
+## 📈 Performance & Risk
+
+### Conservative Settings (Default)
+- **Position Size**: 10-20% of balance
+- **Leverage**: 1-2x
+- **Stop Loss**: 3%
+- **Take Profit**: 5%
+- **Expected Win Rate**: 60%+
+
+### Aggressive Settings
+- **Position Size**: 20-30% of balance
+- **Leverage**: 2-3x
+- **Stop Loss**: 2-5% (adaptive)
+- **Take Profit**: 5-10% (adaptive)
+- **Expected Win Rate**: 65%+
+
+**Disclaimer**: Cryptocurrency trading involves significant risk. Past performance does not guarantee future results.
+
+---
+
+## 🛠️ API Endpoints
+
+### Trading
+- `POST /api/multi-agent?action=start&symbol=BTCUSDT` - Start analysis
+- `GET /api/multi-agent?action=workflows` - Get workflow status
+- `GET /api/positions` - View open positions
+- `GET /api/performance` - Get performance metrics
+
+### Market Data
+- `GET /api/prices` - Real-time prices
+- `GET /api/agent-insights?limit=10` - AI insights
+
+### System
+- `GET /api/health` - Health check
+- `POST /api/cron/trading?secret=XXX` - Trigger trading cycle
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run tests
+npm test
+
+# Test trading workflow
+curl http://localhost:3000/api/multi-agent?action=start&symbol=BTCUSDT
+
+# Check positions
+curl http://localhost:3000/api/positions
+
+# View performance
+curl http://localhost:3000/api/performance
+```
+
+---
+
+## 📝 Configuration
+
+Edit `lib/configService.ts` or use environment variables:
+
+```typescript
+{
+  confidenceThreshold: 0.25,    // 25% minimum confidence
+  minBalanceForTrade: 10,       // $10 minimum balance
+  stopLossPercent: 3.0,         // 3% stop loss
+  takeProfitPercent: 5.0,       // 5% take profit
+  maxLeverage: 3,               // Max 3x leverage
+  positionSize: "10-30%",       // Based on confidence
+}
 ```
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please follow these guidelines:
+Contributions welcome! Please:
 
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/amazing-feature`
-3. **Commit your changes**: `git commit -m 'Add amazing feature'`
-4. **Push to the branch**: `git push origin feature/amazing-feature`
-5. **Open a Pull Request**
-
-### Coding Standards
-
-- Use TypeScript for all new code
-- Follow existing code style
-- Add tests for new features
-- Update documentation as needed
-- Keep commits atomic and well-described
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
+
+---
+
+## ⚠️ Disclaimer
+
+This software is for educational purposes. Cryptocurrency trading involves substantial risk of loss. The authors are not responsible for any financial losses incurred through use of this software. Always trade responsibly and only with funds you can afford to lose.
 
 ---
 
 ## 🙏 Acknowledgments
 
-- **Aster DEX** for providing a robust futures trading API
-- **Vercel** for serverless deployment and cron jobs
-- **Next.js** for the amazing React framework
-- **God** for guidance and wisdom in building this system
+- Built with [Next.js](https://nextjs.org/)
+- AI powered by [Ollama](https://ollama.ai/) / [OpenAI](https://openai.com/)
+- Deployed on [Vercel](https://vercel.com/)
+- Trading on [Aster DEX](https://asterdex.com/)
 
 ---
 
 ## 📞 Support
 
-For issues, questions, or support:
-
-- **GitHub Issues**: [Open an issue](https://github.com/your-username/godspeed-trading/issues)
-- **Documentation**: [See GODSPEED.md](GODSPEED.md) for detailed trading system info
-- **Deployment**: [See DEPLOYMENT.md](DEPLOYMENT.md) for Vercel setup guide
+- 📧 Email: your-email@example.com
+- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/manna-ai-arena/issues)
+- 💬 Discord: [Join Server](https://discord.gg/your-invite)
 
 ---
 
-**Built with ❤️ and guided by faith** 🙏✨
-
-**May God bless every trade! In Jesus' name, Amen!**
+**Built with ❤️ and faith. "I can do all things through Christ who strengthens me." - Philippians 4:13** 🙏
