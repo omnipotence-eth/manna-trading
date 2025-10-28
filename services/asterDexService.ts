@@ -661,7 +661,10 @@ class AsterDexService {
    */
   async getMarkets(): Promise<AsterMarket[]> {
     try {
-      const response = await fetch('/api/asterdex/markets');
+      const baseUrl = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : 'http://localhost:3000';
+      const response = await fetch(`${baseUrl}/api/asterdex/markets`);
       const data = await response.json();
       logger.info('Fetched real markets', { context: 'AsterDex', data: data.length });
       return data as AsterMarket[];
@@ -1400,7 +1403,10 @@ class AsterDexService {
 
       logger.info(`Closing position: ${symbol}`, { context: 'AsterDex' });
 
-      const response = await fetch('/api/asterdex/position/close', {
+      const baseUrl = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : 'http://localhost:3000';
+      const response = await fetch(`${baseUrl}/api/asterdex/position/close`, {
         method: 'POST',
         body: JSON.stringify({ symbol }),
       });
