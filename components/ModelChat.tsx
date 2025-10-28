@@ -75,7 +75,7 @@ export default function ModelChat() {
                   animate={{ opacity: 1, x: 0, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ delay: index * 0.02 }}
-                  className={`p-2 rounded border backdrop-blur-sm ${
+                  className={`p-3 rounded border backdrop-blur-sm ${
                     msg.type === 'trade' 
                       ? 'bg-neon-blue/10 border-neon-blue/30 shadow-lg shadow-neon-blue/10' 
                       : msg.type === 'analysis'
@@ -83,8 +83,8 @@ export default function ModelChat() {
                       : 'bg-black/50 border-green-500/20'
                   }`}
                 >
-                  <div className="flex items-start gap-1.5">
-                    <span className="text-base shrink-0 mt-0.5">
+                  <div className="flex items-start gap-2">
+                    <span className="text-lg shrink-0 mt-0.5">
                       {msg.type === 'trade' ? '💼' : msg.type === 'analysis' ? '🔍' : '💭'}
                     </span>
                     <div className="flex-1 min-w-0">

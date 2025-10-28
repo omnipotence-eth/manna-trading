@@ -10,7 +10,8 @@ export class GodspeedModel implements AITradingModel {
   private modelName = 'Godspeed';
 
   /**
-   * Analyze chart trends across multiple timeframes
+   * 🔮 PREDICTIVE TREND ANALYSIS
+   * Uses leading indicators to predict trends instead of chasing them
    */
   private async analyzeChartTrends(symbol: string): Promise<{
     trend1m: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
@@ -22,6 +23,15 @@ export class GodspeedModel implements AITradingModel {
     trendAlignment: 'BULLISH' | 'BEARISH' | 'MIXED' | 'NEUTRAL';
     confidence: number;
     reasoning: string;
+    // New predictive indicators
+    predictiveSignal: 'EARLY_BULLISH' | 'EARLY_BEARISH' | 'NEUTRAL';
+    leadingIndicators: {
+      volumeDivergence: number;
+      momentumShift: number;
+      supportResistanceBreak: number;
+      accumulationDistribution: number;
+    };
+    predictionConfidence: number;
   }> {
     try {
       // Fetch candles for different timeframes
@@ -119,6 +129,26 @@ export class GodspeedModel implements AITradingModel {
         reasoning = `⚠️ MIXED TRENDS: 1m ${analysis1m.trend}, 5m ${analysis5m.trend}, 15m ${analysis15m.trend}`;
       }
 
+      // 🔮 PREDICTIVE ANALYSIS: Calculate leading indicators
+      const leadingIndicators = await this.calculateLeadingIndicators(symbol, klines1m || [], klines5m || [], klines15m || []);
+      
+      // Determine predictive signal based on leading indicators
+      const predictiveSignal = this.determinePredictiveSignal(leadingIndicators, analysis1m.trend, analysis5m.trend, analysis15m.trend);
+      
+      // Calculate prediction confidence
+      const predictionConfidence = this.calculatePredictionConfidence(leadingIndicators, analysis1m.strength, analysis5m.strength, analysis15m.strength);
+
+      // Enhance trend alignment with predictive signals
+      if (predictiveSignal === 'EARLY_BULLISH' && predictionConfidence >= 0.6) {
+        trendAlignment = 'BULLISH';
+        confidence = Math.max(confidence, predictionConfidence);
+        reasoning = `🔮 EARLY BULLISH PREDICTION: Leading indicators suggest uptrend forming (confidence: ${(predictionConfidence * 100).toFixed(0)}%)`;
+      } else if (predictiveSignal === 'EARLY_BEARISH' && predictionConfidence >= 0.6) {
+        trendAlignment = 'BEARISH';
+        confidence = Math.max(confidence, predictionConfidence);
+        reasoning = `🔮 EARLY BEARISH PREDICTION: Leading indicators suggest downtrend forming (confidence: ${(predictionConfidence * 100).toFixed(0)}%)`;
+      }
+
       return {
         trend1m: analysis1m.trend,
         trend5m: analysis5m.trend,
@@ -128,7 +158,10 @@ export class GodspeedModel implements AITradingModel {
         strength15m: analysis15m.strength,
         trendAlignment,
         confidence,
-        reasoning
+        reasoning,
+        predictiveSignal,
+        leadingIndicators,
+        predictionConfidence
       };
     } catch (error) {
       logger.error(`Chart trend analysis failed for ${symbol}`, error, { context: 'Godspeed' });
@@ -141,9 +174,275 @@ export class GodspeedModel implements AITradingModel {
         strength15m: 0,
         trendAlignment: 'NEUTRAL',
         confidence: 0,
-        reasoning: 'Trend analysis error'
+        reasoning: 'Trend analysis error',
+        predictiveSignal: 'NEUTRAL',
+        leadingIndicators: {
+          volumeDivergence: 0,
+          momentumShift: 0,
+          supportResistanceBreak: 0,
+          accumulationDistribution: 0
+        },
+        predictionConfidence: 0
       };
     }
+  }
+
+  /**
+   * 🔮 CALCULATE LEADING INDICATORS
+   * Analyzes early signals that predict trend changes before they happen
+   */
+  private async calculateLeadingIndicators(symbol: string, klines1m: any[], klines5m: any[], klines15m: any[]): Promise<{
+    volumeDivergence: number;
+    momentumShift: number;
+    supportResistanceBreak: number;
+    accumulationDistribution: number;
+  }> {
+    try {
+      // 1. VOLUME DIVERGENCE ANALYSIS
+      // Detects when volume increases but price doesn't follow (early reversal signal)
+      const volumeDivergence = this.calculateVolumeDivergence(klines1m, klines5m);
+      
+      // 2. MOMENTUM SHIFT ANALYSIS  
+      // Detects when momentum is changing direction before price follows
+      const momentumShift = this.calculateMomentumShift(klines1m, klines5m, klines15m);
+      
+      // 3. SUPPORT/RESISTANCE BREAK ANALYSIS
+      // Detects when price is approaching key levels (breakout prediction)
+      const supportResistanceBreak = this.calculateSupportResistanceBreak(klines1m, klines5m);
+      
+      // 4. ACCUMULATION/DISTRIBUTION ANALYSIS
+      // Detects smart money accumulation before retail follows
+      const accumulationDistribution = this.calculateAccumulationDistribution(klines1m, klines5m);
+
+      return {
+        volumeDivergence,
+        momentumShift,
+        supportResistanceBreak,
+        accumulationDistribution
+      };
+    } catch (error) {
+      logger.error('Failed to calculate leading indicators', error, { context: 'Godspeed' });
+      return {
+        volumeDivergence: 0,
+        momentumShift: 0,
+        supportResistanceBreak: 0,
+        accumulationDistribution: 0
+      };
+    }
+  }
+
+  /**
+   * Calculate volume divergence (leading indicator)
+   */
+  private calculateVolumeDivergence(klines1m: any[], klines5m: any[]): number {
+    if (klines1m.length < 5 || klines5m.length < 3) return 0;
+
+    // Compare recent volume vs price movement
+    const recent1m = klines1m.slice(-5);
+    const recent5m = klines5m.slice(-3);
+    
+    // Calculate volume trend
+    const volumes1m = recent1m.map(k => parseFloat(k[5]));
+    const avgVolume1m = volumes1m.reduce((sum, vol) => sum + vol, 0) / volumes1m.length;
+    const currentVolume1m = volumes1m[volumes1m.length - 1];
+    const volumeRatio1m = currentVolume1m / avgVolume1m;
+
+    // Calculate price momentum
+    const prices1m = recent1m.map(k => parseFloat(k[4]));
+    const priceChange1m = ((prices1m[prices1m.length - 1] - prices1m[0]) / prices1m[0]) * 100;
+
+    // Volume divergence: High volume but low price movement = reversal signal
+    let divergence = 0;
+    if (volumeRatio1m > 1.5 && Math.abs(priceChange1m) < 0.5) {
+      divergence = volumeRatio1m * 0.3; // Strong divergence
+    } else if (volumeRatio1m > 1.2 && Math.abs(priceChange1m) < 1.0) {
+      divergence = volumeRatio1m * 0.2; // Moderate divergence
+    }
+
+    return Math.min(divergence, 1.0);
+  }
+
+  /**
+   * Calculate momentum shift (leading indicator)
+   */
+  private calculateMomentumShift(klines1m: any[], klines5m: any[], klines15m: any[]): number {
+    if (klines1m.length < 10) return 0;
+
+    // Calculate RSI for different timeframes
+    const rsi1m = this.calculateRSIFromKlines(klines1m.slice(-10));
+    const rsi5m = this.calculateRSIFromKlines(klines5m.slice(-6));
+    
+    // Momentum shift: RSI divergence between timeframes
+    let shift = 0;
+    
+    // Bullish momentum shift: 1m RSI rising while 5m RSI still low
+    if (rsi1m > 50 && rsi5m < 45 && rsi1m > rsi5m + 10) {
+      shift = (rsi1m - rsi5m) / 100; // Positive shift
+    }
+    // Bearish momentum shift: 1m RSI falling while 5m RSI still high  
+    else if (rsi1m < 50 && rsi5m > 55 && rsi5m > rsi1m + 10) {
+      shift = -(rsi5m - rsi1m) / 100; // Negative shift
+    }
+
+    return Math.max(-1.0, Math.min(1.0, shift));
+  }
+
+  /**
+   * Calculate support/resistance break probability (leading indicator)
+   */
+  private calculateSupportResistanceBreak(klines1m: any[], klines5m: any[]): number {
+    if (klines1m.length < 20) return 0;
+
+    // Find recent highs and lows
+    const highs = klines1m.slice(-20).map(k => parseFloat(k[2]));
+    const lows = klines1m.slice(-20).map(k => parseFloat(k[3]));
+    const currentPrice = parseFloat(klines1m[klines1m.length - 1][4]);
+
+    const recentHigh = Math.max(...highs);
+    const recentLow = Math.min(...lows);
+    const range = recentHigh - recentLow;
+    
+    // Calculate proximity to key levels
+    const proximityToHigh = (recentHigh - currentPrice) / range;
+    const proximityToLow = (currentPrice - recentLow) / range;
+    
+    // Breakout probability: Close to resistance/support + volume
+    let breakProbability = 0;
+    
+    if (proximityToHigh < 0.1) { // Near resistance
+      const volume = parseFloat(klines1m[klines1m.length - 1][5]);
+      const avgVolume = klines1m.slice(-10).map(k => parseFloat(k[5])).reduce((sum, vol) => sum + vol, 0) / 10;
+      if (volume > avgVolume * 1.3) {
+        breakProbability = 0.7; // High breakout probability
+      }
+    } else if (proximityToLow < 0.1) { // Near support
+      const volume = parseFloat(klines1m[klines1m.length - 1][5]);
+      const avgVolume = klines1m.slice(-10).map(k => parseFloat(k[5])).reduce((sum, vol) => sum + vol, 0) / 10;
+      if (volume > avgVolume * 1.3) {
+        breakProbability = -0.7; // High breakdown probability
+      }
+    }
+
+    return breakProbability;
+  }
+
+  /**
+   * Calculate accumulation/distribution (leading indicator)
+   */
+  private calculateAccumulationDistribution(klines1m: any[], klines5m: any[]): number {
+    if (klines1m.length < 10) return 0;
+
+    // Calculate A/D line: Smart money accumulation
+    let adLine = 0;
+    for (let i = 1; i < klines1m.length; i++) {
+      const current = klines1m[i];
+      const previous = klines1m[i - 1];
+      
+      const high = parseFloat(current[2]);
+      const low = parseFloat(current[3]);
+      const close = parseFloat(current[4]);
+      const volume = parseFloat(current[5]);
+      
+      const previousClose = parseFloat(previous[4]);
+      
+      // Money Flow Multiplier
+      const mfm = ((close - low) - (high - close)) / (high - low);
+      
+      // Money Flow Volume
+      const mfv = mfm * volume;
+      
+      adLine += mfv;
+    }
+
+    // Normalize A/D line
+    const avgVolume = klines1m.map(k => parseFloat(k[5])).reduce((sum, vol) => sum + vol, 0) / klines1m.length;
+    const normalizedAD = adLine / (avgVolume * klines1m.length);
+
+    // Accumulation signal: Positive A/D = smart money buying
+    return Math.max(-1.0, Math.min(1.0, normalizedAD * 10));
+  }
+
+  /**
+   * Determine predictive signal based on leading indicators
+   */
+  private determinePredictiveSignal(indicators: any, trend1m: string, trend5m: string, trend15m: string): 'EARLY_BULLISH' | 'EARLY_BEARISH' | 'NEUTRAL' {
+    const { volumeDivergence, momentumShift, supportResistanceBreak, accumulationDistribution } = indicators;
+    
+    let bullishScore = 0;
+    let bearishScore = 0;
+
+    // Score based on leading indicators
+    if (volumeDivergence > 0.3) bullishScore += 1;
+    if (momentumShift > 0.2) bullishScore += 1;
+    if (supportResistanceBreak > 0.5) bullishScore += 1;
+    if (accumulationDistribution > 0.3) bullishScore += 1;
+
+    if (volumeDivergence < -0.3) bearishScore += 1;
+    if (momentumShift < -0.2) bearishScore += 1;
+    if (supportResistanceBreak < -0.5) bearishScore += 1;
+    if (accumulationDistribution < -0.3) bearishScore += 1;
+
+    // Early signal: Leading indicators suggest trend change
+    if (bullishScore >= 2 && (trend1m === 'SIDEWAYS' || trend5m === 'SIDEWAYS')) {
+      return 'EARLY_BULLISH';
+    } else if (bearishScore >= 2 && (trend1m === 'SIDEWAYS' || trend5m === 'SIDEWAYS')) {
+      return 'EARLY_BEARISH';
+    }
+
+    return 'NEUTRAL';
+  }
+
+  /**
+   * Calculate prediction confidence based on leading indicators
+   */
+  private calculatePredictionConfidence(indicators: any, strength1m: number, strength5m: number, strength15m: number): number {
+    const { volumeDivergence, momentumShift, supportResistanceBreak, accumulationDistribution } = indicators;
+    
+    // Weight leading indicators
+    const leadingScore = (
+      Math.abs(volumeDivergence) * 0.25 +
+      Math.abs(momentumShift) * 0.25 +
+      Math.abs(supportResistanceBreak) * 0.25 +
+      Math.abs(accumulationDistribution) * 0.25
+    );
+
+    // Combine with traditional trend strength
+    const traditionalStrength = (strength1m + strength5m + strength15m) / 3;
+    
+    // Prediction confidence: Leading indicators + trend confirmation
+    return Math.min(1.0, leadingScore + (traditionalStrength * 0.3));
+  }
+
+  /**
+   * Calculate RSI from klines data
+   */
+  private calculateRSIFromKlines(klines: any[]): number {
+    if (klines.length < 14) return 50;
+
+    const closes = klines.map(k => parseFloat(k[4]));
+    const gains = [];
+    const losses = [];
+
+    for (let i = 1; i < closes.length; i++) {
+      const change = closes[i] - closes[i - 1];
+      if (change > 0) {
+        gains.push(change);
+        losses.push(0);
+      } else {
+        gains.push(0);
+        losses.push(Math.abs(change));
+      }
+    }
+
+    const avgGain = gains.reduce((sum, gain) => sum + gain, 0) / gains.length;
+    const avgLoss = losses.reduce((sum, loss) => sum + loss, 0) / losses.length;
+
+    if (avgLoss === 0) return 100;
+    
+    const rs = avgGain / avgLoss;
+    const rsi = 100 - (100 / (1 + rs));
+    
+    return rsi;
   }
 
   /**
@@ -361,6 +660,45 @@ export class GodspeedModel implements AITradingModel {
         };
       }
       
+      // 🔮 PREDICTIVE SIGNAL: Early trend detection (highest priority)
+      if (trendAnalysis.predictiveSignal === 'EARLY_BULLISH' && trendAnalysis.predictionConfidence >= 0.65) {
+        logger.info(`🔮 EARLY BULLISH PREDICTION: ${symbol}`, {
+          context: 'Godspeed',
+          data: {
+            action: 'BUY',
+            predictionConfidence: (trendAnalysis.predictionConfidence * 100).toFixed(1) + '%',
+            leadingIndicators: trendAnalysis.leadingIndicators,
+            trends: `1m:${trendAnalysis.trend1m} 5m:${trendAnalysis.trend5m} 15m:${trendAnalysis.trend15m}`
+          }
+        });
+
+        return {
+          symbol,
+          action: 'BUY',
+          confidence: trendAnalysis.predictionConfidence,
+          size: 1.0,
+          reasoning: `[${this.modelName}] ${trendAnalysis.reasoning}`
+        };
+      } else if (trendAnalysis.predictiveSignal === 'EARLY_BEARISH' && trendAnalysis.predictionConfidence >= 0.65) {
+        logger.info(`🔮 EARLY BEARISH PREDICTION: ${symbol}`, {
+          context: 'Godspeed',
+          data: {
+            action: 'SELL',
+            predictionConfidence: (trendAnalysis.predictionConfidence * 100).toFixed(1) + '%',
+            leadingIndicators: trendAnalysis.leadingIndicators,
+            trends: `1m:${trendAnalysis.trend1m} 5m:${trendAnalysis.trend5m} 15m:${trendAnalysis.trend15m}`
+          }
+        });
+
+        return {
+          symbol,
+          action: 'SELL',
+          confidence: trendAnalysis.predictionConfidence,
+          size: 1.0,
+          reasoning: `[${this.modelName}] ${trendAnalysis.reasoning}`
+        };
+      }
+
       // STRONG SIGNAL: Trend alignment alone (all 3 timeframes agree)
       if (trendAnalysis.confidence >= 0.70 && trendAnalysis.trendAlignment !== 'NEUTRAL' && trendAnalysis.trendAlignment !== 'MIXED') {
         const action = trendAnalysis.trendAlignment === 'BULLISH' ? 'BUY' : 'SELL';

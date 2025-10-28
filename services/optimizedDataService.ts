@@ -124,7 +124,10 @@ class OptimizedDataService {
           let currentPrice = entryPrice; // Default to entry price
           try {
             // Try to get current price from prices API
-            const priceResponse = await fetch('/api/prices');
+            const baseUrl = process.env.VERCEL_URL 
+              ? `https://${process.env.VERCEL_URL}` 
+              : 'http://localhost:3000';
+            const priceResponse = await fetch(`${baseUrl}/api/prices`);
             if (priceResponse.ok) {
               const priceData = await priceResponse.json();
               const priceKey = symbol.replace('/USDT', 'USDT');
@@ -312,7 +315,10 @@ class OptimizedDataService {
    */
   private async getCurrentPrices(): Promise<Record<string, number>> {
     try {
-      const response = await fetch('/api/prices');
+      const baseUrl = process.env.VERCEL_URL 
+        ? `https://${process.env.VERCEL_URL}` 
+        : 'http://localhost:3000';
+      const response = await fetch(`${baseUrl}/api/prices`);
       if (response.ok) {
         const data = await response.json();
         return data.prices || {};
