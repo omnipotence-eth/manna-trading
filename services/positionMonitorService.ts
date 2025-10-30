@@ -7,6 +7,7 @@
 import { logger } from '@/lib/logger';
 import { asterDexService } from './asterDexService';
 import { db } from '@/lib/db';
+import { TRADING_THRESHOLDS } from '@/constants/tradingConstants';
 
 export interface OpenPosition {
   id: string;
@@ -27,6 +28,9 @@ export interface OpenPosition {
   lastChecked: number;
   orderId: string;
   status: 'OPEN' | 'CLOSING' | 'CLOSED';
+  // HIGH PRIORITY FIX: Add error tracking fields
+  lastError?: string;
+  errorCount?: number;
 }
 
 export interface PositionUpdate {
@@ -133,21 +137,47 @@ class PositionMonitorService {
   private async monitorAllPositions(): Promise<void> {
     if (this.positions.size === 0) return;
 
-    logger.debug('Checking positions', {
-      context: 'PositionMonitor',
-      data: { count: this.positions.size }
-    });
+    // HIGH PRIORITY FIX: Add comprehensive error handling with recovery
+    try {
+      logger.debug('Checking positions', {
+        context: 'PositionMonitor',
+        data: { count: this.positions.size }
+      });
 
-    const checkPromises = Array.from(this.positions.values()).map(position =>
-      this.checkPosition(position).catch(error => {
-        logger.error(`Error checking position ${position.id}`, error, {
-          context: 'PositionMonitor',
-          data: { positionId: position.id, symbol: position.symbol }
-        });
-      })
-    );
+      const checkPromises = Array.from(this.positions.values()).map(position =>
+        this.checkPosition(position).catch(error => {
+          logger.error(`Error checking position ${position.id}`, error, {
+            context: 'PositionMonitor',
+            data: { positionId: position.id, symbol: position.symbol }
+          });
+          // HIGH PRIORITY FIX: Mark position as needing attention instead of silently failing
+          position.lastError = error instanceof Error ? error.message : String(error);
+          position.errorCount = (position.errorCount || 0) + 1;
+          
+          // If position has too many errors, mark it for manual review
+          if (position.errorCount >= TRADING_THRESHOLDS.MAX_ERROR_COUNT_FOR_REVIEW) {
+            logger.warn(`Position ${position.id} has ${position.errorCount} consecutive errors - manual review recommended`, {
+              context: 'PositionMonitor',
+              data: { positionId: position.id, symbol: position.symbol }
+            });
+          }
+        })
+      );
 
-    await Promise.all(checkPromises);
+      await Promise.all(checkPromises);
+    } catch (error) {
+      // HIGH PRIORITY FIX: Log error with context and don't crash the service
+      logger.error('Failed to check positions', error instanceof Error ? error : new Error(String(error)), {
+        context: 'PositionMonitor',
+        data: {
+          positionsCount: this.positions.size,
+          errorType: error?.constructor?.name || 'Unknown'
+        }
+      });
+      
+      // Don't throw - keep monitoring service running
+      // Errors on individual positions are already handled above
+    }
   }
 
   /**

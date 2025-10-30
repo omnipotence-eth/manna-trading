@@ -70,6 +70,11 @@ export class MultiAgentTradingSystem {
    */
   async stop(): Promise<void> {
     this.isRunning = false;
+    // CRITICAL FIX: Clear interval to prevent memory leak
+    if (this.cycleIntervalId) {
+      clearTimeout(this.cycleIntervalId);
+      this.cycleIntervalId = null;
+    }
     logger.info('🛑 Multi-Agent Trading System stopped', { context: 'MultiAgentSystem' });
   }
 
@@ -124,7 +129,11 @@ export class MultiAgentTradingSystem {
 
     // Schedule next cycle
     if (this.isRunning) {
-      setTimeout(() => this.runTradingCycle(), 5 * 60 * 1000); // 5 minutes
+      // CRITICAL FIX: Store interval ID and clear previous one if exists
+      if (this.cycleIntervalId) {
+        clearTimeout(this.cycleIntervalId);
+      }
+      this.cycleIntervalId = setTimeout(() => this.runTradingCycle(), 5 * 60 * 1000); // 5 minutes
     }
   }
 

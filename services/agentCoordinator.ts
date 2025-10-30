@@ -8,6 +8,7 @@ import { deepseekService } from '@/services/deepseekService';
 import { AGENT_PROMPTS, MarketData, SentimentData, OnChainData, AnalystReports, FinalDecision, Portfolio, RiskApprovedTrade } from '@/lib/agentPrompts';
 import { DEEPSEEK_OPTIMIZED_PROMPTS } from '@/lib/agentPromptsOptimized';
 import { realBalanceService } from '@/services/realBalanceService';
+import { TRADING_THRESHOLDS } from '@/constants/tradingConstants';
 
 export interface AgentMessage {
   from: string;
@@ -518,25 +519,32 @@ export class AgentCoordinator {
     agent.lastActivity = Date.now();
 
     try {
-      // Ensure we have technical analysis data
+      // HIGH PRIORITY FIX: Validate technical analysis data structure
       const technicalAnalysis = workflow.context.technicalAnalysis;
+      if (!technicalAnalysis || typeof technicalAnalysis !== 'object') {
+        throw new Error('Missing or invalid technical analysis data for Chief Analyst decision');
+      }
 
-      if (!technicalAnalysis) {
-        throw new Error('Missing technical analysis data for Chief Analyst decision');
+      // HIGH PRIORITY FIX: Validate required fields with type guards
+      if (typeof technicalAnalysis.action !== 'string' || !['BUY', 'SELL', 'HOLD'].includes(technicalAnalysis.action)) {
+        throw new Error(`Invalid technical analysis action: ${technicalAnalysis.action}`);
+      }
+      if (typeof technicalAnalysis.confidence !== 'number' || technicalAnalysis.confidence < 0 || technicalAnalysis.confidence > 1) {
+        throw new Error(`Invalid technical analysis confidence: ${technicalAnalysis.confidence}`);
       }
 
       // Create simplified decision based on technical analysis only
       const decision = {
         symbol: workflow.symbol,
         action: technicalAnalysis.action || 'HOLD',
-        confidence: technicalAnalysis.confidence || 0.5,
+        confidence: technicalAnalysis.confidence || TRADING_THRESHOLDS.DEFAULT_CONFIDENCE,
         reasoning: `Based on technical analysis: ${technicalAnalysis.reasoning || 'No reasoning provided'}`,
-        conviction: technicalAnalysis.confidence > 0.7 ? 'high' : technicalAnalysis.confidence > 0.5 ? 'medium' : 'low',
+        conviction: technicalAnalysis.confidence > TRADING_THRESHOLDS.HIGH_CONFIDENCE_THRESHOLD ? 'high' : technicalAnalysis.confidence > TRADING_THRESHOLDS.MEDIUM_CONFIDENCE_THRESHOLD ? 'medium' : 'low',
         recommendedHolding: technicalAnalysis.timeframe || 'hours',
         currentPrice: workflow.context.marketData?.price || 0,
-        bid: workflow.context.marketData?.price ? workflow.context.marketData.price * 0.999 : 0,
-        ask: workflow.context.marketData?.price ? workflow.context.marketData.price * 1.001 : 0,
-        spread: 0.002,
+        bid: workflow.context.marketData?.price ? workflow.context.marketData.price * TRADING_THRESHOLDS.DEFAULT_PRICE_MULTIPLIER_BID : 0,
+        ask: workflow.context.marketData?.price ? workflow.context.marketData.price * TRADING_THRESHOLDS.DEFAULT_PRICE_MULTIPLIER_ASK : 0,
+        spread: TRADING_THRESHOLDS.DEFAULT_SPREAD,
         liquidity: workflow.context.marketData?.volume || 0,
         correlation: workflow.context.marketData?.volatility || 15
       };
@@ -577,12 +585,24 @@ export class AgentCoordinator {
       if (!balanceConfig || balanceConfig.availableBalance === undefined) {
         throw new Error('Unable to fetch real-time balance from Aster DEX API');
       }
-      const balance = balanceConfig.availableBalance;
+      // CRITICAL FIX: Add null check with default value
+      const balance = balanceConfig.availableBalance ?? 0;
+      if (balance <= 0) {
+        throw new Error('Account balance is zero or negative - cannot trade');
+      }
       
-      // Ensure we have the final decision from Chief Analyst
+      // HIGH PRIORITY FIX: Validate final decision structure before using
       const finalDecision = workflow.context.finalDecision;
-      if (!finalDecision) {
-        throw new Error('Final decision not available for risk assessment');
+      if (!finalDecision || typeof finalDecision !== 'object') {
+        throw new Error('Final decision not available or invalid for risk assessment');
+      }
+      
+      // HIGH PRIORITY FIX: Validate required fields exist
+      if (typeof finalDecision.action !== 'string' || !['BUY', 'SELL', 'HOLD'].includes(finalDecision.action)) {
+        throw new Error(`Invalid final decision action: ${finalDecision.action}`);
+      }
+      if (typeof finalDecision.confidence !== 'number' || finalDecision.confidence < 0 || finalDecision.confidence > 1) {
+        throw new Error(`Invalid final decision confidence: ${finalDecision.confidence}`);
       }
 
       const currentPrice = workflow.context.marketData?.price || 0;
@@ -641,8 +661,8 @@ export class AgentCoordinator {
         const maxConcurrentPositions = asterConfig.trading.maxConcurrentPositions || 2;
         const maxPortfolioRiskPercent = asterConfig.trading.maxPortfolioRiskPercent || 10;
 
-        // Check concurrent positions limit (STRICTER for <$100 accounts)
-        const maxPositionsForAccount = balance < 100 ? 1 : maxConcurrentPositions;
+        // ENFORCE MAX CONCURRENT POSITIONS FOR MICRO ACCOUNTS
+        const maxPositionsForAccount = balance < TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD ? 1 : maxConcurrentPositions;
         if (openPositions.length >= maxPositionsForAccount) {
           logger.warn(`⛔ Trade REJECTED: Max concurrent positions (${maxPositionsForAccount}) reached`, {
             context: 'AgentCoordinator',
@@ -659,14 +679,60 @@ export class AgentCoordinator {
         }
 
         // Check portfolio risk limit (STRICTER for <$100 accounts)
-        const maxRiskForAccount = balance < 100 ? 5 : maxPortfolioRiskPercent;
-        const totalRisk = openPositions.reduce((sum, pos) => {
+        const maxRiskForAccount = balance < TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD ? TRADING_THRESHOLDS.MAX_PORTFOLIO_RISK_MICRO : maxPortfolioRiskPercent;
+        
+        // HIGH PRIORITY FIX: Validate portfolio risk calculation with type safety
+        let totalRisk = openPositions.reduce((sum, pos) => {
+          // Validate position data before calculation
+          if (!pos.stopLoss || !pos.entryPrice || !pos.size || pos.entryPrice <= 0 || balance <= 0) {
+            logger.warn(`Invalid position data for risk calculation: ${pos.symbol}`, {
+              context: 'AgentCoordinator',
+              data: { symbol: pos.symbol, stopLoss: pos.stopLoss, entryPrice: pos.entryPrice, size: pos.size }
+            });
+            return sum; // Skip invalid positions
+          }
+          
           const positionRisk = Math.abs((pos.stopLoss - pos.entryPrice) / pos.entryPrice * 100);
-          return sum + (positionRisk * (pos.entryPrice * pos.size) / balance * 100);
+          const positionRiskValue = (positionRisk * (pos.entryPrice * pos.size) / balance * 100);
+          
+          // Validate result is finite and reasonable
+          if (!isFinite(positionRiskValue) || positionRiskValue < 0 || positionRiskValue > 100) {
+            logger.warn(`Invalid risk calculation result for ${pos.symbol}: ${positionRiskValue}`, {
+              context: 'AgentCoordinator',
+              data: { symbol: pos.symbol, positionRiskValue }
+            });
+            return sum; // Skip invalid calculations
+          }
+          
+          return sum + positionRiskValue;
         }, 0);
         
-        const newPositionRisk = riskAssessment.riskPercentage || 0;
+        // HIGH PRIORITY FIX: Validate new position risk
+        const newPositionRisk = typeof riskAssessment.riskPercentage === 'number' 
+          ? Math.max(0, Math.min(100, riskAssessment.riskPercentage)) // Clamp between 0-100
+          : 0;
+        
+        // Validate total risk calculation
+        if (!isFinite(totalRisk) || totalRisk < 0) {
+          logger.warn('Invalid total risk calculation, resetting to 0', {
+            context: 'AgentCoordinator',
+            data: { totalRisk, balance }
+          });
+          totalRisk = 0;
+        }
+        
         const totalRiskAfter = totalRisk + newPositionRisk;
+        
+        // Validate total risk after is reasonable
+        if (!isFinite(totalRiskAfter) || totalRiskAfter < 0 || totalRiskAfter > 200) {
+          logger.error('Invalid total risk after calculation', {
+            context: 'AgentCoordinator',
+            data: { totalRisk, newPositionRisk, totalRiskAfter, balance }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = 'Trade rejected: Invalid risk calculation - system error';
+          return riskAssessment;
+        }
         
         if (totalRiskAfter > maxRiskForAccount) {
           logger.warn(`⛔ Trade REJECTED: Portfolio risk would exceed ${maxRiskForAccount}%`, {
@@ -685,8 +751,8 @@ export class AgentCoordinator {
         }
 
         // ENFORCE LEVERAGE LIMIT FOR SMALL ACCOUNTS
-        if (balance < 500 && riskAssessment.leverage > 1) {
-          logger.warn(`⛔ Trade REJECTED: Account <$500 cannot use leverage`, {
+        if (balance < TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD && riskAssessment.leverage > 1) {
+          logger.warn(`⛔ Trade REJECTED: Account <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD} cannot use leverage`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -695,13 +761,13 @@ export class AgentCoordinator {
             }
           });
           riskAssessment.approved = false;
-          riskAssessment.reasoning = `Trade rejected: Accounts <$500 cannot use leverage (requested ${riskAssessment.leverage}x, must be 1x)`;
+          riskAssessment.reasoning = `Trade rejected: Accounts <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD} cannot use leverage (requested ${riskAssessment.leverage}x, must be 1x)`;
         }
 
         // ENFORCE POSITION SIZE LIMIT FOR MICRO ACCOUNTS (ULTRA STRICT)
         const positionRiskPercent = riskAssessment.riskPercentage || 0;
-        if (balance < 100 && positionRiskPercent > 3) {
-          logger.warn(`⛔ Trade REJECTED: Position risk exceeds 3% limit for accounts <$100`, {
+        if (balance < TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD && positionRiskPercent > TRADING_THRESHOLDS.MAX_POSITION_RISK_MICRO) {
+          logger.warn(`⛔ Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_MICRO}% limit for accounts <$${TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD}`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -710,9 +776,9 @@ export class AgentCoordinator {
             }
           });
           riskAssessment.approved = false;
-          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds 3% maximum for accounts <$100`;
-        } else if (balance < 200 && positionRiskPercent > 5) {
-          logger.warn(`⛔ Trade REJECTED: Position risk exceeds 5% limit for accounts <$200`, {
+          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_MICRO}% maximum for accounts <$${TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD}`;
+        } else if (balance < TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD && positionRiskPercent > TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL) {
+          logger.warn(`⛔ Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% limit for accounts <$${TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD}`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -721,9 +787,9 @@ export class AgentCoordinator {
             }
           });
           riskAssessment.approved = false;
-          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds 5% maximum for accounts <$200`;
-        } else if (balance < 500 && positionRiskPercent > 5) {
-          logger.warn(`⛔ Trade REJECTED: Position risk exceeds 5% limit for accounts <$500`, {
+          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% maximum for accounts <$${TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD}`;
+        } else if (balance < TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD && positionRiskPercent > TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL) {
+          logger.warn(`⛔ Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% limit for accounts <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD}`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -732,13 +798,27 @@ export class AgentCoordinator {
             }
           });
           riskAssessment.approved = false;
-          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds 5% maximum for accounts <$500`;
+          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% maximum for accounts <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD}`;
         }
         
         // ENFORCE MINIMUM R:R RATIO FOR MICRO ACCOUNTS
-        const minRRForAccount = balance < 100 ? 4.0 : balance < 200 ? 3.5 : balance < 500 ? 3.0 : 2.5;
+        const minRRForAccount = balance < TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD 
+          ? TRADING_THRESHOLDS.MIN_RR_MICRO 
+          : balance < TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD 
+          ? TRADING_THRESHOLDS.MIN_RR_SMALL 
+          : balance < TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD 
+          ? TRADING_THRESHOLDS.MIN_RR_MEDIUM 
+          : TRADING_THRESHOLDS.MIN_RR_LARGE;
         const actualRR = riskAssessment.riskRewardRatio || 0;
-        if (actualRR < minRRForAccount) {
+        // HIGH PRIORITY FIX: Validate R:R is positive and reasonable
+        if (actualRR < 0 || actualRR > 100) {
+          logger.warn(`⛔ Trade REJECTED: Invalid Risk/Reward ratio ${actualRR.toFixed(2)}:1`, {
+            context: 'AgentCoordinator',
+            data: { symbol: workflow.symbol, actualRR }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Invalid Risk/Reward ratio ${actualRR.toFixed(2)}:1 (must be between 0 and 100)`;
+        } else if (actualRR < minRRForAccount) {
           logger.warn(`⛔ Trade REJECTED: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum for account size`, {
             context: 'AgentCoordinator',
             data: {
@@ -1075,7 +1155,7 @@ export class AgentCoordinator {
             leverage: riskAssessment.leverage,
             stopLoss: riskAssessment.stopLoss,
             takeProfit: riskAssessment.takeProfit,
-            trailingStopPercent: 2.0, // 2% trailing stop
+            trailingStopPercent: TRADING_THRESHOLDS.DEFAULT_TRAILING_STOP_PERCENT, // 2% trailing stop
             openedAt: Date.now(),
             orderId: tradeResult.orderId || ''
           });

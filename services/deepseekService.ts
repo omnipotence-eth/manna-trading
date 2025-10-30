@@ -97,15 +97,23 @@ export class DeepSeekService {
         thinking: options.thinking
       });
 
+      // HIGH PRIORITY FIX: Add request timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for LLM
+
       const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
+        clearTimeout(timeoutId);
         // Try fallback models if primary fails
         if (model === this.defaultModel) {
           logger.warn('Primary model failed, trying fallback', {
@@ -161,6 +169,16 @@ export class DeepSeekService {
 
     } catch (error) {
       const duration = Date.now() - startTime;
+      // HIGH PRIORITY FIX: Handle timeout errors specifically
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.error('DeepSeek R1 request timeout', error, {
+          context: 'DeepSeekService',
+          model,
+          duration: `${duration}ms`,
+          promptLength: prompt.length
+        });
+        throw new Error('DeepSeek R1 request timeout - request took too long');
+      }
       logger.error('DeepSeek R1 API call failed', error, {
         context: 'DeepSeekService',
         model,
@@ -231,13 +249,20 @@ export class DeepSeekService {
         userPromptLength: userPrompt.length
       });
 
+      // HIGH PRIORITY FIX: Add request timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
       const response = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         // Try fallback
@@ -279,6 +304,15 @@ export class DeepSeekService {
 
     } catch (error) {
       const duration = Date.now() - startTime;
+      // HIGH PRIORITY FIX: Handle timeout errors specifically
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.error('DeepSeek R1 system chat timeout', error, {
+          context: 'DeepSeekService',
+          model,
+          duration: `${duration}ms`
+        });
+        throw new Error('DeepSeek R1 system chat timeout - request took too long');
+      }
       logger.error('DeepSeek R1 system chat failed', error, {
         context: 'DeepSeekService',
         model,
@@ -336,7 +370,16 @@ export class DeepSeekService {
    */
   async testConnection(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/tags`);
+      // HIGH PRIORITY FIX: Add timeout to connection test
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for connection test
+      
+      const response = await fetch(`${this.baseUrl}/api/tags`, {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (response.ok) {
         const models = await response.json();
         const availableModels = models.models?.map((m: any) => m.name) || [];
@@ -351,7 +394,11 @@ export class DeepSeekService {
       }
       return false;
     } catch (error) {
-      logger.error('Ollama connection failed', error, { context: 'DeepSeekService' });
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.error('Ollama connection test timeout', error, { context: 'DeepSeekService' });
+      } else {
+        logger.error('Ollama connection failed', error, { context: 'DeepSeekService' });
+      }
       return false;
     }
   }

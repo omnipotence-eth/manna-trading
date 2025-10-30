@@ -19,12 +19,50 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // HIGH PRIORITY FIX: Add body size validation
+    const contentLength = req.headers.get('content-length');
+    const MAX_BODY_SIZE = 1024 * 5; // 5KB max for order requests
+    if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
+      return NextResponse.json(
+        { error: `Request body too large. Maximum size: ${MAX_BODY_SIZE} bytes` },
+        { status: 413 }
+      );
+    }
+
     const body = await req.json();
     
-    // Validate required fields
-    if (!body.symbol || !body.side || !body.type || !body.quantity) {
+    // HIGH PRIORITY FIX: Enhanced validation with type checking and sanitization
+    if (!body.symbol || typeof body.symbol !== 'string') {
       return NextResponse.json(
-        { error: 'Missing required fields: symbol, side, type, quantity' },
+        { error: 'Invalid or missing symbol field' },
+        { status: 400 }
+      );
+    }
+    if (!body.side || !['BUY', 'SELL'].includes(body.side)) {
+      return NextResponse.json(
+        { error: 'Invalid or missing side field - must be BUY or SELL' },
+        { status: 400 }
+      );
+    }
+    if (!body.type || !['MARKET', 'LIMIT'].includes(body.type)) {
+      return NextResponse.json(
+        { error: 'Invalid or missing type field - must be MARKET or LIMIT' },
+        { status: 400 }
+      );
+    }
+    if (!body.quantity || typeof body.quantity !== 'number' || body.quantity <= 0) {
+      return NextResponse.json(
+        { error: 'Invalid or missing quantity field - must be a positive number' },
+        { status: 400 }
+      );
+    }
+    
+    // HIGH PRIORITY FIX: Validate symbol format (e.g., BTCUSDT, ETHUSDT)
+    const symbolRegex = /^[A-Z]{2,10}USDT$/;
+    const normalizedSymbol = body.symbol.replace('/', '');
+    if (!symbolRegex.test(normalizedSymbol)) {
+      return NextResponse.json(
+        { error: 'Invalid symbol format - must be format like BTCUSDT or BTC/USDT' },
         { status: 400 }
       );
     }
@@ -32,12 +70,12 @@ export async function POST(req: NextRequest) {
     // Apply rate limiting and circuit breaker protection
     return await withRateLimit(async () => {
       return await circuitBreakers.asterApi.execute(async () => {
-        // Build order parameters
+        // Build order parameters (symbol already validated and normalized)
         const orderParams: Record<string, string | number> = {
-          symbol: body.symbol.replace('/', ''), // Convert BTC/USDT to BTCUSDT
-          side: body.side, // BUY or SELL
-          type: body.type, // MARKET or LIMIT
-          quantity: body.quantity,
+          symbol: normalizedSymbol, // Already validated above
+          side: body.side, // BUY or SELL (already validated)
+          type: body.type, // MARKET or LIMIT (already validated)
+          quantity: body.quantity, // Already validated as positive number
         };
 
         // Add price for LIMIT orders

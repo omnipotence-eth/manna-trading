@@ -44,7 +44,8 @@ export const asterConfig = {
   // API Credentials
   apiKey: getEnvVar('ASTER_API_KEY', '', true),
   secretKey: getEnvVar('ASTER_SECRET_KEY', '', true),
-  publicApiKey: getEnvVar('NEXT_PUBLIC_ASTER_API_KEY', getEnvVar('ASTER_API_KEY', '')),
+  // CRITICAL FIX: Never expose secret API key - use separate public key or empty string
+  publicApiKey: getEnvVar('NEXT_PUBLIC_ASTER_API_KEY', ''), // Removed fallback to secret key
   
   // API Endpoints
   baseUrl: getEnvVar('ASTER_BASE_URL', 'https://fapi.asterdex.com'),

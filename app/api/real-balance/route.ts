@@ -85,8 +85,9 @@ async function getChartData(timeRange: string, request: NextRequest) {
     // Calculate equity progression from trades
     const chartData = [];
     
-    // FIXED STARTING BALANCE: Use your actual deposit amount
-    const INITIAL_DEPOSIT = 100; // You started with $100 yesterday
+    // CRITICAL FIX: Fetch initial deposit from config or database instead of hardcoding
+    const { asterConfig } = await import('@/lib/configService');
+    const INITIAL_DEPOSIT = asterConfig.trading.initialCapital || 100; // Use config value, fallback to 100
     
     // Calculate total P&L from ALL trades (to show full progression)
     const totalHistoricalPnL = allTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);

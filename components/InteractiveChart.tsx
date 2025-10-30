@@ -30,7 +30,8 @@ export default function InteractiveChart({
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const getTimeAgo = (timestamp: number): string => {
+  // OPTIMIZED: Memoize time ago calculation function
+  const getTimeAgo = useCallback((timestamp: number): string => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
     if (seconds < 10) return 'just now';
     if (seconds < 60) return `${seconds}s ago`;
@@ -38,10 +39,10 @@ export default function InteractiveChart({
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
     return `${hours}h ago`;
-  };
+  }, []);
 
-  // Generate realistic portfolio data
-  const generatePortfolioData = (startBalance: number, hours: number): ChartDataPoint[] => {
+  // OPTIMIZED: Memoize portfolio data generation
+  const generatePortfolioData = useCallback((startBalance: number, hours: number): ChartDataPoint[] => {
     const data: ChartDataPoint[] = [];
     const now = Date.now();
     const startTime = now - (hours * 60 * 60 * 1000);

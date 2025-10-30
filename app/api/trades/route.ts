@@ -85,14 +85,45 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const trade = await request.json();
-
-    // Validate required fields
-    if (!trade.id || !trade.symbol || !trade.side) {
+    // HIGH PRIORITY FIX: Add body size validation
+    const contentLength = request.headers.get('content-length');
+    const MAX_BODY_SIZE = 1024 * 10; // 10KB max
+    if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Missing required trade fields',
+          error: `Request body too large. Maximum size: ${MAX_BODY_SIZE} bytes`,
+        },
+        { status: 413 }
+      );
+    }
+
+    const trade = await request.json();
+
+    // HIGH PRIORITY FIX: Enhanced validation with type checking
+    if (!trade.id || typeof trade.id !== 'string') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Missing or invalid trade id field (must be string)',
+        },
+        { status: 400 }
+      );
+    }
+    if (!trade.symbol || typeof trade.symbol !== 'string') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Missing or invalid trade symbol field (must be string)',
+        },
+        { status: 400 }
+      );
+    }
+    if (!trade.side || !['BUY', 'SELL'].includes(trade.side)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Missing or invalid trade side field (must be BUY or SELL)',
         },
         { status: 400 }
       );
@@ -133,11 +164,25 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    logger.error('Failed to save trade', error, { context: 'TradesAPI' });
+    // HIGH PRIORITY FIX: Enhanced error messages with details
+    const errorMessage = error instanceof Error 
+      ? `Failed to save trade: ${error.message}` 
+      : 'Failed to save trade: Unknown error';
+    
+    logger.error('Failed to save trade', error, { 
+      context: 'TradesAPI',
+      data: {
+        errorType: error?.constructor?.name || 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      }
+    });
+    
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Unknown error',
+        error: errorMessage,
+        timestamp: new Date().toISOString(),
       },
       { status: 500 }
     );
