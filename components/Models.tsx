@@ -1,5 +1,6 @@
 'use client';
 
+import { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import { getConfidenceColor } from '@/lib/confidenceColors';
@@ -14,28 +15,31 @@ interface AIModel {
   winRate: number;
 }
 
-export default function Models() {
+function Models() {
   const trades = useStore((state) => state.trades);
   const positions = useStore((state) => state.positions);
   const accountValue = useStore((state) => state.accountValue);
   
-  // Calculate real metrics
-  // All trades from database are completed (no status field needed)
-  const completedTrades = trades.filter(t => !t.status || t.status === 'completed');
-  const winningTrades = completedTrades.filter(t => t.pnl > 0);
-  const totalPnL = completedTrades.reduce((sum, t) => sum + t.pnl, 0);
-  const performancePercent = accountValue > 0 ? (totalPnL / accountValue) * 100 : 0;
-  const winRate = completedTrades.length > 0 ? (winningTrades.length / completedTrades.length) * 100 : 0;
-  
-  const model: AIModel = {
+  // OPTIMIZED: Memoize expensive calculations
+  const model: AIModel = useMemo(() => {
+    // Calculate real metrics
+    // All trades from database are completed (no status field needed)
+    const completedTrades = trades.filter(t => !t.status || t.status === 'completed');
+    const winningTrades = completedTrades.filter(t => t.pnl > 0);
+    const totalPnL = completedTrades.reduce((sum, t) => sum + t.pnl, 0);
+    const performancePercent = accountValue > 0 ? (totalPnL / accountValue) * 100 : 0;
+    const winRate = completedTrades.length > 0 ? (winningTrades.length / completedTrades.length) * 100 : 0;
+    
+    return {
     name: 'Multi-Agent AI System',
     description: 'Advanced LLM-powered multi-agent trading system with Technical Analyst, Risk Manager, Chief Analyst, and Execution Specialist. Powered by DeepSeek R1 32B with GPU acceleration for superior reasoning and intelligent decision-making with comprehensive market analysis across all timeframes.',
-    strategy: 'Multi-Agent LLM Coordination + Risk Management + Market Analysis',
-    status: 'active',
-    performance: performancePercent,
-    trades: completedTrades.length,
-    winRate,
-  };
+      strategy: 'Multi-Agent LLM Coordination + Risk Management + Market Analysis',
+      status: 'active' as const,
+      performance: performancePercent,
+      trades: completedTrades.length,
+      winRate,
+    };
+  }, [trades, accountValue]);
 
   return (
     <div className="space-y-6">
@@ -111,4 +115,7 @@ export default function Models() {
     </div>
   );
 }
+
+// OPTIMIZED: Memoize component to prevent unnecessary re-renders
+export default memo(Models);
 

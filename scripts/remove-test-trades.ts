@@ -3,15 +3,20 @@
  * Run with: npx tsx scripts/remove-test-trades.ts
  */
 
-import { sql } from '@/lib/db';
 import { logger } from '@/lib/logger';
+
+// Import database connection
+const { Pool } = require('pg');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
 async function removeTestTrades() {
   try {
     logger.info('🧹 Starting test trade removal...', { context: 'RemoveTestTrades' });
 
     // Remove trades with test-related identifiers
-    const result = await sql`
+    const result = await pool.query(`
       DELETE FROM trades
       WHERE 
         symbol = 'TEST/USDT' OR
@@ -22,17 +27,17 @@ async function removeTestTrades() {
         entry_reason LIKE '%Test%' OR
         entry_market_regime = 'test'
       RETURNING id, symbol, model, timestamp;
-    `;
+    `);
 
-    const deletedCount = result.length || 0;
+    const deletedCount = result.rows?.length || 0;
 
     logger.info(`✅ Removed ${deletedCount} test trades from database`, {
       context: 'RemoveTestTrades',
-      data: { deletedCount, trades: result }
+      data: { deletedCount, trades: result.rows }
     });
 
     console.log(`\n✅ Successfully removed ${deletedCount} test trades:\n`);
-    result.forEach((trade: any) => {
+    result.rows?.forEach((trade: any) => {
       console.log(`  - ${trade.id} | ${trade.symbol} | ${trade.model} | ${trade.timestamp}`);
     });
 
@@ -40,6 +45,8 @@ async function removeTestTrades() {
   } catch (error) {
     logger.error('Failed to remove test trades', error, { context: 'RemoveTestTrades' });
     throw error;
+  } finally {
+    await pool.end();
   }
 }
 

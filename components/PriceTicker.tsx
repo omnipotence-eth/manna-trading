@@ -127,15 +127,7 @@ export default function PriceTicker() {
     const interval = setInterval(fetchPrices, 3000);
     
     return () => clearInterval(interval);
-  }, []);
-
-  // Debug: Show state in component
-  if (typeof window !== 'undefined' && prices.length > 0 && prices[0].price === 0) {
-    frontendLogger.debug('Prices are still 0, waiting for API', { component: 'PriceTicker' });
-  }
-  if (typeof window !== 'undefined' && prices.length > 0 && prices[0].price > 0) {
-    frontendLogger.debug('Rendering with real prices', { component: 'PriceTicker' });
-  }
+  }, [updateLivePrice]); // OPTIMIZED: Include updateLivePrice in dependencies
 
   return (
     <div className="border-b border-green-400/30 bg-black/80 overflow-hidden relative">

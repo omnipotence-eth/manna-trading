@@ -1,12 +1,17 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 
-export default function ModelChat() {
+function ModelChat() {
   const modelMessages = useStore((state) => state.modelMessages);
   const thoughtsRef = useRef<HTMLDivElement>(null);
+
+  // OPTIMIZED: Memoize reversed messages to prevent unnecessary array creation
+  const reversedMessages = useMemo(() => {
+    return [...modelMessages].reverse();
+  }, [modelMessages]);
 
   useEffect(() => {
     if (thoughtsRef.current) {
@@ -68,7 +73,7 @@ export default function ModelChat() {
             </div>
           ) : (
             <AnimatePresence mode="popLayout">
-              {modelMessages.slice().reverse().map((msg, index) => (
+              {reversedMessages.map((msg, index) => (
                 <motion.div
                   key={msg.id}
                   initial={{ opacity: 0, x: -20, scale: 0.95 }}
@@ -107,3 +112,6 @@ export default function ModelChat() {
     </div>
   );
 }
+
+// OPTIMIZED: Memoize component to prevent unnecessary re-renders
+export default memo(ModelChat);
