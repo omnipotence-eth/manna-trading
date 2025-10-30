@@ -4,6 +4,14 @@
       "path": "/api/cron/trading",
       "schedule": "* * * * *"
     }
-  ]
+  ],
+  "functions": {
+    "app/api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
 
