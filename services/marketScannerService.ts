@@ -6,6 +6,8 @@
 
 import { logger } from '@/lib/logger';
 import { asterDexService } from './asterDexService';
+import { asterConfig } from '@/lib/configService';
+import { TRADING_THRESHOLDS, MARKET_SCANNER_CONSTANTS } from '@/constants/tradingConstants';
 
 export interface OrderBookDepth {
   bidDepth: number;
@@ -86,55 +88,92 @@ class MarketScannerService {
       // OPTIMIZED: Use configService instead of direct process.env access
       const { asterConfig } = await import('@/lib/configService');
       const baseUrl = asterConfig.baseUrl || 'https://fapi.asterdex.com';
-      const tickerResponse = await fetch(`${baseUrl}/fapi/v1/ticker/24hr`);
-      if (!tickerResponse.ok) {
-        throw new Error(`Failed to fetch ticker data: ${tickerResponse.status}`);
-      }
-      const tickerData = await tickerResponse.json();
-
-      // Create a map for quick lookup and sort by volume
-      const tickerMap = new Map();
-      const tickersWithVolume: Array<{ symbol: string; volume: number; ticker: any }> = [];
       
-      if (Array.isArray(tickerData)) {
-        tickerData.forEach((ticker: any) => {
-          tickerMap.set(ticker.symbol, ticker);
-          const volume = parseFloat(ticker.volume || '0');
-          if (volume > 0) {
-            tickersWithVolume.push({
-              symbol: ticker.symbol,
-              volume,
-              ticker
-            });
-          }
+      // CRITICAL FIX: Add request timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      // Declare variables outside try block for proper scoping
+      let tickerMap = new Map();
+      let tickersWithVolume: Array<{ symbol: string; volume: number; ticker: any }> = [];
+      
+      try {
+        const tickerResponse = await fetch(`${baseUrl}/fapi/v1/ticker/24hr`, {
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
+        
+        if (!tickerResponse.ok) {
+          throw new Error(`Failed to fetch ticker data: ${tickerResponse.status}`);
+        }
+        
+        const tickerData = await tickerResponse.json();
+
+        // Create a map for quick lookup and sort by volume
+        tickerMap = new Map();
+        tickersWithVolume = [];
+        
+        if (Array.isArray(tickerData)) {
+          // HIGH PRIORITY FIX: Add type guard for ticker structure
+          tickerData.forEach((ticker: any) => {
+            // Validate ticker has required fields
+            if (!ticker || typeof ticker !== 'object' || !ticker.symbol) {
+              logger.warn('Invalid ticker data structure, skipping', {
+                context: 'MarketScanner',
+                data: { ticker: ticker ? JSON.stringify(ticker).substring(0, 100) : 'null' }
+              });
+              return; // Skip invalid tickers
+            }
+            
+            tickerMap.set(ticker.symbol, ticker);
+            const volume = parseFloat(ticker.volume || '0');
+            if (volume > 0 && isFinite(volume)) {
+              tickersWithVolume.push({
+                symbol: ticker.symbol,
+                volume,
+                ticker
+              });
+            }
+          });
+        } else {
+          logger.warn('Ticker data is not an array', {
+            context: 'MarketScanner',
+            data: { tickerDataType: typeof tickerData, isArray: Array.isArray(tickerData) }
+          });
+        }
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          throw new Error('Request timeout - ticker data fetch took too long');
+        }
+        throw error;
       }
 
       // Sort by volume (descending) and take top 50
       tickersWithVolume.sort((a, b) => b.volume - a.volume);
-      const top50Symbols = tickersWithVolume.slice(0, 50).map(t => t.symbol);
+      const top50Symbols = tickersWithVolume.slice(0, MARKET_SCANNER_CONSTANTS.TOP_SYMBOLS_COUNT).map(t => t.symbol);
       
       // Filter allSymbols to only include top 50 by volume
       const symbols = allSymbols.filter((s: any) => 
         top50Symbols.includes(s.symbol || s)
       );
 
-      logger.info('Focusing on top 50 coins by volume', {
-        context: 'MarketScanner',
-        data: { 
-          totalAvailable: allSymbols.length,
-          top50Count: symbols.length,
-          analyzingCount: Math.min(30, symbols.length),
-          topVolume: tickersWithVolume[0]?.volume || 0,
-          top10Symbols: tickersWithVolume.slice(0, 10).map(t => ({ symbol: t.symbol, volume: t.volume.toFixed(0) }))
-        }
-      });
+        logger.info(`Focusing on top ${MARKET_SCANNER_CONSTANTS.TOP_SYMBOLS_COUNT} coins by volume`, {
+          context: 'MarketScanner',
+          data: { 
+            totalAvailable: allSymbols.length,
+            top50Count: symbols.length,
+            analyzingCount: Math.min(MARKET_SCANNER_CONSTANTS.ANALYZE_COUNT, symbols.length),
+            topVolume: tickersWithVolume[0]?.volume || 0,
+            top10Symbols: tickersWithVolume.slice(0, 10).map(t => ({ symbol: t.symbol, volume: t.volume.toFixed(0) }))
+          }
+        });
 
-      // Analyze top 50 symbols (excluding blacklisted)
-      const opportunities: MarketOpportunity[] = [];
-      const blacklist = asterConfig.trading.blacklistedSymbols || [];
+        // Analyze top symbols (excluding blacklisted)
+        const opportunities: MarketOpportunity[] = [];
+        const blacklist = asterConfig.trading.blacklistedSymbols || [];
 
-      for (const symbolInfo of symbols.slice(0, 30)) { // Analyze top 30 by volume
+        for (const symbolInfo of symbols.slice(0, MARKET_SCANNER_CONSTANTS.ANALYZE_COUNT)) { // Analyze top 30 by volume
         try {
           // Skip blacklisted symbols
           if (blacklist.includes(symbolInfo.symbol) || blacklist.includes(symbolInfo.symbol.replace('/', ''))) {
@@ -185,7 +224,7 @@ class MarketScannerService {
       opportunities.sort((a, b) => b.score - a.score);
 
       // Identify volume spikes (volume > 2x average)
-      const volumeSpikes = opportunities.filter(op => op.marketData.volumeRatio > 2.0);
+      const volumeSpikes = opportunities.filter(op => op.marketData.volumeRatio > TRADING_THRESHOLDS.VOLUME_SPIKE_THRESHOLD);
 
       // Get top 10 by volume
       const topByVolume = opportunities
@@ -246,20 +285,17 @@ class MarketScannerService {
 
       // CRITICAL: Filter out problematic low-liquidity coins BEFORE analysis
       // This prevents trading coins like COSMO/APE that have execution issues
-      const MIN_LIQUIDITY_USD = 1000000; // Minimum $1M daily volume for trading
-      const MIN_QUOTE_VOLUME = 500000; // Minimum $500K quote volume (more strict)
-      
-      if (quoteVolume24h < MIN_QUOTE_VOLUME) {
-        logger.debug(`Skipping ${symbol}: Low liquidity ($${(quoteVolume24h / 1000).toFixed(1)}K < $${(MIN_QUOTE_VOLUME / 1000).toFixed(1)}K minimum)`, {
+      if (quoteVolume24h < TRADING_THRESHOLDS.MIN_QUOTE_VOLUME) {
+        logger.debug(`Skipping ${symbol}: Low liquidity ($${(quoteVolume24h / 1000).toFixed(1)}K < $${(TRADING_THRESHOLDS.MIN_QUOTE_VOLUME / 1000).toFixed(1)}K minimum)`, {
           context: 'MarketScanner',
-          data: { symbol, quoteVolume24h, minRequired: MIN_QUOTE_VOLUME }
+          data: { symbol, quoteVolume24h, minRequired: TRADING_THRESHOLDS.MIN_QUOTE_VOLUME }
         });
         return null; // Skip this coin entirely
       }
 
       // Check for extremely wide spreads (indicates execution problems)
       const spreadPercent = ((high24h - low24h) / price) * 100;
-      if (spreadPercent > 2.0) { // Spread > 2% indicates severe liquidity issues
+      if (spreadPercent > TRADING_THRESHOLDS.MAX_SPREAD_PERCENT) { // Spread > 2% indicates severe liquidity issues
         logger.debug(`Skipping ${symbol}: Wide spread (${spreadPercent.toFixed(2)}% > 2% maximum) - execution risk`, {
           context: 'MarketScanner',
           data: { symbol, spreadPercent }
@@ -281,16 +317,26 @@ class MarketScannerService {
       
       // OPTIMIZED: Better RSI estimation using price extremes
       const pricePosition = (price - low24h) / (high24h - low24h);
-      const rsi = 50 + (pricePosition - 0.5) * 100;
+      const rsiMidpoint = 50; // RSI midpoint
+      const rsiRange = 100; // Full RSI range
+      const rsi = rsiMidpoint + (pricePosition - TRADING_THRESHOLDS.DEFAULT_CONFIDENCE) * rsiRange;
       
       // OPTIMIZED: Dynamic spread calculation
       const spread = ((high24h - low24h) / price) * 100;
       const spreadQuality = Math.max(0, 1 - (spread / 5)); // Lower spread = better
       
+      // HIGH PRIORITY FIX: Calculate volumeRatio (current volume vs average)
+      // Use average volume from ticker if available, otherwise estimate from quoteVolume
+      const avgVolume24h = parseFloat(ticker.avgVolume || ticker.quoteVolume || '0');
+      const volumeRatio = avgVolume24h > 0 ? quoteVolume24h / avgVolume24h : 1.0; // Default to 1.0 if no average
+      
+      // HIGH PRIORITY FIX: Calculate volumeStrength (normalized volume ratio)
+      const volumeStrength = Math.min(volumeRatio / TRADING_THRESHOLDS.VOLUME_SPIKE_THRESHOLD, 1.0); // Normalize to 0-1 scale
+      
       // OPTIMIZED: Multi-factor liquidity score
-      const baseVolumeLiquidity = Math.min(quoteVolume24h / 5000000, 1.0); // $5M for max score
-      const volumeConsistency = Math.min(volumeRatio / 2.0, 1.0); // Consistency bonus
-      const liquidity = (baseVolumeLiquidity * 0.7) + (volumeConsistency * 0.3);
+      const baseVolumeLiquidity = Math.min(quoteVolume24h / MARKET_SCANNER_CONSTANTS.MAX_LIQUIDITY_USD, 1.0); // $5M for max score
+      const volumeConsistency = Math.min(volumeRatio / TRADING_THRESHOLDS.VOLUME_SPIKE_THRESHOLD, 1.0); // Consistency bonus
+      const liquidity = (baseVolumeLiquidity * TRADING_THRESHOLDS.GOOD_LIQUIDITY_SCORE) + (volumeConsistency * 0.3);
 
       // Analyze signals
       const signals: string[] = [];
@@ -301,20 +347,21 @@ class MarketScannerService {
       
       // 1. Volume Analysis (Weight: 30%)
       let volumeScore = 0;
-      if (volumeRatio > 3.5) {
+      if (volumeRatio > MARKET_SCANNER_CONSTANTS.EXTREME_VOLUME_SPIKE) {
         signals.push('EXTREME_VOLUME_SPIKE');
         reasoning.push(`Extreme volume: ${volumeRatio.toFixed(2)}x (breakout likely)`);
         volumeScore = 30;
-      } else if (volumeRatio > 2.5) {
+      } else if (volumeRatio > MARKET_SCANNER_CONSTANTS.HIGH_VOLUME_SPIKE) {
         signals.push('HIGH_VOLUME_SPIKE');
         reasoning.push(`Strong volume: ${volumeRatio.toFixed(2)}x (high interest)`);
         volumeScore = 22;
-      } else if (volumeRatio > 1.7) {
+      } else if (volumeRatio > MARKET_SCANNER_CONSTANTS.VOLUME_INCREASE) {
         signals.push('VOLUME_INCREASE');
         reasoning.push(`Above-average volume: ${volumeRatio.toFixed(2)}x`);
         volumeScore = 15;
-      } else if (volumeRatio > 1.2) {
+      } else if (volumeRatio > MARKET_SCANNER_CONSTANTS.NORMAL_VOLUME) {
         signals.push('NORMAL_VOLUME');
+        reasoning.push(`Normal volume: ${volumeRatio.toFixed(2)}x`);
         volumeScore = 8;
       } else if (volumeRatio < 0.6) {
         signals.push('LOW_VOLUME');
@@ -386,18 +433,18 @@ class MarketScannerService {
       let liquidityScore = 0;
       if (liquidity > 0.8) {
         signals.push('EXCELLENT_LIQUIDITY');
-        reasoning.push(`Excellent liquidity: $${(quoteVolume24h / 1000000).toFixed(2)}M (tight spreads)`);
+            reasoning.push(`Excellent liquidity: $${(quoteVolume24h / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR).toFixed(2)}M (tight spreads)`);
         liquidityScore = 15;
       } else if (liquidity > 0.6) {
         signals.push('HIGH_LIQUIDITY');
-        reasoning.push(`High liquidity: $${(quoteVolume24h / 1000000).toFixed(2)}M`);
+            reasoning.push(`High liquidity: $${(quoteVolume24h / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR).toFixed(2)}M`);
         liquidityScore = 10;
       } else if (liquidity > 0.4) {
         signals.push('MODERATE_LIQUIDITY');
         liquidityScore = 5;
       } else if (liquidity < 0.25) {
         signals.push('LOW_LIQUIDITY');
-        reasoning.push(`Low liquidity: $${(quoteVolume24h / 1000000).toFixed(2)}M (slippage risk)`);
+            reasoning.push(`Low liquidity: $${(quoteVolume24h / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR).toFixed(2)}M (slippage risk)`);
         liquidityScore = -12;
         // CRITICAL: Reject low-liquidity coins entirely (prevents COSMO/APE issues)
         return null; // Don't even return this opportunity - too risky
@@ -408,11 +455,11 @@ class MarketScannerService {
       let patternScore = 0;
       
       // Volume-confirmed breakouts (highest conviction)
-      if (volumeRatio > 2.0 && momentum > 5 && rsi < 70) {
+      if (volumeRatio > TRADING_THRESHOLDS.VOLUME_SPIKE_THRESHOLD && momentum > 5 && rsi < 70) {
         signals.push('BULLISH_BREAKOUT');
         reasoning.push('🚀 Volume-confirmed bullish breakout (high probability)');
         patternScore = 20;
-      } else if (volumeRatio > 2.0 && momentum < -5 && rsi > 30) {
+      } else if (volumeRatio > TRADING_THRESHOLDS.VOLUME_SPIKE_THRESHOLD && momentum < -5 && rsi > 30) {
         signals.push('BEARISH_BREAKDOWN');
         reasoning.push('⚠️ Volume-confirmed bearish breakdown');
         patternScore = -20;
@@ -447,13 +494,13 @@ class MarketScannerService {
 
       // OPTIMIZED: Dynamic recommendation thresholds
       let recommendation: 'STRONG_BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG_SELL';
-      if (score >= 85) {
+      if (score >= MARKET_SCANNER_CONSTANTS.STRONG_BUY_SCORE) {
         recommendation = 'STRONG_BUY';
-      } else if (score >= 70) {
+      } else if (score >= MARKET_SCANNER_CONSTANTS.BUY_SCORE) {
         recommendation = 'BUY';
-      } else if (score >= 40) {
+      } else if (score >= MARKET_SCANNER_CONSTANTS.NEUTRAL_SCORE) {
         recommendation = 'NEUTRAL';
-      } else if (score >= 25) {
+      } else if (score >= MARKET_SCANNER_CONSTANTS.SELL_SCORE) {
         recommendation = 'SELL';
       } else {
         recommendation = 'STRONG_SELL';
@@ -481,13 +528,13 @@ class MarketScannerService {
         
         if (orderBook) {
           // Adjust score based on order book analysis
-          if (orderBook.liquidityScore > 0.7) {
+          if (orderBook.liquidityScore > TRADING_THRESHOLDS.GOOD_LIQUIDITY_SCORE) {
             score += 10;
             signals.push('HIGH_LIQUIDITY');
-            reasoning.push(`Excellent liquidity: $${(orderBook.totalDepth / 1000000).toFixed(2)}M order book depth`);
-          } else if (orderBook.liquidityScore < 0.3) {
+            reasoning.push(`Excellent liquidity: $${(orderBook.totalDepth / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR).toFixed(2)}M order book depth`);
+          } else if (orderBook.liquidityScore < TRADING_THRESHOLDS.MIN_LIQUIDITY_SCORE) {
             // CRITICAL: Reject coins with order book liquidity <0.3 (execution problems)
-            logger.warn(`Rejecting ${symbol}: Order book liquidity too low (${orderBook.liquidityScore.toFixed(2)} < 0.3) - can't exit positions`, {
+            logger.warn(`Rejecting ${symbol}: Order book liquidity too low (${orderBook.liquidityScore.toFixed(2)} < ${TRADING_THRESHOLDS.MIN_LIQUIDITY_SCORE}) - can't exit positions`, {
               context: 'MarketScanner',
               data: { symbol, liquidityScore: orderBook.liquidityScore, totalDepth: orderBook.totalDepth }
             });
@@ -497,14 +544,14 @@ class MarketScannerService {
           if (orderBook.spreadPercent < 0.05) {
             score += 5;
             reasoning.push(`Tight spread: ${orderBook.spreadPercent.toFixed(3)}%`);
-          } else if (orderBook.spreadPercent > 0.5) {
+          } else if (orderBook.spreadPercent > TRADING_THRESHOLDS.MAX_SPREAD_FOR_TRADING) {
             // CRITICAL: Reject coins with spread >0.5% (execution problems like COSMO/APE)
-            logger.warn(`Rejecting ${symbol}: Spread too wide (${orderBook.spreadPercent.toFixed(3)}% > 0.5%) - execution risk`, {
+            logger.warn(`Rejecting ${symbol}: Spread too wide (${orderBook.spreadPercent.toFixed(3)}% > ${TRADING_THRESHOLDS.MAX_SPREAD_FOR_TRADING}%) - execution risk`, {
               context: 'MarketScanner',
               data: { symbol, spreadPercent: orderBook.spreadPercent }
             });
             return null; // Skip this coin - can't execute properly
-          } else if (orderBook.spreadPercent > 0.2) {
+          } else if (orderBook.spreadPercent > TRADING_THRESHOLDS.WIDE_SPREAD_WARNING) {
             score -= 5;
             signals.push('WIDE_SPREAD');
             reasoning.push(`Wide spread warning: ${orderBook.spreadPercent.toFixed(3)}%`);
@@ -540,7 +587,7 @@ class MarketScannerService {
           volume24h,
           volumeChange: (volumeRatio - 1) * 100,
           priceChange24h,
-          avgVolume,
+          avgVolume: avgVolume24h, // HIGH PRIORITY FIX: Use calculated avgVolume24h
           volumeRatio,
           spread,
           liquidity,
@@ -647,7 +694,7 @@ class MarketScannerService {
       });
       
       // Calculate liquidity score (0-1 scale, normalized to $1M)
-      const liquidityScore = Math.min(totalDepth / 1000000, 1.0);
+      const liquidityScore = Math.min(totalDepth / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR, 1.0);
       
       // Calculate order book imbalance
       const imbalance = (bidDepth - askDepth) / totalDepth;

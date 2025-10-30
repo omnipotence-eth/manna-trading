@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import { frontendLogger } from '@/lib/frontendLogger';
@@ -52,7 +52,8 @@ export default function EnhancedAIChat() {
   const trades = useStore((state) => state.trades);
   const modelMessages = useStore((state) => state.modelMessages);
   
-  const toggleMessageDetails = (messageId: string) => {
+  // OPTIMIZED: Memoize toggle handler to prevent unnecessary re-renders
+  const toggleMessageDetails = useCallback((messageId: string) => {
     setExpandedMessages(prev => {
       const newSet = new Set(prev);
       if (newSet.has(messageId)) {
@@ -62,7 +63,27 @@ export default function EnhancedAIChat() {
       }
       return newSet;
     });
-  };
+  }, []);
+  
+  // OPTIMIZED: Memoize displayed messages to prevent unnecessary recalculations
+  const displayedMessages = useMemo(() => {
+    return [...modelMessages].reverse().slice(0, 50); // Show last 50 messages
+  }, [modelMessages]);
+  
+  // OPTIMIZED: Memoize trade logs transformation
+  const transformedTradeLogs = useMemo(() => {
+    return trades.slice(-20).reverse().map(trade => ({
+      id: trade.id,
+      timestamp: new Date(trade.timestamp).getTime(),
+      symbol: trade.symbol,
+      side: trade.side,
+      size: trade.size,
+      price: trade.entryPrice,
+      pnl: trade.pnl,
+      leverage: trade.leverage,
+      reasoning: trade.entryReason || 'Position opened'
+    }));
+  }, [trades]);
 
   // Fetch real LLM agent insights and trade logs
   useEffect(() => {
@@ -180,11 +201,12 @@ export default function EnhancedAIChat() {
     });
   }, [trades]); // Only update trade logs when trades change
 
-  const formatTime = (timestamp: number) => {
+  // OPTIMIZED: Memoize helper functions to prevent unnecessary re-renders
+  const formatTime = useCallback((timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString();
-  };
-
-  const getAgentColor = (agent: string) => {
+  }, []);
+  
+  const getAgentColor = useCallback((agent: string) => {
     switch (agent) {
       case 'Technical Analyst': return 'text-blue-400';
       case 'Chief Analyst': return 'text-purple-400';
@@ -193,9 +215,9 @@ export default function EnhancedAIChat() {
       case 'Market Overview': return 'text-cyan-400';
       default: return 'text-green-400';
     }
-  };
-
-  const getAgentIcon = (agent: string) => {
+  }, []);
+  
+  const getAgentIcon = useCallback((agent: string) => {
     switch (agent) {
       case 'Technical Analyst': return '📊';
       case 'Chief Analyst': return '🧠';
@@ -204,7 +226,7 @@ export default function EnhancedAIChat() {
       case 'Market Overview': return '🌐';
       default: return '🤖';
     }
-  };
+  }, []);
 
   if (isLoading) {
     return (
@@ -233,11 +255,14 @@ export default function EnhancedAIChat() {
     );
   }
 
-  // Combine and sort all messages by timestamp
-  const allMessages = [
-    ...agentThoughts.map(thought => ({ ...thought, type: 'thought' as const })),
-    ...tradeLogs.map(log => ({ ...log, type: 'trade' as const }))
-  ].sort((a, b) => b.timestamp - a.timestamp);
+  // OPTIMIZED: Memoize combined and sorted messages to prevent unnecessary recalculations
+  const allMessages = useMemo(() => {
+    return [
+      ...agentThoughts.map(thought => ({ ...thought, type: 'thought' as const })),
+      ...tradeLogs.map(log => ({ ...log, type: 'trade' as const })),
+      ...displayedMessages.map(msg => ({ ...msg, type: 'message' as const }))
+    ].sort((a, b) => b.timestamp - a.timestamp);
+  }, [agentThoughts, tradeLogs, displayedMessages]);
 
   return (
     <div className="h-full flex flex-col">
@@ -368,46 +393,56 @@ export default function EnhancedAIChat() {
                         <span className="text-xs font-bold text-green-400">
                           TRADE EXECUTED
                         </span>
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                          message.side === 'BUY' 
-                            ? 'bg-green-500/20 text-green-500' 
-                            : 'bg-red-500/20 text-red-500'
-                        }`}>
-                          {message.side}
-                        </span>
+                        {message.type === 'trade' && (
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            message.side === 'BUY' 
+                              ? 'bg-green-500/20 text-green-500' 
+                              : 'bg-red-500/20 text-red-500'
+                          }`}>
+                            {message.side}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-green-500/50">
                         {formatTime(message.timestamp)}
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
-                      <div>
-                        <span className="text-green-500/60">Symbol:</span>
-                        <span className="text-green-500 ml-1 font-bold">{message.symbol}</span>
+                    {message.type === 'trade' ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
+                          <div>
+                            <span className="text-green-500/60">Symbol:</span>
+                            <span className="text-green-500 ml-1 font-bold">{message.symbol}</span>
+                          </div>
+                          <div>
+                            <span className="text-green-500/60">Price:</span>
+                            <span className="text-green-500 ml-1 font-bold">${message.price.toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span className="text-green-500/60">Size:</span>
+                            <span className="text-green-500 ml-1 font-bold">{message.size.toFixed(4)}</span>
+                          </div>
+                          <div>
+                            <span className="text-green-500/60">Leverage:</span>
+                            <span className="text-green-500 ml-1 font-bold">{message.leverage}x</span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-between">
+                          <div className={`text-sm font-bold ${message.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            PnL: {message.pnl >= 0 ? '+' : ''}${message.pnl.toFixed(2)}
+                          </div>
+                          <div className="text-xs text-green-500/60 italic">
+                            {message.reasoning}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-xs text-green-400 leading-relaxed break-words">
+                        <span className="text-green-500/60">[{message.model}]:</span> {message.message}
                       </div>
-                      <div>
-                        <span className="text-green-500/60">Price:</span>
-                        <span className="text-green-500 ml-1 font-bold">${message.price.toFixed(2)}</span>
-                      </div>
-                      <div>
-                        <span className="text-green-500/60">Size:</span>
-                        <span className="text-green-500 ml-1 font-bold">{message.size.toFixed(4)}</span>
-                      </div>
-                      <div>
-                        <span className="text-green-500/60">Leverage:</span>
-                        <span className="text-green-500 ml-1 font-bold">{message.leverage}x</span>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between">
-                      <div className={`text-sm font-bold ${message.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                        PnL: {message.pnl >= 0 ? '+' : ''}${message.pnl.toFixed(2)}
-                      </div>
-                      <div className="text-xs text-green-500/60 italic">
-                        {message.reasoning}
-                      </div>
-                    </div>
+                    )}
                   </div>
                 )}
               </motion.div>

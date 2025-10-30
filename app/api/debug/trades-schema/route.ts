@@ -5,8 +5,17 @@ import { logger } from '@/lib/logger';
 /**
  * Debug endpoint to check trades table schema
  * GET /api/debug/trades-schema
+ * CRITICAL FIX: Add authentication check - should not be exposed in production
  */
 export async function GET() {
+  // CRITICAL FIX: Block debug endpoints in production
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json(
+      { error: 'Debug endpoints are disabled in production' },
+      { status: 403 }
+    );
+  }
+
   try {
     // Get column info for trades table
     const result = await sql`

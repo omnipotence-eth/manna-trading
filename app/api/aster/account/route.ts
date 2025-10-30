@@ -50,21 +50,23 @@ export async function GET(req: NextRequest) {
 
         if (!response.ok) {
           const errorText = await response.text();
-          return handleAsterApiError(response, 'AsterAPI', {
-            balance: 54.04,
-            accountEquity: 54.04,
-            availableBalance: 15.49,
-            totalPositionInitialMargin: 33.30,
-            totalUnrealizedProfit: 0.63,
-            totalWalletBalance: -51.83,
-            totalMarginBalance: -51.20,
-            totalInitialMargin: 33.30,
-            totalCrossWalletBalance: -51.83,
+          // CRITICAL FIX: Remove hardcoded fallback data - only use in development
+          const fallbackData = process.env.NODE_ENV === 'development' ? {
+            balance: 0,
+            accountEquity: 0,
+            availableBalance: 0,
+            totalPositionInitialMargin: 0,
+            totalUnrealizedProfit: 0,
+            totalWalletBalance: 0,
+            totalMarginBalance: 0,
+            totalInitialMargin: 0,
+            totalCrossWalletBalance: 0,
             totalOpenOrderInitialMargin: 0,
             assets: [],
             fallback: true,
             timestamp: new Date().toISOString()
-          });
+          } : undefined;
+          return handleAsterApiError(response, 'AsterAPI', fallbackData);
         }
 
         const data = await response.json();
@@ -76,9 +78,9 @@ export async function GET(req: NextRequest) {
         const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
         
         // Calculate account value
-        // Use availableBalance as the primary balance (what you can actually trade with)
-        const calculatedAccountValue = availableBalance;
-        const accountEquity = totalWalletBalance + totalUnrealizedProfit;
+        // FIXED: Use totalMarginBalance which includes unrealized P&L (correct account equity)
+        const calculatedAccountValue = totalMarginBalance; // Total account equity including unrealized P&L
+        const accountEquity = totalMarginBalance; // Same as calculatedAccountValue (includes unrealized P&L)
         
         logger.info('Account value calculated', {
           context: 'AsterAPI',

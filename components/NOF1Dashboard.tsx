@@ -202,10 +202,15 @@ export default function NOF1Dashboard() {
     runTradingCycle();
     const tradingIntervalId = setInterval(runTradingCycle, 30000); // Every 30 seconds
 
+    // HIGH PRIORITY FIX: Cleanup intervals on unmount to prevent memory leaks
     return () => {
       isMountedRef.current = false;
-      clearInterval(dataIntervalId);
-      clearInterval(tradingIntervalId);
+      if (dataIntervalId) {
+        clearInterval(dataIntervalId);
+      }
+      if (tradingIntervalId) {
+        clearInterval(tradingIntervalId);
+      }
     };
   }, [setAccountValue, updatePosition, addTrade, addModelMessage]);
 

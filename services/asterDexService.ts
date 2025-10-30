@@ -1,10 +1,13 @@
 import { ethers } from 'ethers';
 import { logger } from '@/lib/logger';
 import { TRADING_CONSTANTS, ERROR_MESSAGES } from '@/constants';
+import { TRADING_THRESHOLDS } from '@/constants/tradingConstants';
 import type { WebSocketMessage } from '@/types/trading';
 import { apiCache } from './apiCache';
 import { generateSignature, buildSignedQuery } from '@/lib/asterAuth';
 import { AsterApiError } from '@/lib/asterApiError';
+import { asterConfig } from '@/lib/configService';
+import { circuitBreakers } from '@/lib/circuitBreaker';
 
 export interface AsterMarket {
   symbol: string;
@@ -420,7 +423,7 @@ class AsterDexService {
       // Simulate trades for all symbols
       Object.entries(basePrices).forEach(([symbol, basePrice]) => {
         // Random price fluctuation (-0.5% to +0.5%)
-        const priceChange = (Math.random() - 0.5) * 0.01 * basePrice;
+        const priceChange = (Math.random() - TRADING_THRESHOLDS.PRICE_CHANGE_PROBABILITY) * TRADING_THRESHOLDS.RANDOM_PRICE_CHANGE_RANGE * basePrice;
         const currentPrice = basePrice + priceChange;
         basePrices[symbol] = currentPrice; // Update base price
         
@@ -437,7 +440,7 @@ class AsterDexService {
         onMessage(mockTradeData);
         
         // Also send ticker update every other cycle
-        if (Math.random() > 0.5) {
+        if (Math.random() > TRADING_THRESHOLDS.PRICE_CHANGE_PROBABILITY) {
           const mockTickerData: WebSocketMessage = {
             type: 'ticker',
             data: {
@@ -863,7 +866,7 @@ class AsterDexService {
       const lotSizeFilter = symbolData.filters?.find((f: any) => f.filterType === 'LOT_SIZE');
       const quantityPrecision = symbolData.quantityPrecision || 2; // Default to 2 decimals
       const stepSize = lotSizeFilter?.stepSize || '0.01'; // Default step size
-      const maxQty = lotSizeFilter?.maxQty ? parseFloat(lotSizeFilter.maxQty) : 1000000; // Default to high limit
+      const maxQty = lotSizeFilter?.maxQty ? parseFloat(lotSizeFilter.maxQty) : TRADING_THRESHOLDS.MAX_QUANTITY_DEFAULT; // Default to high limit
       
       const result = { quantityPrecision, stepSize, maxQty };
       
@@ -879,7 +882,7 @@ class AsterDexService {
     } catch (error) {
       logger.error(`Failed to fetch symbol precision for ${symbol}`, error, { context: 'AsterDex' });
       // Return safe defaults
-      return { quantityPrecision: 2, stepSize: '0.01', maxQty: 1000000 };
+      return { quantityPrecision: 2, stepSize: '0.01', maxQty: TRADING_THRESHOLDS.MAX_QUANTITY_LIMIT };
     }
   }
 
@@ -973,7 +976,7 @@ class AsterDexService {
           totalPairs: data.symbols.length,
           topVolumeSymbols: tradingPairs.slice(0, 10).map((s: any) => ({
             symbol: s.symbol,
-            volume: `$${(s.quoteVolume24h / 1000000).toFixed(2)}M`
+            volume: `$${(s.quoteVolume24h / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR).toFixed(2)}M`
           }))
         }
       });
@@ -1499,13 +1502,40 @@ class AsterDexService {
     }
     
     const requestPromise = (async () => {
-      try {
-        const response = await fetch(this.getApiUrl('/api/aster/account'));
-        if (!response.ok) {
-          throw new Error(`API returned ${response.status}`);
-        }
-        
-        const data = await response.json();
+      // HIGH PRIORITY FIX: Add retry logic with exponential backoff
+      const maxRetries = 3;
+      let lastError: Error | null = null;
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          if (attempt > 0) {
+            // Exponential backoff: 1s, 2s, 4s
+            const delay = Math.pow(2, attempt - 1) * 1000;
+            logger.debug(`Retrying getBalance request (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms`, {
+              context: 'AsterDex'
+            });
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+          
+          const response = await fetch(this.getApiUrl('/api/aster/account'));
+          if (!response.ok) {
+            throw new Error(`API returned ${response.status}`);
+          }
+          
+          const data = await response.json();
+          
+          // HIGH PRIORITY FIX: Add type validation for API response
+          if (!data || typeof data !== 'object') {
+            throw new Error('Invalid API response format - expected object');
+          }
+          
+          // Validate required fields exist
+          if (typeof data.totalMarginBalance !== 'string' && typeof data.totalMarginBalance !== 'number') {
+            logger.warn('Missing totalMarginBalance in API response', {
+              context: 'AsterDex',
+              data: { responseKeys: Object.keys(data) }
+            });
+          }
       
       // Calculate TRUE account value using correct Aster DEX formula:
       // Total Account Equity = totalMarginBalance (this already includes unrealized P&L)
@@ -1546,8 +1576,29 @@ class AsterDexService {
         
         return balance;
       } catch (error) {
-        logger.error('Failed to get real balance', error, { context: 'AsterDex' });
-        return 100; // Fallback to initial capital
+        lastError = error instanceof Error ? error : new Error(String(error));
+        
+        // Log retry attempt
+        if (attempt < maxRetries - 1) {
+          logger.warn(`getBalance request failed (attempt ${attempt + 1}/${maxRetries})`, lastError, {
+            context: 'AsterDex',
+            data: { attempt: attempt + 1, maxRetries }
+          });
+        } else {
+          // Final attempt failed
+          logger.error('Failed to get real balance after all retries', lastError, { 
+            context: 'AsterDex',
+            data: { attempts: maxRetries }
+          });
+          
+          // Return fallback value
+          return 100; // Fallback to initial capital
+        }
+      }
+    }
+    
+    // If we get here, all retries failed
+    return 100; // Fallback to initial capital
       } finally {
         // Remove from pending requests map when done
         this.pendingRequests.delete(requestKey);
