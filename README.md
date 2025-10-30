@@ -95,6 +95,24 @@ AGENT_RUNNER_INTERVAL=2
 
 ---
 
+## 🚀 Vercel Deployment
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for comprehensive deployment guide.
+
+**Quick Steps:**
+1. Push code to GitHub
+2. Import repository in Vercel dashboard
+3. Configure environment variables
+4. Deploy!
+
+**Required Environment Variables:**
+- `ASTER_API_KEY` - Aster DEX API key
+- `ASTER_SECRET_KEY` - Aster DEX secret key
+- `DATABASE_URL` - PostgreSQL connection string
+- `OLLAMA_BASE_URL` - Ollama server URL (for AI features)
+
+---
+
 ## 📝 Configuration
 
 ### **Trading Parameters:**

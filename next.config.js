@@ -9,8 +9,7 @@ const nextConfig = {
     // your project has ESLint errors.
     ignoreDuringBuilds: true,
   },
-  // Vercel deployment configuration
-  output: 'standalone', // Optimize for serverless deployment
+  // Optimized for Vercel deployment
   // Remove CSP headers for development - browser extensions/settings might override them anyway
 }
 
