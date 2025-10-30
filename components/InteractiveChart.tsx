@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { frontendLogger } from '@/lib/frontendLogger';
 import { frontendPerformanceMonitor } from '@/lib/frontendPerformanceMonitor';
@@ -74,7 +74,7 @@ export default function InteractiveChart({
     }
 
     return data;
-  };
+  }, []);
 
   // Fetch real balance data
   useEffect(() => {

@@ -1502,103 +1502,101 @@ class AsterDexService {
     }
     
     const requestPromise = (async () => {
-      // HIGH PRIORITY FIX: Add retry logic with exponential backoff
-      const maxRetries = 3;
-      let lastError: Error | null = null;
-      
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          if (attempt > 0) {
-            // Exponential backoff: 1s, 2s, 4s
-            const delay = Math.pow(2, attempt - 1) * 1000;
-            logger.debug(`Retrying getBalance request (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms`, {
-              context: 'AsterDex'
-            });
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
-          
-          const response = await fetch(this.getApiUrl('/api/aster/account'));
-          if (!response.ok) {
-            throw new Error(`API returned ${response.status}`);
-          }
-          
-          const data = await response.json();
-          
-          // HIGH PRIORITY FIX: Add type validation for API response
-          if (!data || typeof data !== 'object') {
-            throw new Error('Invalid API response format - expected object');
-          }
-          
-          // Validate required fields exist
-          if (typeof data.totalMarginBalance !== 'string' && typeof data.totalMarginBalance !== 'number') {
-            logger.warn('Missing totalMarginBalance in API response', {
+      try {
+        // HIGH PRIORITY FIX: Add retry logic with exponential backoff
+        const maxRetries = 3;
+        let lastError: Error | null = null;
+        
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            if (attempt > 0) {
+              // Exponential backoff: 1s, 2s, 4s
+              const delay = Math.pow(2, attempt - 1) * 1000;
+              logger.debug(`Retrying getBalance request (attempt ${attempt + 1}/${maxRetries}) after ${delay}ms`, {
+                context: 'AsterDex'
+              });
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            
+            const response = await fetch(this.getApiUrl('/api/aster/account'));
+            if (!response.ok) {
+              throw new Error(`API returned ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            // HIGH PRIORITY FIX: Add type validation for API response
+            if (!data || typeof data !== 'object') {
+              throw new Error('Invalid API response format - expected object');
+            }
+            
+            // Validate required fields exist
+            if (typeof data.totalMarginBalance !== 'string' && typeof data.totalMarginBalance !== 'number') {
+              logger.warn('Missing totalMarginBalance in API response', {
+                context: 'AsterDex',
+                data: { responseKeys: Object.keys(data) }
+              });
+            }
+        
+            // Calculate TRUE account value using correct Aster DEX formula:
+            // Total Account Equity = totalMarginBalance (this already includes unrealized P&L)
+            const totalMarginBalance = parseFloat(data.totalMarginBalance || 0);
+            const totalWalletBalance = parseFloat(data.totalWalletBalance || 0);
+            const totalUnrealizedProfit = parseFloat(data.totalUnrealizedProfit || 0);
+            const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
+            
+            // totalMarginBalance = totalWalletBalance + totalUnrealizedProfit
+            // This is the REAL account value including unrealized P&L
+            let balance = totalMarginBalance;
+            
+            // If balance is negative (losses), show it as is (don't hide losses)
+            // If you want to show absolute value instead, uncomment:
+            // balance = Math.abs(balance);
+            
+            // Final fallback: if still negative or invalid, use position margin + unrealized P&L
+            if (balance <= 0 || isNaN(balance)) {
+              balance = totalPositionInitialMargin + (totalUnrealizedProfit || 0);
+              if (balance <= 0) {
+                throw new Error('Invalid balance data from Aster API');
+              }
+            }
+            
+            logger.info(`💰 REAL Aster Account Value: $${balance.toFixed(2)}`, {
               context: 'AsterDex',
-              data: { responseKeys: Object.keys(data) }
+              data: { 
+                totalAccountValue: balance,
+                positionValue: totalPositionInitialMargin,
+                unrealizedPnL: totalUnrealizedProfit,
+                totalMarginBalance: totalMarginBalance,
+                rawMarginBalance: data.totalMarginBalance,
+              },
             });
+            
+            // Cache for 15 seconds
+            apiCache.set(cacheKey, balance, apiCache.getTTL('BALANCE'));
+            
+            return balance;
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            
+            // Log retry attempt
+            if (attempt < maxRetries - 1) {
+              logger.warn(`getBalance request failed (attempt ${attempt + 1}/${maxRetries})`, lastError, {
+                context: 'AsterDex',
+                data: { attempt: attempt + 1, maxRetries }
+              });
+            } else {
+              // Final attempt failed
+              logger.error('Failed to get real balance after all retries', lastError, { 
+                context: 'AsterDex',
+                data: { attempts: maxRetries }
+              });
+            }
           }
-      
-      // Calculate TRUE account value using correct Aster DEX formula:
-      // Total Account Equity = totalMarginBalance (this already includes unrealized P&L)
-      const totalMarginBalance = parseFloat(data.totalMarginBalance || 0);
-      const totalWalletBalance = parseFloat(data.totalWalletBalance || 0);
-      const totalUnrealizedProfit = parseFloat(data.totalUnrealizedProfit || 0);
-      const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
-      
-      // totalMarginBalance = totalWalletBalance + totalUnrealizedProfit
-      // This is the REAL account value including unrealized P&L
-      let balance = totalMarginBalance;
-      
-      // If balance is negative (losses), show it as is (don't hide losses)
-      // If you want to show absolute value instead, uncomment:
-      // balance = Math.abs(balance);
-      
-      // Final fallback: if still negative or invalid, use position margin + unrealized P&L
-      if (balance <= 0 || isNaN(balance)) {
-        balance = totalPositionInitialMargin + (totalUnrealizedProfit || 0);
-        if (balance <= 0) {
-          throw new Error('Invalid balance data from Aster API');
         }
-      }
-      
-      logger.info(`💰 REAL Aster Account Value: $${balance.toFixed(2)}`, {
-        context: 'AsterDex',
-        data: { 
-          totalAccountValue: balance,
-          positionValue: totalPositionInitialMargin,
-          unrealizedPnL: totalUnrealizedProfit,
-          totalMarginBalance: totalMarginBalance,
-          rawMarginBalance: data.totalMarginBalance,
-        },
-      });
-      
-        // Cache for 15 seconds
-        apiCache.set(cacheKey, balance, apiCache.getTTL('BALANCE'));
         
-        return balance;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        
-        // Log retry attempt
-        if (attempt < maxRetries - 1) {
-          logger.warn(`getBalance request failed (attempt ${attempt + 1}/${maxRetries})`, lastError, {
-            context: 'AsterDex',
-            data: { attempt: attempt + 1, maxRetries }
-          });
-        } else {
-          // Final attempt failed
-          logger.error('Failed to get real balance after all retries', lastError, { 
-            context: 'AsterDex',
-            data: { attempts: maxRetries }
-          });
-          
-          // Return fallback value
-          return 100; // Fallback to initial capital
-        }
-      }
-    }
-    
-    // If we get here, all retries failed
-    return 100; // Fallback to initial capital
+        // If we get here, all retries failed
+        return 100; // Fallback to initial capital
       } finally {
         // Remove from pending requests map when done
         this.pendingRequests.delete(requestKey);

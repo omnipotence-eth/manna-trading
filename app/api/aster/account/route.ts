@@ -76,6 +76,7 @@ export async function GET(req: NextRequest) {
         const totalWalletBalance = parseFloat(data.totalWalletBalance || 0);
         const totalUnrealizedProfit = parseFloat(data.totalUnrealizedProfit || 0);
         const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
+        const totalMarginBalance = parseFloat(data.totalMarginBalance || 0);
         
         // Calculate account value
         // FIXED: Use totalMarginBalance which includes unrealized P&L (correct account equity)
