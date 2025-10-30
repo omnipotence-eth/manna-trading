@@ -139,7 +139,12 @@ export const appConfig = {
   
   // API Configuration
   api: {
-    baseUrl: getEnvVar('VERCEL_URL') ? `https://${getEnvVar('VERCEL_URL')}` : 'http://localhost:3000',
+    // Vercel provides VERCEL_URL automatically, use it if available
+    baseUrl: process.env.VERCEL_URL 
+      ? `https://${process.env.VERCEL_URL}` 
+      : process.env.NEXT_PUBLIC_APP_URL 
+      ? process.env.NEXT_PUBLIC_APP_URL
+      : 'http://localhost:3000',
     timeout: getNumberEnvVar('API_TIMEOUT', 30000),
     retryAttempts: getNumberEnvVar('API_RETRY_ATTEMPTS', 3),
   },
