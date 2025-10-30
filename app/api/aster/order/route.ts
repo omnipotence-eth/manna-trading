@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildSignedQuery } from '@/lib/asterAuth';
 import { logger } from '@/lib/logger';
-
-const ASTER_BASE_URL = process.env.ASTER_BASE_URL || 'https://fapi.asterdex.com';
-const API_KEY = process.env.ASTER_API_KEY;
-const API_SECRET = process.env.ASTER_SECRET_KEY;
+import { withRateLimit } from '@/lib/rateLimiter';
+import { asterConfig } from '@/lib/configService';
+import { circuitBreakers } from '@/lib/circuitBreaker';
 
 /**
  * POST /api/aster/order
@@ -140,7 +139,7 @@ export async function POST(req: NextRequest) {
  * Cancels an order on Aster DEX (authenticated)
  */
 export async function DELETE(req: NextRequest) {
-  if (!API_KEY || !API_SECRET) {
+  if (!asterConfig.apiKey || !asterConfig.secretKey) {
     logger.error('Aster API credentials not configured', undefined, { context: 'AsterAPI' });
     return NextResponse.json(
       { error: 'API credentials not configured' },
@@ -168,8 +167,8 @@ export async function DELETE(req: NextRequest) {
 
     // Build signed query with fresh timestamp
     cancelParams.timestamp = Date.now();
-    const queryString = await buildSignedQuery(cancelParams, API_SECRET);
-    const url = `${ASTER_BASE_URL}/fapi/v1/order?${queryString}`;
+    const queryString = await buildSignedQuery(cancelParams, asterConfig.secretKey);
+    const url = `${asterConfig.baseUrl}/fapi/v1/order?${queryString}`;
 
     logger.info('Canceling Aster order', {
       context: 'AsterAPI',
@@ -179,7 +178,7 @@ export async function DELETE(req: NextRequest) {
     const response = await fetch(url, {
       method: 'DELETE',
       headers: {
-        'X-MBX-APIKEY': API_KEY,
+        'X-MBX-APIKEY': asterConfig.apiKey,
       },
     });
 

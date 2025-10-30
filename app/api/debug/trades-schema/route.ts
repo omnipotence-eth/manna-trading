@@ -21,7 +21,7 @@ export async function GET() {
       ORDER BY ordinal_position;
     `;
 
-    logger.info('Trades table schema:', { context: 'Debug', data: result.rows });
+    logger.info('Trades table schema:', { context: 'Debug', data: result.rows as any });
 
     return NextResponse.json({
       success: true,

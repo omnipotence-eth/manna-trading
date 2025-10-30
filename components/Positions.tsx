@@ -65,6 +65,8 @@ const Positions = memo(function Positions() {
             </motion.div>
           );
         })
+      )}
+    </div>
   );
 });
 

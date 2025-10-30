@@ -6,7 +6,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { handleApiError, createSuccessResponse } from '@/lib/errorHandler';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
-import { asterDexService } from '@/services/asterDexService';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
@@ -20,9 +19,9 @@ export async function GET(request: NextRequest) {
 
     switch (action) {
       case 'chart-data':
-        return await getChartData(timeRange);
+        return await getChartData(timeRange, request);
       case 'current-balance':
-        return await getCurrentBalance();
+        return await getCurrentBalance(request);
       case 'balance-history':
         return await getBalanceHistory(timeRange);
       default:
@@ -42,7 +41,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function getChartData(timeRange: string) {
+async function getChartData(timeRange: string, request: NextRequest) {
   try {
     logger.info('Fetching balance chart data', { 
       context: 'BalanceChartAPI',
@@ -50,7 +49,11 @@ async function getChartData(timeRange: string) {
     });
 
     // Fetch real balance from Aster API - no fallback
-    const accountInfo = await asterDexService.getAccountInfo();
+    const response = await fetch(new URL('/api/aster/account', request.url).toString());
+    if (!response.ok) {
+      throw new Error(`Failed to fetch account info: ${response.status}`);
+    }
+    const accountInfo = await response.json();
     
     if (!accountInfo || !accountInfo.availableBalance) {
       throw new Error('No real balance data available from Aster API');
@@ -181,10 +184,14 @@ async function getChartData(timeRange: string) {
   }
 }
 
-async function getCurrentBalance() {
+async function getCurrentBalance(request: NextRequest) {
   try {
     // Fetch real balance from Aster API
-    const accountInfo = await asterDexService.getAccountInfo();
+    const response = await fetch(new URL('/api/aster/account', request.url).toString());
+    if (!response.ok) {
+      throw new Error(`Failed to fetch account info: ${response.status}`);
+    }
+    const accountInfo = await response.json();
     
     if (accountInfo && accountInfo.availableBalance) {
       // Use availableBalance (the actual trading balance)

@@ -3,7 +3,7 @@ import { logger } from '@/lib/logger';
 import { TRADING_CONSTANTS, ERROR_MESSAGES } from '@/constants';
 import type { WebSocketMessage } from '@/types/trading';
 import { apiCache } from './apiCache';
-import { generateSignature } from '@/lib/asterAuth';
+import { generateSignature, buildSignedQuery } from '@/lib/asterAuth';
 import { AsterApiError } from '@/lib/asterApiError';
 
 export interface AsterMarket {
