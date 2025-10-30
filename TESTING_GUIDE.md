@@ -2,14 +2,14 @@
 
 ## 📋 Testing Strategy Overview
 
-**Recommendation: Test locally first, then deploy separately**
+**Recommendation: Test locally first, then deploy when ready**
 
-Since you have version 2.0 running on Vercel, here's the best approach:
+Since you've cleaned up your Vercel deployments, here's the best approach:
 
-### ✅ DO NOT DELETE Vercel Deployment
-- Keep version 2.0 running on Vercel (it's stable)
-- Test version 3.0 locally first
-- Deploy version 3.0 to a **separate Vercel project** when ready
+### ✅ Start Fresh with Local Testing ⭐
+- Test version 3.0 locally first (uses your GPU)
+- Deploy to Vercel when ready (create new project)
+- Clean slate for testing
 
 ---
 
