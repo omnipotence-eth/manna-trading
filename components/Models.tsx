@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
+import { getConfidenceColor } from '@/lib/confidenceColors';
 
 interface AIModel {
   name: string;
@@ -27,9 +28,9 @@ export default function Models() {
   const winRate = completedTrades.length > 0 ? (winningTrades.length / completedTrades.length) * 100 : 0;
   
   const model: AIModel = {
-    name: 'Godspeed',
-    description: 'Advanced optimized AI trading system with RSI analysis, trend detection, volume confirmation, and multi-strategy approach. Uses professional risk management with 1:3 risk/reward ratio and dynamic leverage adjustment.',
-    strategy: 'RSI + Trend Following + Mean Reversion + Breakout + Dynamic Leverage',
+    name: 'Multi-Agent AI System',
+    description: 'Advanced LLM-powered multi-agent trading system with Technical Analyst, Risk Manager, Chief Analyst, and Execution Specialist. Powered by DeepSeek R1 32B with GPU acceleration for superior reasoning and intelligent decision-making with comprehensive market analysis across all timeframes.',
+    strategy: 'Multi-Agent LLM Coordination + Risk Management + Market Analysis',
     status: 'active',
     performance: performancePercent,
     trades: completedTrades.length,
@@ -42,9 +43,9 @@ export default function Models() {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <h1 className="text-3xl font-bold terminal-text mb-2">GODSPEED AI SYSTEM</h1>
+        <h1 className="text-3xl font-bold terminal-text mb-2">MULTI-AGENT AI SYSTEM</h1>
               <p className="text-green-500/60 text-sm">
-                Advanced AI Trading System • Maximum Leverage • Trading on Aster DEX
+                LLM-Powered Trading Agents • Intelligent Analysis • Trading on Aster DEX
               </p>
       </motion.div>
 
@@ -91,18 +92,18 @@ export default function Models() {
                 <span className="text-green-500">${accountValue.toFixed(2)}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-green-500/60">Risk Level:</span>
-                <span className="text-red-500">HYPER-AGGRESSIVE</span>
+                <span className="text-green-500/60">Analysis Cycle:</span>
+                <span className="text-green-500">Every 2 minutes</span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-green-500/60">Max Leverage:</span>
-                <span className="text-green-500">MAX (20x-50x per coin)</span>
+                <span className="text-green-500/60">AI Model:</span>
+                <span className="text-neon-blue">DeepSeek R1 32B (GPU)</span>
               </div>
             </div>
 
             <div className="mt-4 pt-4 border-t border-green-500/30">
               <div className="text-xs text-green-500/60 text-center">
-                🚀 Godspeed is actively trading • Real-time metrics updated live
+                🤖 Multi-Agent AI is actively analyzing • Real-time metrics updated live
               </div>
             </div>
           </motion.div>

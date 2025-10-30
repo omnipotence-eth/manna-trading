@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import { frontendLogger } from '@/lib/frontendLogger';
 import { frontendPerformanceMonitor } from '@/lib/frontendPerformanceMonitor';
+import { getConfidenceColor, formatConfidence } from '@/lib/confidenceColors';
 
 interface AgentThought {
   id: string;
@@ -46,74 +47,63 @@ export default function EnhancedAIChat() {
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
   
   const trades = useStore((state) => state.trades);
   const modelMessages = useStore((state) => state.modelMessages);
+  
+  const toggleMessageDetails = (messageId: string) => {
+    setExpandedMessages(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId);
+      } else {
+        newSet.add(messageId);
+      }
+      return newSet;
+    });
+  };
 
   // Fetch real LLM agent insights and trade logs
   useEffect(() => {
+    let isMounted = true;
+    
     const fetchAIData = async () => {
-      try {
+      // Don't show loading on refresh (only on initial mount)
+      if (agentThoughts.length === 0) {
         setIsLoading(true);
+      }
+      
+      try {
         setError(null);
         
         // Add timeout to prevent infinite loading
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
         
-        // Fetch real agent insights from LLM
-        const insightsResponse = await fetch('/api/agent-insights?symbol=BTC/USDT&limit=8', {
+        // Fetch real agent insights from comprehensive market scanner
+        const insightsResponse = await fetch('/api/agent-insights?limit=10', {
           signal: controller.signal
         });
         
         clearTimeout(timeoutId);
+        
+        if (!isMounted) return; // Component unmounted, don't update state
         
         if (insightsResponse.ok) {
           const insightsData = await insightsResponse.json();
           
           if (insightsData.success && insightsData.data?.insights) {
             setAgentThoughts(insightsData.data.insights);
-            frontendLogger.debug('Real agent insights loaded', { 
+            frontendLogger.debug('Real agent insights loaded from market scanner', { 
               component: 'EnhancedAIChat',
               data: {
                 insightsCount: insightsData.data.insights.length,
-                symbol: insightsData.data.symbol
+                totalSymbolsScanned: insightsData.data.scanResult?.totalSymbols || 0,
+                bestOpportunity: insightsData.data.scanResult?.bestOpportunity?.symbol || 'none'
               }
             });
-            
-            // Generate trade logs from actual trades only
-            const generateTradeLogs = (): TradeLog[] => {
-              const tradeLogs: TradeLog[] = [];
-              
-              // Only process real trades with valid data
-              trades.filter(trade => trade.id && trade.timestamp && trade.symbol).forEach((trade) => {
-                tradeLogs.push({
-                  id: `trade-${trade.id}`,
-                  timestamp: new Date(trade.timestamp).getTime(),
-                  symbol: trade.symbol,
-                  side: trade.side === 'LONG' ? 'BUY' : 'SELL',
-                  size: trade.size || 0,
-                  price: trade.entryPrice || 0,
-                  pnl: trade.pnl || 0,
-                  leverage: trade.leverage || 1,
-                  reasoning: `Real trade executed: ${trade.side === 'LONG' ? 'bullish' : 'bearish'} position`
-                });
-              });
-              
-              return tradeLogs.sort((a, b) => b.timestamp - a.timestamp);
-            };
-
-            const logs = generateTradeLogs();
-            setTradeLogs(logs);
             setError(null);
-            
-            frontendLogger.debug('AI chat data loaded', { 
-              component: 'EnhancedAIChat',
-              data: {
-                insights: insightsData.data.insights.length,
-                trades: logs.length
-              }
-            });
           } else {
             throw new Error('Failed to fetch insights');
           }
@@ -122,22 +112,73 @@ export default function EnhancedAIChat() {
         }
 
       } catch (err) {
-        frontendLogger.error('Failed to load AI chat data', err as Error, { 
-          component: 'EnhancedAIChat' 
-        });
-        setError('Failed to load AI data - API unavailable');
-        setAgentThoughts([]);
+        if (!isMounted) return; // Component unmounted
+        
+        if (err instanceof Error && err.name === 'AbortError') {
+          frontendLogger.warn('Insights request timed out', { component: 'EnhancedAIChat' });
+          // Don't set error on timeout if we already have data
+          if (agentThoughts.length === 0) {
+            setError('Market scan taking longer than expected...');
+          }
+        } else {
+          frontendLogger.error('Failed to load AI chat data', err as Error, { 
+            component: 'EnhancedAIChat' 
+          });
+          // Don't clear existing data on error
+          if (agentThoughts.length === 0) {
+            setError('Connecting to market scanner...');
+          }
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
+    // Initial fetch
     fetchAIData();
     
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchAIData, 30000);
-    return () => clearInterval(interval);
-  }, [trades]);
+    // Refresh every 2 minutes (smoother updates, no visible reload)
+    const interval = setInterval(fetchAIData, 120000); // 2 minutes
+    
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []); // NO DEPENDENCIES - only run on mount and interval
+  
+  // Separate effect for trade logs (updates independently)
+  useEffect(() => {
+    const generateTradeLogs = (): TradeLog[] => {
+      const tradeLogs: TradeLog[] = [];
+      
+      // Only process real trades with valid data
+      trades.filter(trade => trade.id && trade.timestamp && trade.symbol).forEach((trade) => {
+        tradeLogs.push({
+          id: `trade-${trade.id}`,
+          timestamp: new Date(trade.timestamp).getTime(),
+          symbol: trade.symbol,
+          side: trade.side === 'LONG' ? 'BUY' : 'SELL',
+          size: trade.size || 0,
+          price: trade.entryPrice || 0,
+          pnl: trade.pnl || 0,
+          leverage: trade.leverage || 1,
+          reasoning: `Real trade executed: ${trade.side === 'LONG' ? 'bullish' : 'bearish'} position`
+        });
+      });
+      
+      return tradeLogs.sort((a, b) => b.timestamp - a.timestamp);
+    };
+
+    const logs = generateTradeLogs();
+    setTradeLogs(logs);
+    
+    frontendLogger.debug('Trade logs updated', { 
+      component: 'EnhancedAIChat',
+      data: { trades: logs.length }
+    });
+  }, [trades]); // Only update trade logs when trades change
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString();
@@ -149,6 +190,7 @@ export default function EnhancedAIChat() {
       case 'Chief Analyst': return 'text-purple-400';
       case 'Risk Manager': return 'text-orange-400';
       case 'Execution Specialist': return 'text-green-400';
+      case 'Market Overview': return 'text-cyan-400';
       default: return 'text-green-400';
     }
   };
@@ -159,6 +201,7 @@ export default function EnhancedAIChat() {
       case 'Chief Analyst': return '🧠';
       case 'Risk Manager': return '🛡️';
       case 'Execution Specialist': return '⚡';
+      case 'Market Overview': return '🌐';
       default: return '🤖';
     }
   };
@@ -245,8 +288,8 @@ export default function EnhancedAIChat() {
                             {message.agent}
                           </span>
                           {message.confidence && (
-                            <span className="text-xs text-green-500/60 bg-green-500/10 px-2 py-0.5 rounded shrink-0">
-                              {Math.round(message.confidence * 100)}%
+                            <span className={`text-xs px-2 py-0.5 rounded shrink-0 font-bold ${getConfidenceColor(message.confidence).text} ${getConfidenceColor(message.confidence).bg}`}>
+                              {formatConfidence(message.confidence)}
                             </span>
                           )}
                         </div>
@@ -270,33 +313,51 @@ export default function EnhancedAIChat() {
                       </div>
                     </div>
                     
-                    <div className="text-xs text-green-400 leading-relaxed mb-3 break-words">
+                    <div className="text-xs text-green-400 leading-relaxed mb-2 break-words">
                       {message.insight}
                     </div>
                     
-                    {/* Market Data Display */}
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs bg-black/20 p-2.5 rounded mb-2">
-                      <div className="flex justify-between">
-                        <span className="text-green-500/60">Price:</span>
-                        <span className="text-green-500 font-mono font-bold">${message.marketData.price.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-green-500/60">RSI:</span>
-                        <span className="text-green-500 font-mono font-bold">{message.marketData.rsi.toFixed(1)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-green-500/60">Volume:</span>
-                        <span className="text-green-500 font-mono font-bold">{(message.marketData.volume / 1000000).toFixed(1)}M</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-green-500/60">Volatility:</span>
-                        <span className="text-green-500 font-mono font-bold">{(message.marketData.volatility * 100).toFixed(1)}%</span>
-                      </div>
-                    </div>
+                    {/* Collapsible Market Data */}
+                    <button
+                      onClick={() => toggleMessageDetails(message.id)}
+                      className="text-xs text-green-500/60 hover:text-green-500 mb-2 flex items-center gap-1 transition-colors"
+                    >
+                      <span>{expandedMessages.has(message.id) ? '▼' : '▶'}</span>
+                      <span>{expandedMessages.has(message.id) ? 'Hide' : 'Show'} Details</span>
+                    </button>
                     
-                    <div className="text-xs text-green-500/60 italic break-words">
-                      {message.reasoning}
-                    </div>
+                    {expandedMessages.has(message.id) && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        {/* Market Data Display */}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs bg-black/20 p-2.5 rounded mb-2">
+                          <div className="flex justify-between">
+                            <span className="text-green-500/60">Price:</span>
+                            <span className="text-green-500 font-mono font-bold">${message.marketData.price.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-green-500/60">RSI:</span>
+                            <span className="text-green-500 font-mono font-bold">{message.marketData.rsi.toFixed(1)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-green-500/60">Volume:</span>
+                            <span className="text-green-500 font-mono font-bold">{(message.marketData.volume / 1000000).toFixed(1)}M</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-green-500/60">Volatility:</span>
+                            <span className="text-green-500 font-mono font-bold">{(message.marketData.volatility * 100).toFixed(1)}%</span>
+                          </div>
+                        </div>
+                        
+                        <div className="text-xs text-green-500/60 italic break-words">
+                          {message.reasoning}
+                        </div>
+                      </motion.div>
+                    )}
                   </div>
                 ) : (
                   <div>

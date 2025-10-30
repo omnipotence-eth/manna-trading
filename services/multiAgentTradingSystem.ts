@@ -3,8 +3,9 @@
  * Coordinates 6 specialized AI agents for sophisticated trading decisions
  */
 
-import { qwenService } from '@/services/qwenService';
+import { deepseekService } from '@/services/deepseekService';
 import { AGENT_PROMPTS, MarketData, SentimentData, OnChainData, AnalystReports, FinalDecision, Portfolio, RiskApprovedTrade } from '@/lib/agentPrompts';
+import { DEEPSEEK_OPTIMIZED_PROMPTS } from '@/lib/agentPromptsOptimized';
 import { logger } from '@/lib/logger';
 import { asterDexService } from '@/services/asterDexService';
 import { dataIngestionService } from '@/services/dataIngestionService';
@@ -54,10 +55,10 @@ export class MultiAgentTradingSystem {
     this.isRunning = true;
     logger.info('🚀 Starting Multi-Agent Trading System', { context: 'MultiAgentSystem' });
 
-    // Test Qwen connection
-    const qwenConnected = await qwenService.testConnection();
-    if (!qwenConnected) {
-      throw new Error('Qwen service not available. Please ensure Ollama is running.');
+    // Test DeepSeek R1 connection
+    const deepseekConnected = await deepseekService.testConnection();
+    if (!deepseekConnected) {
+      throw new Error('DeepSeek R1 service not available. Please ensure Ollama is running with deepseek-r1 model.');
     }
 
     // Start trading cycle
@@ -289,20 +290,28 @@ export class MultiAgentTradingSystem {
   }
 
   /**
-   * Run Technical Analyst agent
+   * Run Technical Analyst agent - USING DEEPSEEK R1 OPTIMIZED PROMPTS
    */
   private async runTechnicalAnalyst(data: MarketData): Promise<any> {
-    const prompt = AGENT_PROMPTS.TECHNICAL_ANALYST.analysisTemplate(data);
+    const systemPrompt = DEEPSEEK_OPTIMIZED_PROMPTS.TECHNICAL_ANALYST.systemPrompt;
+    const prompt = DEEPSEEK_OPTIMIZED_PROMPTS.TECHNICAL_ANALYST.analysisTemplate(data);
     
     try {
-      const analysis = await qwenService.chatWithSystem(
-        AGENT_PROMPTS.TECHNICAL_ANALYST.systemPrompt,
+      const result = await deepseekService.chatWithSystem(
+        systemPrompt,
         prompt,
-        'qwen2.5:7b-instruct',
-        { format: 'json', temperature: 0.7 }
+        undefined, // Use default DeepSeek R1 32B model
+        { 
+          format: 'json', 
+          temperature: 0.6,
+          thinking: true, // Enable Chain-of-Thought reasoning
+          max_tokens: 3000
+        }
       );
 
-      logger.debug('📊 Technical analysis completed', {
+      const analysis = typeof result === 'string' ? JSON.parse(result) : result;
+
+      logger.debug('📊 Technical analysis completed (DeepSeek R1)', {
         context: 'TechnicalAnalyst',
         action: analysis.action,
         confidence: analysis.confidence
@@ -322,17 +331,23 @@ export class MultiAgentTradingSystem {
   }
 
   /**
-   * Run Sentiment Analyst agent
+   * Run Sentiment Analyst agent - USING DEEPSEEK R1 OPTIMIZED PROMPTS
    */
   private async runSentimentAnalyst(data: SentimentData): Promise<any> {
+    // NOTE: Using old prompts for Sentiment Analyst as optimized version focuses on Technical + Chief + Risk
     const prompt = AGENT_PROMPTS.SENTIMENT_ANALYST.analysisTemplate(data);
     
     try {
-      const analysis = await qwenService.chatWithSystem(
+      const analysis = await deepseekService.chatWithSystem(
         AGENT_PROMPTS.SENTIMENT_ANALYST.systemPrompt,
         prompt,
-        'qwen2.5:7b-instruct',
-        { format: 'json', temperature: 0.7 }
+        undefined, // Use default DeepSeek R1 32B model
+        { 
+          format: 'json', 
+          temperature: 0.7,
+          thinking: false, // Sentiment analysis doesn't need heavy reasoning
+          max_tokens: 1500
+        }
       );
 
       logger.debug('💬 Sentiment analysis completed', {
@@ -356,17 +371,23 @@ export class MultiAgentTradingSystem {
   }
 
   /**
-   * Run On-Chain Analyst agent
+   * Run On-Chain Analyst agent - USING DEEPSEEK R1
    */
   private async runOnchainAnalyst(data: OnChainData): Promise<any> {
+    // NOTE: Using old prompts for OnChain Analyst as optimized version focuses on Technical + Chief + Risk
     const prompt = AGENT_PROMPTS.ONCHAIN_ANALYST.analysisTemplate(data);
     
     try {
-      const analysis = await qwenService.chatWithSystem(
+      const analysis = await deepseekService.chatWithSystem(
         AGENT_PROMPTS.ONCHAIN_ANALYST.systemPrompt,
         prompt,
-        'qwen2.5:7b-instruct',
-        { format: 'json', temperature: 0.7 }
+        undefined, // Use default DeepSeek R1 32B model
+        { 
+          format: 'json', 
+          temperature: 0.7,
+          thinking: false,
+          max_tokens: 1500
+        }
       );
 
       logger.debug('⛓️ On-chain analysis completed', {
@@ -395,14 +416,16 @@ export class MultiAgentTradingSystem {
   private async runChiefAnalyst(reports: AnalystReports): Promise<FinalDecision> {
     logger.debug('👑 Running Chief Analyst', { context: 'MultiAgentSystem' });
 
-    const prompt = AGENT_PROMPTS.CHIEF_ANALYST.debateTemplate(reports);
+    // Use OPTIMIZED Chief Analyst prompt for DeepSeek R1's advanced reasoning
+    const systemPrompt = DEEPSEEK_OPTIMIZED_PROMPTS.CHIEF_ANALYST.systemPrompt;
+    const prompt = DEEPSEEK_OPTIMIZED_PROMPTS.CHIEF_ANALYST.debateTemplate(reports);
     
     try {
-      const decision = await qwenService.chatWithSystem(
-        AGENT_PROMPTS.CHIEF_ANALYST.systemPrompt,
+      const decision = await deepseekService.chatWithSystem(
+        systemPrompt,
         prompt,
-        'qwen2.5:7b-instruct', // Could use 14B model here for more sophisticated reasoning
-        { format: 'json', temperature: 0.6 }
+        undefined, // Using DeepSeek R1 32B for superior reasoning
+        { format: 'json', temperature: 0.6, thinking: true, max_tokens: 3500 }
       );
 
       logger.info('👑 Chief Analyst decision made', {
@@ -435,11 +458,15 @@ export class MultiAgentTradingSystem {
   }
 
   /**
-   * Run Risk Manager
+   * Run Risk Manager - USING DEEPSEEK R1 OPTIMIZED PROMPTS
    */
   private async runRiskManager(decision: FinalDecision): Promise<any> {
-    logger.debug('🛡️ Running Risk Manager', { context: 'MultiAgentSystem' });
+    logger.debug('🛡️ Running Risk Manager (DeepSeek R1)', { context: 'MultiAgentSystem' });
 
+    // NOTE: This is a simplified version for multiAgentTradingSystem
+    // The main agentCoordinator.ts uses the full RISK_MANAGER optimized prompts
+    // For consistency, using old prompts here but with DeepSeek R1 enhancements
+    
     // Mock portfolio data - in production, get from actual portfolio
     const portfolio: Portfolio = {
       balance: 10000,
@@ -453,14 +480,19 @@ export class MultiAgentTradingSystem {
     const prompt = AGENT_PROMPTS.RISK_MANAGER.assessmentTemplate(decision, portfolio);
     
     try {
-      const assessment = await qwenService.chatWithSystem(
+      const assessment = await deepseekService.chatWithSystem(
         AGENT_PROMPTS.RISK_MANAGER.systemPrompt,
         prompt,
-        'qwen2.5:7b-instruct',
-        { format: 'json', temperature: 0.5 }
+        undefined, // Use default DeepSeek R1 32B model
+        { 
+          format: 'json', 
+          temperature: 0.4, // Conservative for risk decisions
+          thinking: true, // Enable Chain-of-Thought reasoning
+          max_tokens: 2000
+        }
       );
 
-      logger.info('🛡️ Risk assessment completed', {
+      logger.info('🛡️ Risk assessment completed (DeepSeek R1)', {
         context: 'RiskManager',
         approved: assessment.approved,
         positionSize: assessment.positionSize,
@@ -503,11 +535,16 @@ export class MultiAgentTradingSystem {
     const prompt = AGENT_PROMPTS.EXECUTION_SPECIALIST.executionTemplate(trade);
     
     try {
-      const execution = await qwenService.chatWithSystem(
+      const execution = await deepseekService.chatWithSystem(
         AGENT_PROMPTS.EXECUTION_SPECIALIST.systemPrompt,
         prompt,
-        'qwen2.5:7b-instruct',
-        { format: 'json', temperature: 0.3 }
+        undefined, // Use default DeepSeek R1 32B model
+        { 
+          format: 'json', 
+          temperature: 0.3,
+          thinking: false, // Execution is operational, less reasoning needed
+          max_tokens: 1500
+        }
       );
 
       logger.info('⚡ Execution plan created', {

@@ -4,6 +4,7 @@ import { TRADING_CONSTANTS, ERROR_MESSAGES } from '@/constants';
 import type { WebSocketMessage } from '@/types/trading';
 import { apiCache } from './apiCache';
 import { generateSignature } from '@/lib/asterAuth';
+import { AsterApiError } from '@/lib/asterApiError';
 
 export interface AsterMarket {
   symbol: string;
@@ -1030,64 +1031,107 @@ class AsterDexService {
   }
 
   /**
-   * Get account information including available balance
-   * CACHED: 3 seconds to reduce redundant account fetches during trade execution
+   * Make authenticated API request with timeout and error handling
+   * OPTIMIZED: Added timeout and better error handling
    */
-  async getAccountInfo(): Promise<{ totalWalletBalance: number; availableBalance: number } | null> {
-    const cacheKey = 'accountInfo';
-    
-    // Check cache first (3 second TTL)
-    const cached = apiCache.get(cacheKey);
-    if (cached) {
-      logger.debug('Using cached account info', { context: 'AsterDex' });
-      return cached as { totalWalletBalance: number; availableBalance: number };
-    }
-    
-    try {
-      // Call Aster API directly, not our internal API route
-      const url = `${this.baseUrl}/account`;
-      const timestamp = Date.now();
-      const queryString = `timestamp=${timestamp}`;
+  private async authenticatedRequest<T>(
+    endpoint: string,
+    params: Record<string, string | number> = {},
+    method: 'GET' | 'POST' | 'DELETE' = 'GET',
+    timeout: number = 30000 // 30 second default timeout
+  ): Promise<T> {
+    return this.rateLimitedRequest(async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
       
-      // Generate signature using the imported function
-      if (!this.secretKey) {
-        throw new Error('Secret key not configured');
+      try {
+        // Build signed query
+        const queryString = await buildSignedQuery({
+          ...params,
+          timestamp: Date.now(),
+        }, this.secretKey!);
+        
+        const url = `${this.baseUrl}/${endpoint}?${queryString}`;
+        
+        const response = await fetch(url, {
+          method,
+          headers: {
+            'X-MBX-APIKEY': this.apiKey || '',
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorData: any;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch {
+            errorData = { msg: errorText };
+          }
+          
+          // Map AsterDex error codes to meaningful messages
+          const errorCode = errorData.code || response.status;
+          throw new AsterApiError(
+            this.mapErrorCode(errorCode, errorData.msg || errorText),
+            errorCode,
+            response.status
+          );
+        }
+        
+        return await response.json();
+      } catch (error) {
+        clearTimeout(timeoutId);
+        
+        if (error instanceof AsterApiError) {
+          throw error;
+        }
+        
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new AsterApiError('Request timeout', -1008, 408);
+        }
+        
+        throw error;
       }
-      const signature = await generateSignature(queryString, this.secretKey);
-      
-      const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
-        method: 'GET',
-        headers: {
-          'X-MBX-APIKEY': this.apiKey || '',
-          'Content-Type': 'application/json',
-        },
-      });
+    });
+  }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API returned ${response.status}: ${errorText}`);
-      }
-
-      const data = await response.json();
-      
-      // Prioritize totalWalletBalance if available
-      const totalWalletBalance = parseFloat(data.totalWalletBalance || data.totalCrossWalletBalance || data.availableBalance || '0');
-      const availableBalance = parseFloat(data.availableBalance || data.totalCrossWalletBalance || data.totalWalletBalance || '0');
-
-      const accountInfo = {
-        totalWalletBalance: Math.abs(totalWalletBalance),
-        availableBalance: Math.abs(availableBalance),
-      };
-
-      // Cache for 100ms for ultra real-time updates (10x per second max)
-      apiCache.set(cacheKey, accountInfo, 0.1);
-      
-      logger.debug('Fetched and cached account info', { context: 'AsterDex', data: accountInfo });
-      return accountInfo;
-    } catch (error) {
-      logger.error('Failed to get account info', error, { context: 'AsterDex' });
-      return null;
-    }
+  /**
+   * Map AsterDex error codes to meaningful messages
+   * Reference: Binance Futures API error codes (AsterDex compatible)
+   */
+  private mapErrorCode(code: number, message: string): string {
+    const errorMap: Record<number, string> = {
+      '-1001': 'Disconnected from server',
+      '-1002': 'Unauthorized request',
+      '-1003': 'Too many requests',
+      '-1004': 'Unexpected response format',
+      '-1005': 'Invalid signature',
+      '-1006': 'Invalid timestamp',
+      '-1007': 'Invalid recvWindow',
+      '-1008': 'Request timeout',
+      '-1009': 'Unknown error occurred',
+      '-1010': 'Invalid API key',
+      '-1020': 'Unsupported operation',
+      '-1021': 'Invalid timestamp',
+      '-1022': 'Invalid signature',
+      '-2010': 'New order rejected',
+      '-2011': 'Cancel order rejected',
+      '-2013': 'No such order',
+      '-2014': 'API-key format invalid',
+      '-2015': 'Invalid API-key, IP, or permissions',
+      400: 'Bad request',
+      401: 'Authentication failed',
+      403: 'Forbidden',
+      404: 'Not found',
+      429: 'Rate limit exceeded',
+      500: 'Internal server error',
+    };
+    
+    return errorMap[code] || message || 'Unknown error';
   }
 
   /**

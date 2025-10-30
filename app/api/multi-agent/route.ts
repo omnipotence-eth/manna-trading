@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { agentCoordinator } from '@/services/agentCoordinator';
-import { qwenService } from '@/services/qwenService';
+import { deepseekService } from '@/services/deepseekService';
 import { handleApiError, createSuccessResponse } from '@/lib/errorHandler';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
 import { circuitBreakers } from '@/lib/circuitBreaker';
@@ -22,8 +22,8 @@ export async function GET(request: NextRequest) {
     switch (action) {
       case 'status':
         return await getSystemStatus();
-      case 'test-qwen':
-        return await testQwenConnection();
+      case 'test-deepseek':
+        return await testDeepSeekConnection();
       case 'models':
         return await getAvailableModels();
       case 'start':
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
           message: 'Multi-Agent Trading System API',
           endpoints: [
             'GET /api/multi-agent?action=status',
-            'GET /api/multi-agent?action=test-qwen',
+            'GET /api/multi-agent?action=test-deepseek',
             'GET /api/multi-agent?action=models',
             'GET /api/multi-agent?action=start&symbol=BTC/USDT',
             'GET /api/multi-agent?action=agents',
@@ -227,13 +227,13 @@ async function getPerformanceMetrics() {
   });
 }
 
-async function testQwenConnection() {
+async function testDeepSeekConnection() {
   const isConnected = await circuitBreakers.externalApi.execute(async () => {
-    return await qwenService.testConnection();
+    return await deepseekService.testConnection();
   });
 
   return createSuccessResponse({
-    message: 'Qwen Connection Test',
+    message: 'DeepSeek R1 Connection Test',
     connected: isConnected,
     timestamp: new Date().toISOString()
   });
@@ -241,11 +241,11 @@ async function testQwenConnection() {
 
 async function getAvailableModels() {
   const models = await circuitBreakers.externalApi.execute(async () => {
-    return await qwenService.getAvailableModels();
+    return await deepseekService.getAvailableModels();
   });
 
   return createSuccessResponse({
-    message: 'Available Qwen Models',
+    message: 'Available DeepSeek R1 Models',
     models,
     timestamp: new Date().toISOString()
   });
@@ -253,7 +253,7 @@ async function getAvailableModels() {
 
 async function testAnalysis(request: NextRequest) {
   const body = await request.json();
-  const { prompt, model = 'qwen2.5:7b-instruct' } = body;
+  const { prompt, model = 'deepseek-r1:32b' } = body;
 
   if (!prompt) {
     return NextResponse.json(
@@ -263,11 +263,11 @@ async function testAnalysis(request: NextRequest) {
   }
 
   const analysis = await circuitBreakers.externalApi.execute(async () => {
-    return await qwenService.generateAnalysis(prompt, model);
+    return await deepseekService.generateTradingAnalysis(prompt, model);
   });
 
   return createSuccessResponse({
-    message: 'Analysis Test Completed',
+    message: 'DeepSeek R1 Analysis Test Completed',
     analysis,
     model,
     timestamp: new Date().toISOString()

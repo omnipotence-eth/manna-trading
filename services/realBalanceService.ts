@@ -116,11 +116,11 @@ class RealBalanceService {
       // Update initial capital to actual balance
       initialCapital: realBalance,
       
-      // Adjust confidence threshold based on balance size
-      confidenceThreshold: realBalance > 1000 ? 0.5 : 0.6, // Higher threshold for smaller balances
+      // Adjust confidence threshold based on balance size (ULTRA HIGH for micro accounts)
+      confidenceThreshold: realBalance < 100 ? 0.80 : realBalance < 200 ? 0.75 : realBalance < 500 ? 0.70 : realBalance < 2000 ? 0.65 : 0.60, // Ultra-high threshold for micro accounts
       
       // Adjust position sizing based on balance
-      maxPositionSize: realBalance * 0.1, // Max 10% of balance per position
+      maxPositionSize: realBalance < 100 ? realBalance * 0.03 : realBalance * 0.1, // Max 3% for <$100, 10% for larger
     };
 
     // Update the global config (this is a simplified approach)

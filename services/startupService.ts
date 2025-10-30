@@ -18,7 +18,7 @@ class StartupService {
       return;
     }
 
-    logger.info('Initializing application services', { context: 'Startup' });
+    logger.info('🚀 Initializing application services', { context: 'Startup' });
 
     try {
       // Initialize Real Balance Service
@@ -31,8 +31,21 @@ class StartupService {
 
       // Initialize 24/7 Agent Runner
       if (asterConfig.trading.enable24_7Agents) {
-        logger.info('Starting 24/7 Agent Runner', { context: 'Startup' });
-        await agentRunnerService.start();
+        logger.info('Starting 24/7 Agent Runner (this may take 10-20 seconds)', { context: 'Startup' });
+        
+        // Start Agent Runner with timeout protection
+        const startPromise = agentRunnerService.start();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Agent Runner startup timeout')), 30000)
+        );
+        
+        try {
+          await Promise.race([startPromise, timeoutPromise]);
+          logger.info('✅ Agent Runner started successfully', { context: 'Startup' });
+        } catch (error) {
+          logger.error('Agent Runner startup failed or timed out', error as Error, { context: 'Startup' });
+          // Continue anyway - runner may still work
+        }
       } else {
         logger.info('24/7 Agent Runner disabled in config', { context: 'Startup' });
       }
@@ -42,6 +55,8 @@ class StartupService {
 
     } catch (error) {
       logger.error('Failed to initialize application services', error, { context: 'Startup' });
+      // Mark as initialized anyway to prevent retry loops
+      this.initialized = true;
       throw error;
     }
   }

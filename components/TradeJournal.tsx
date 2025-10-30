@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 
@@ -29,49 +29,63 @@ export default function TradeJournal() {
   // Get trades from store
   const trades = useStore((state) => state.trades);
 
-  // Transform trades into journal entries with real analysis data
-  const journalEntries: JournalEntry[] = trades.map((trade) => {
-    return {
-      id: trade.id,
-      timestamp: new Date(trade.timestamp).getTime(),
-      model: trade.model,
-      symbol: trade.symbol,
-      side: trade.side,
-      entryPrice: trade.entryPrice,
-      exitPrice: trade.exitPrice,
-      size: trade.size,
-      pnl: trade.pnl,
-      pnlPercent: trade.pnlPercent,
-      entryReason: trade.entryReason || 'Position opened based on market analysis',
-      exitReason: trade.exitReason || 'Position closed automatically',
-      signals: trade.entrySignals || ['Price Action'],
-      confidence: trade.entryConfidence || 50,
-      duration: Math.floor(trade.duration / 60), // Convert seconds to minutes
-    };
-  });
+  // OPTIMIZED: Memoize expensive transformation calculations
+  const journalEntries: JournalEntry[] = useMemo(() => {
+    return trades.map((trade) => {
+      return {
+        id: trade.id,
+        timestamp: new Date(trade.timestamp).getTime(),
+        model: trade.model,
+        symbol: trade.symbol,
+        side: trade.side,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice,
+        size: trade.size,
+        pnl: trade.pnl,
+        pnlPercent: trade.pnlPercent,
+        entryReason: trade.entryReason || 'Position opened based on market analysis',
+        exitReason: trade.exitReason || 'Position closed automatically',
+        signals: typeof trade.entrySignals === 'object' && trade.entrySignals !== null && 'primary' in trade.entrySignals
+          ? [trade.entrySignals.primary, ...(trade.entrySignals.confirming || [])].filter(Boolean)
+          : Array.isArray(trade.entrySignals) 
+          ? trade.entrySignals 
+          : ['Price Action'],
+        confidence: trade.entryConfidence || 50,
+        duration: Math.floor(trade.duration / 60), // Convert seconds to minutes
+      };
+    });
+  }, [trades]);
 
-  // Apply filters
-  const filteredEntries = journalEntries.filter(entry => {
-    if (filter === 'wins') return entry.pnl > 0;
-    if (filter === 'losses') return entry.pnl < 0;
-    return true;
-  });
+  // OPTIMIZED: Memoize filtered entries
+  const filteredEntries = useMemo(() => {
+    return journalEntries.filter(entry => {
+      if (filter === 'wins') return entry.pnl > 0;
+      if (filter === 'losses') return entry.pnl < 0;
+      return true;
+    });
+  }, [journalEntries, filter]);
 
-  // Apply sorting
-  const sortedEntries = [...filteredEntries].sort((a, b) => {
-    if (sortBy === 'time') return b.timestamp - a.timestamp;
-    if (sortBy === 'pnl') return b.pnl - a.pnl;
-    if (sortBy === 'duration') return b.duration - a.duration;
-    return 0;
-  });
+  // OPTIMIZED: Memoize sorted entries
+  const sortedEntries = useMemo(() => {
+    return [...filteredEntries].sort((a, b) => {
+      if (sortBy === 'time') return b.timestamp - a.timestamp;
+      if (sortBy === 'pnl') return b.pnl - a.pnl;
+      if (sortBy === 'duration') return b.duration - a.duration;
+      return 0;
+    });
+  }, [filteredEntries, sortBy]);
 
-  // Calculate stats
-  const totalTrades = journalEntries.length;
-  const wins = journalEntries.filter(e => e.pnl > 0).length;
-  const losses = journalEntries.filter(e => e.pnl < 0).length;
-  const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
-  const totalPnL = journalEntries.reduce((sum, e) => sum + e.pnl, 0);
-  const avgDuration = totalTrades > 0 ? journalEntries.reduce((sum, e) => sum + e.duration, 0) / totalTrades : 0;
+  // OPTIMIZED: Memoize expensive stats calculations
+  const stats = useMemo(() => {
+    const totalTrades = journalEntries.length;
+    const wins = journalEntries.filter(e => e.pnl > 0).length;
+    const losses = journalEntries.filter(e => e.pnl < 0).length;
+    const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+    const totalPnL = journalEntries.reduce((sum, e) => sum + e.pnl, 0);
+    const avgDuration = totalTrades > 0 ? journalEntries.reduce((sum, e) => sum + e.duration, 0) / totalTrades : 0;
+    
+    return { totalTrades, wins, losses, winRate, totalPnL, avgDuration };
+  }, [journalEntries]);
 
   return (
     <div className="space-y-6">
@@ -128,25 +142,25 @@ export default function TradeJournal() {
       >
         <div className="glass-effect p-4 rounded-lg">
           <div className="text-xs text-green-500/60 mb-1">TOTAL TRADES</div>
-          <div className="text-2xl font-bold terminal-text">{totalTrades}</div>
+          <div className="text-2xl font-bold terminal-text">{stats.totalTrades}</div>
         </div>
         <div className="glass-effect p-4 rounded-lg">
           <div className="text-xs text-green-500/60 mb-1">WIN RATE</div>
-          <div className="text-2xl font-bold text-neon-green">{winRate.toFixed(1)}%</div>
+          <div className="text-2xl font-bold text-neon-green">{stats.winRate.toFixed(1)}%</div>
         </div>
         <div className="glass-effect p-4 rounded-lg">
           <div className="text-xs text-green-500/60 mb-1">TOTAL P&L</div>
-          <div className={`text-2xl font-bold ${totalPnL >= 0 ? 'text-neon-green' : 'text-red-500'}`}>
-            ${totalPnL.toFixed(2)}
+          <div className={`text-2xl font-bold ${stats.totalPnL >= 0 ? 'text-neon-green' : 'text-red-500'}`}>
+            ${stats.totalPnL.toFixed(2)}
           </div>
         </div>
         <div className="glass-effect p-4 rounded-lg">
           <div className="text-xs text-green-500/60 mb-1">AVG DURATION</div>
-          <div className="text-2xl font-bold terminal-text">{avgDuration.toFixed(0)}m</div>
+          <div className="text-2xl font-bold terminal-text">{stats.avgDuration.toFixed(0)}m</div>
         </div>
         <div className="glass-effect p-4 rounded-lg">
           <div className="text-xs text-green-500/60 mb-1">W/L RATIO</div>
-          <div className="text-2xl font-bold terminal-text">{wins}/{losses}</div>
+          <div className="text-2xl font-bold terminal-text">{stats.wins}/{stats.losses}</div>
         </div>
       </motion.div>
 
@@ -183,11 +197,15 @@ export default function TradeJournal() {
       <div className="space-y-4 max-h-[800px] overflow-y-auto">
         {sortedEntries.length === 0 ? (
           <div className="glass-effect p-12 rounded-lg text-center border border-green-500/20">
-            <div className="text-6xl mb-4">📊</div>
-            <div className="text-green-500/40 text-xl mb-2 font-bold">No Trades Yet</div>
-            <div className="text-green-500/60 text-sm max-w-md mx-auto">
-              Godspeed is analyzing markets and will execute trades when high-confidence opportunities emerge. 
-              All trades will be logged here with detailed entry/exit analysis.
+            <div className="text-6xl mb-4">💼</div>
+            <div className="text-green-500/40 text-xl mb-3 font-bold">No Trades Executed Yet</div>
+            <div className="text-green-500/60 text-sm max-w-md mx-auto space-y-2">
+              <div>🔍 Market Scanner: Active (every 2 min)</div>
+              <div>📊 4 AI Agents: Analyzing opportunities</div>
+              <div>🎯 Confidence Threshold: 65% minimum (70% for accounts &lt;$500)</div>
+              <div>💰 Position Size: 5-20% of balance</div>
+              <div className="text-yellow-500/80 mt-3">First trade will appear here automatically</div>
+              <div className="text-green-500/60 text-xs mt-2">Add $20+ balance for optimal trading</div>
             </div>
             <div className="mt-6 p-4 bg-neon-blue/5 border border-neon-blue/30 rounded-lg text-left max-w-md mx-auto">
               <div className="text-xs text-neon-blue font-bold mb-2">💡 WHAT&apos;S LOGGED:</div>

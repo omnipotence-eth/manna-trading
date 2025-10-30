@@ -30,7 +30,7 @@ export interface OpenPosition {
 }
 
 export interface PositionUpdate {
-  action: 'STOP_LOSS' | 'TAKE_PROFIT' | 'TRAILING_STOP' | 'TIMEOUT' | 'PARTIAL_EXIT';
+  action: 'STOP_LOSS' | 'TAKE_PROFIT' | 'TRAILING_STOP' | 'TIMEOUT' | 'PARTIAL_EXIT' | 'FORCE_CLOSE';
   reason: string;
   exitPrice: number;
   pnl: number;
@@ -422,6 +422,67 @@ class PositionMonitorService {
   }
 
   /**
+   * Force close a position immediately (100%)
+   */
+  async forceClose(positionId: string): Promise<boolean> {
+    const position = this.positions.get(positionId);
+    if (!position) {
+      logger.warn('Cannot force close - position not found', {
+        context: 'PositionMonitor',
+        data: { positionId }
+      });
+      return false;
+    }
+
+    logger.info('🔴 FORCE CLOSING POSITION', {
+      context: 'PositionMonitor',
+      data: {
+        positionId: position.id,
+        symbol: position.symbol,
+        side: position.side,
+        size: position.size,
+        reason: 'Manual force close requested'
+      }
+    });
+
+    try {
+      const currentPrice = await asterDexService.getPrice(position.symbol);
+      const pnl = position.side === 'LONG'
+        ? (currentPrice - position.entryPrice) * position.size
+        : (position.entryPrice - currentPrice) * position.size;
+      const pnlPercent = (pnl / (position.entryPrice * position.size)) * 100 * position.leverage;
+
+      const update: PositionUpdate = {
+        action: 'FORCE_CLOSE',
+        reason: 'Manual force close',
+        exitPrice: currentPrice,
+        pnl,
+        pnlPercent
+      };
+
+      await this.closePosition(position, update);
+      
+      logger.info('✅ Position force closed successfully', {
+        context: 'PositionMonitor',
+        data: {
+          positionId: position.id,
+          symbol: position.symbol,
+          pnl: pnl.toFixed(2),
+          pnlPercent: pnlPercent.toFixed(2)
+        }
+      });
+
+      return true;
+    } catch (error) {
+      logger.error('Force close failed', error, {
+        context: 'PositionMonitor',
+        data: { positionId, symbol: position.symbol }
+      });
+      return false;
+    }
+  }
+
+  /**
    * Get all open positions
    */
   getOpenPositions(): OpenPosition[] {
@@ -565,6 +626,49 @@ class PositionMonitorService {
 
       // Delete from open_positions
       await db.execute(`DELETE FROM open_positions WHERE id = $1`, [position.id]);
+
+      // Update trade in trades table with exit info
+      try {
+        await db.execute(`
+          UPDATE trades 
+          SET exit_price = $1, 
+              pnl = $2, 
+              pnl_percent = $3, 
+              exit_reason = $4, 
+              exit_timestamp = $5, 
+              duration = $6
+          WHERE symbol = $7 
+            AND side = $8 
+            AND entry_price = $9 
+            AND exit_timestamp IS NULL
+          ORDER BY timestamp DESC
+          LIMIT 1
+        `, [
+          update.exitPrice,
+          update.pnl,
+          update.pnlPercent,
+          update.action,
+          Date.now(),
+          Date.now() - position.openedAt,
+          position.symbol,
+          position.side,
+          position.entryPrice
+        ]);
+        
+        logger.info('📝 Trade updated in database with exit info', {
+          context: 'PositionMonitor',
+          data: { 
+            symbol: position.symbol, 
+            pnl: update.pnl.toFixed(2),
+            exitReason: update.action
+          }
+        });
+      } catch (updateError) {
+        logger.error('Failed to update trade in database (non-critical)', updateError, { 
+          context: 'PositionMonitor',
+          data: { positionId: position.id }
+        });
+      }
 
       // Record trade performance
       try {

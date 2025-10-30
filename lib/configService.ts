@@ -67,17 +67,29 @@ export const asterConfig = {
     maxSymbolsPerCycle: getNumberEnvVar('TRADING_MAX_SYMBOLS', 20),
     batchSize: getNumberEnvVar('TRADING_BATCH_SIZE', 5),
     maxExecutionTime: getNumberEnvVar('TRADING_MAX_EXECUTION_TIME', 25000),
-    confidenceThreshold: getNumberEnvVar('TRADING_CONFIDENCE_THRESHOLD', 0.25), // Lowered for testing
-    stopLossPercent: getNumberEnvVar('TRADING_STOP_LOSS', 3.0),
-    takeProfitPercent: getNumberEnvVar('TRADING_TAKE_PROFIT', 5.0),
-    minBalanceForTrade: getNumberEnvVar('TRADING_MIN_BALANCE', 10), // Lowered for testing with actual balance
+    confidenceThreshold: getNumberEnvVar('TRADING_CONFIDENCE_THRESHOLD', 0.65), // OPTIMIZED: Raised to 65% for profitability (was 0.45)
+    stopLossPercent: getNumberEnvVar('TRADING_STOP_LOSS', 4.0), // OPTIMIZED: Increased to 4% for small accounts (was 3.0) - prevents premature stops
+    takeProfitPercent: getNumberEnvVar('TRADING_TAKE_PROFIT', 12.0), // OPTIMIZED: Increased to 12% for 3:1 R:R (was 5.0)
+    minBalanceForTrade: getNumberEnvVar('TRADING_MIN_BALANCE', 5), // Dynamic: 5% of available balance (minimum $5)
     safetyBufferPercent: getNumberEnvVar('TRADING_SAFETY_BUFFER', 10),
     initialCapital: getNumberEnvVar('INITIAL_CAPITAL', 100),
       aiModelSymbol: getEnvVar('AI_MODEL_SYMBOL', 'BTC/USDT'),
       forceTradeTest: getBooleanEnvVar('NEXT_PUBLIC_FORCE_TRADE_TEST', true), // Enable real trading by default
       enable24_7Agents: getBooleanEnvVar('ENABLE_24_7_AGENTS', true),
-      agentRunnerInterval: getNumberEnvVar('AGENT_RUNNER_INTERVAL', 15), // minutes
-      maxConcurrentWorkflows: getNumberEnvVar('MAX_CONCURRENT_WORKFLOWS', 3),
+      agentRunnerInterval: getNumberEnvVar('AGENT_RUNNER_INTERVAL', 2), // minutes - OPTIMIZED: 2min for faster opportunity capture
+      maxConcurrentWorkflows: getNumberEnvVar('MAX_CONCURRENT_WORKFLOWS', 2), // OPTIMIZED: Max 2 concurrent workflows (was 3)
+      maxConcurrentPositions: getNumberEnvVar('MAX_CONCURRENT_POSITIONS', 2), // OPTIMIZED: Max 2 positions open simultaneously (1 for accounts <$100)
+      maxPortfolioRiskPercent: getNumberEnvVar('MAX_PORTFOLIO_RISK', 10), // OPTIMIZED: Max 10% total risk across all positions (5% for accounts <$100)
+      // Symbol Blacklist - Never trade these symbols
+      blacklistedSymbols: [
+        'APEUSDT',
+        'APE/USDT',
+        'ATOMUSDT',
+        'ATOM/USDT',
+        'COSMOUSDT',
+        'COSMO/USDT',
+        'COSMO' // Added due to consistent losses on every trade
+      ],
     },
   
   // Monitoring Configuration
@@ -86,6 +98,23 @@ export const asterConfig = {
     tradingCycleInterval: getNumberEnvVar('MONITORING_TRADING_INTERVAL', 30000),
     logLevel: getEnvVar('LOG_LEVEL', 'info'),
   }
+};
+
+/**
+ * AI Model Configuration (DeepSeek R1)
+ */
+export const aiConfig = {
+  // Ollama Configuration
+  ollamaBaseUrl: getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434'),
+  
+  // DeepSeek R1 Models (in order of preference)
+  defaultModel: getEnvVar('DEEPSEEK_MODEL', 'deepseek-r1:32b'), // Optimized for RTX 5070 Ti
+  fallbackModels: getEnvVar('DEEPSEEK_FALLBACK_MODELS', 'deepseek-r1:14b,deepseek-r1:8b,deepseek-r1:7b').split(','),
+  
+  // Model Parameters
+  temperature: getNumberEnvVar('DEEPSEEK_TEMPERATURE', 0.6), // Lower for trading (more deterministic)
+  maxTokens: getNumberEnvVar('DEEPSEEK_MAX_TOKENS', 2000), // R1 needs more tokens for reasoning
+  enableThinking: getBooleanEnvVar('DEEPSEEK_ENABLE_THINKING', true), // Enable Chain-of-Thought reasoning
 };
 
 /**

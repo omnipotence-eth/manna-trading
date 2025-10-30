@@ -27,7 +27,18 @@ export default function InteractiveChart({
   const [hoveredPoint, setHoveredPoint] = useState<ChartDataPoint | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const getTimeAgo = (timestamp: number): string => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 10) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  };
 
   // Generate realistic portfolio data
   const generatePortfolioData = (startBalance: number, hours: number): ChartDataPoint[] => {
@@ -112,6 +123,7 @@ export default function InteractiveChart({
           
           setChartData(chartData);
           setError(null);
+          setLastUpdated(Date.now());
           setIsLoading(false);
           
           frontendLogger.debug('Real chart data loaded successfully', { 
@@ -454,7 +466,7 @@ export default function InteractiveChart({
         {/* Data Stream Effect */}
         <div className="absolute top-4 left-4 text-xs text-green-400/40 font-mono animate-pulse">
           <div className="animate-bounce">● LIVE DATA STREAM</div>
-          <div className="text-xs opacity-50">SYSTEM: ONLINE</div>
+          <div className="text-[10px] opacity-50">Updated: {getTimeAgo(lastUpdated)}</div>
         </div>
         
         <canvas

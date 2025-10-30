@@ -64,20 +64,85 @@ async function getChartData(timeRange: string) {
     const timeRangeMs = getTimeRangeMs(timeRange);
     const startTime = now - timeRangeMs;
 
-    // Create a simple chart showing current balance as a flat line
-    const dataPoints = Math.max(20, Math.floor(timeRangeMs / (30 * 60 * 1000))); // 30-minute intervals
-    const intervalMs = timeRangeMs / dataPoints;
+    // Fetch all trades from database to calculate equity progression
+    const { getTrades } = await import('@/lib/db');
+    const allTrades = await getTrades({ limit: 1000 });
     
+    // Filter trades within time range
+    const tradesInRange = allTrades.filter(trade => {
+      const tradeTime = new Date(trade.timestamp).getTime();
+      return tradeTime >= startTime && tradeTime <= now;
+    });
+
+    // Sort trades by timestamp
+    tradesInRange.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    // Calculate equity progression from trades
     const chartData = [];
-    for (let i = 0; i <= dataPoints; i++) {
-      const timestamp = startTime + (i * intervalMs);
-      chartData.push({
-        timestamp: timestamp,
-        balance: currentBalance,
-        unrealizedPnl: 0,
-        realizedPnl: 0,
-        totalPnL: 0
-      });
+    
+    // FIXED STARTING BALANCE: Use your actual deposit amount
+    const INITIAL_DEPOSIT = 100; // You started with $100 yesterday
+    
+    // Calculate total P&L from ALL trades (to show full progression)
+    const totalHistoricalPnL = allTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    
+    // Add starting point at the earliest trade time OR 24h ago (whichever is earlier)
+    const earliestTradeTime = allTrades.length > 0 
+      ? Math.min(...allTrades.map(t => new Date(t.timestamp).getTime()))
+      : startTime;
+    const chartStartTime = Math.min(earliestTradeTime, startTime);
+    
+    chartData.push({
+      timestamp: chartStartTime,
+      balance: INITIAL_DEPOSIT,
+      unrealizedPnl: 0,
+      realizedPnl: 0,
+      totalPnL: 0
+    });
+
+    // Add point for each trade chronologically
+    let cumulativePnL = 0;
+    allTrades.forEach((trade) => {
+      const tradeTime = new Date(trade.timestamp).getTime();
+      // Only include trades after our start point
+      if (tradeTime >= chartStartTime) {
+        cumulativePnL += trade.pnl || 0;
+        const balanceAtTrade = INITIAL_DEPOSIT + cumulativePnL;
+        
+        chartData.push({
+          timestamp: tradeTime,
+          balance: balanceAtTrade,
+          unrealizedPnl: 0,
+          realizedPnl: cumulativePnL,
+          totalPnL: cumulativePnL
+        });
+      }
+    });
+
+    // Add current point with unrealized P&L
+    chartData.push({
+      timestamp: now,
+      balance: currentBalance,
+      unrealizedPnl: accountInfo.unrealizedPnL || 0,
+      realizedPnl: cumulativePnL,
+      totalPnL: (accountInfo.unrealizedPnL || 0) + cumulativePnL
+    });
+
+    // If no trades, create a simple flat line for visualization
+    if (chartData.length <= 2) {
+      chartData.length = 0;
+      const intervalMs = timeRangeMs / 20;
+      for (let i = 0; i <= 20; i++) {
+        chartData.push({
+          timestamp: startTime + (i * intervalMs),
+          balance: currentBalance,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          totalPnL: 0
+        });
+      }
     }
 
     logger.info('Balance chart data created successfully', {
@@ -86,6 +151,9 @@ async function getChartData(timeRange: string) {
         timeRange,
         dataPoints: chartData.length,
         currentBalance,
+        initialDeposit: 100,
+        totalPnL: currentBalance - 100,
+        tradesIncluded: allTrades.length,
         timeSpan: `${Math.round((now - chartData[0]?.timestamp) / (1000 * 60 * 60))} hours`,
         isRealData: true
       }

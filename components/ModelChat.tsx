@@ -16,7 +16,7 @@ export default function ModelChat() {
 
   return (
     <div className="w-full h-[450px]">
-      {/* Godspeed Trading Thoughts - Full Width */}
+      {/* Multi-Agent Trading Thoughts - Full Width */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -27,8 +27,8 @@ export default function ModelChat() {
           <div className="flex items-center gap-3">
             <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse shadow-lg shadow-green-500/50"></div>
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-neon-green">Godspeed Trading Decisions</h3>
-              <p className="text-xs text-green-500/60">Why I made each trade and what I'm thinking</p>
+              <h3 className="text-lg font-bold text-neon-green">Multi-Agent Trading Decisions</h3>
+              <p className="text-xs text-green-500/60">AI agent analysis and trade reasoning</p>
             </div>
             <span className="text-xs text-green-500/60 px-2 py-1 bg-green-500/10 rounded border border-green-500/30">
               {modelMessages.length} decisions
@@ -51,8 +51,8 @@ export default function ModelChat() {
                 >
                   🧠
                 </motion.div>
-                <div className="text-green-500/60 text-sm font-bold mb-2">Godspeed is thinking...</div>
-                <div className="text-green-500/40 text-xs">Analyzing market conditions for trading opportunities</div>
+                <div className="text-green-500/60 text-sm font-bold mb-2">AI Agents analyzing...</div>
+                <div className="text-green-500/40 text-xs">Coordinating multi-agent market analysis</div>
                 <motion.div
                   animate={{ opacity: [0.3, 1, 0.3] }}
                   transition={{ duration: 1.5, repeat: Infinity }}

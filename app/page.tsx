@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Header from '@/components/Header';
 import PriceTicker from '@/components/PriceTicker';
 import NOF1Dashboard from '@/components/NOF1Dashboard';
-import Models from '@/components/Models';
+import AgentsSystem from '@/components/AgentsSystem';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
 export default function Home() {
@@ -25,11 +25,11 @@ export default function Home() {
           </div>
         )}
         
-        {/* GODSPEED view */}
+        {/* AGENTS System view */}
         {activeView === 'models' && (
-          <div className="container mx-auto px-2 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8 flex-1 overflow-auto">
+          <div className="flex-1 overflow-auto">
             <ErrorBoundary>
-              <Models />
+              <AgentsSystem />
             </ErrorBoundary>
           </div>
         )}

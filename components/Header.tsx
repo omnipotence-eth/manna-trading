@@ -1,7 +1,7 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 
 interface HeaderProps {
   activeView: 'live' | 'models';
@@ -10,6 +10,10 @@ interface HeaderProps {
 
 export default function Header({ activeView, setActiveView }: HeaderProps) {
   const [isOnline, setIsOnline] = useState(true);
+  const [scanStatus, setScanStatus] = useState<{ isScanning: boolean; lastScan: number }>({
+    isScanning: false,
+    lastScan: Date.now()
+  });
 
   // Simple online status check
   useEffect(() => {
@@ -26,6 +30,40 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
       window.removeEventListener('offline', checkOnlineStatus);
     };
   }, []);
+
+  // Scan status check
+  useEffect(() => {
+    const checkScanStatus = async () => {
+      try {
+        const response = await fetch('/api/multi-agent?action=workflows');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data && data.data.length > 0) {
+            const latestWorkflow = data.data[0];
+            setScanStatus({
+              isScanning: latestWorkflow.status === 'running',
+              lastScan: latestWorkflow.startedAt || Date.now()
+            });
+          }
+        }
+      } catch (error) {
+        // Silent fail
+      }
+    };
+
+    checkScanStatus();
+    const interval = setInterval(checkScanStatus, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getTimeAgo = (timestamp: number) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h ago`;
+  };
 
   return (
     <header className="border-b border-green-400/30 bg-black/90 backdrop-blur-sm sticky top-0 z-50 relative overflow-hidden">
@@ -48,20 +86,35 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
           <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 sm:gap-3"
           >
             <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-500'} animate-pulse shadow-lg ${isOnline ? 'shadow-green-400/50' : 'shadow-red-500/50'}`}></div>
             <h1 className="text-xl sm:text-2xl font-bold">
               <span className="text-green-400">MANNA ARENA</span>
               <span className="text-neon-blue ml-2">AI</span>
             </h1>
+            {scanStatus.isScanning ? (
+              <motion.div
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="flex items-center gap-1.5 px-2 py-0.5 sm:px-3 sm:py-1 bg-green-500/20 border border-green-500/50 rounded text-xs"
+              >
+                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-green-500 font-bold hidden sm:inline">SCANNING</span>
+              </motion.div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 sm:px-3 sm:py-1 bg-blue-500/20 border border-blue-500/50 rounded text-[10px] sm:text-xs">
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                <span className="text-blue-500/70">{getTimeAgo(scanStatus.lastScan)}</span>
+              </div>
+            )}
           </motion.div>
 
           {/* Centered Navigation */}
           <nav className="flex gap-1 sm:gap-2">
             {[
               { id: 'live' as const, label: 'LIVE' },
-              { id: 'models' as const, label: 'GODSPEED' },
+              { id: 'models' as const, label: 'AGENTS' },
             ].map((item) => (
               <motion.button
                 key={item.id}

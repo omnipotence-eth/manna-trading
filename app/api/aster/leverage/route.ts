@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildSignedQuery } from '@/lib/asterAuth';
 import { logger } from '@/lib/logger';
-
-const ASTER_BASE_URL = process.env.ASTER_BASE_URL || 'https://fapi.asterdex.com';
-const API_KEY = process.env.ASTER_API_KEY;
-const API_SECRET = process.env.ASTER_SECRET_KEY;
+import { withRateLimit } from '@/lib/rateLimiter';
+import { asterConfig } from '@/lib/configService';
+import { circuitBreakers } from '@/lib/circuitBreaker';
+import { handleAsterApiError, createSuccessResponse } from '@/lib/errorHandler';
 
 /**
  * POST /api/aster/leverage
@@ -12,7 +12,7 @@ const API_SECRET = process.env.ASTER_SECRET_KEY;
  * MUST be called BEFORE placing leveraged orders
  */
 export async function POST(req: NextRequest) {
-  if (!API_KEY || !API_SECRET) {
+  if (!asterConfig.apiKey || !asterConfig.secretKey) {
     logger.error('Aster API credentials not configured', undefined, { context: 'AsterAPI' });
     return NextResponse.json(
       { error: 'API credentials not configured' },
@@ -40,54 +40,71 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Build leverage parameters
-    const leverageParams: Record<string, string | number> = {
-      symbol: body.symbol.replace('/', ''), // Convert BTC/USDT to BTCUSDT
-      leverage: leverage,
-      timestamp: Date.now()
-    };
+    // Apply rate limiting and circuit breaker protection
+    return await withRateLimit(async () => {
+      return await circuitBreakers.asterApi.execute(async () => {
+        // Build leverage parameters
+        const leverageParams: Record<string, string | number> = {
+          symbol: body.symbol.replace('/', ''), // Convert BTC/USDT to BTCUSDT
+          leverage: leverage,
+          timestamp: Date.now()
+        };
 
-    // Build signed query
-    const queryString = await buildSignedQuery(leverageParams, API_SECRET);
-    const url = `${ASTER_BASE_URL}/fapi/v1/leverage?${queryString}`;
+        // Build signed query
+        const queryString = await buildSignedQuery(leverageParams, asterConfig.secretKey);
+        const url = `${asterConfig.baseUrl}/fapi/v1/leverage?${queryString}`;
 
-    logger.info('Setting leverage on Aster DEX', {
-      context: 'AsterAPI',
-      data: { symbol: body.symbol, leverage },
-    });
+        logger.info('Setting leverage on Aster DEX', {
+          context: 'AsterAPI',
+          data: { symbol: body.symbol, leverage },
+        });
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'X-MBX-APIKEY': API_KEY,
-        'Content-Type': 'application/json',
-      },
-    });
+        // Add timeout to prevent hanging requests
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Aster API leverage setting failed', undefined, {
-        context: 'AsterAPI',
-        data: { status: response.status, error: errorText, params: leverageParams },
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'X-MBX-APIKEY': asterConfig.apiKey,
+              'Content-Type': 'application/json',
+            },
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            return handleAsterApiError(response, 'AsterAPI');
+          }
+
+          const data = await response.json();
+          logger.info('Successfully set leverage on Aster DEX', {
+            context: 'AsterAPI',
+            data: { symbol: body.symbol, leverage: data.leverage || leverage },
+          });
+
+          return createSuccessResponse({
+            success: true,
+            symbol: body.symbol,
+            leverage: data.leverage || leverage,
+            maxNotionalValue: data.maxNotionalValue,
+            ...data
+          });
+        } catch (error: any) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            logger.error('Leverage setting timeout', error, { context: 'AsterAPI' });
+            return NextResponse.json(
+              { error: 'Request timeout - leverage setting took too long' },
+              { status: 408 }
+            );
+          }
+          throw error;
+        }
       });
-      return NextResponse.json(
-        { error: `Aster API error: ${errorText}` },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
-    logger.info('Successfully set leverage on Aster DEX', {
-      context: 'AsterAPI',
-      data: { symbol: body.symbol, leverage: data.leverage || leverage },
-    });
-
-    return NextResponse.json({
-      success: true,
-      symbol: body.symbol,
-      leverage: data.leverage || leverage,
-      maxNotionalValue: data.maxNotionalValue,
-      ...data
     });
   } catch (error: any) {
     logger.error('Failed to set leverage', error, { context: 'AsterAPI' });

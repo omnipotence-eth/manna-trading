@@ -18,12 +18,12 @@ interface Trade {
   // Entry analysis
   entryReason: string;
   entryConfidence: number;
-  entrySignals: string[];
+  entrySignals: any; // JSON object with trade entry signals
   entryMarketRegime: string;
-  entryScore: string;
+  entryScore: number;
   // Exit analysis
   exitReason: string;
-  exitTimestamp: string;
+  exitTimestamp: string | null;
   duration: number; // in seconds
 }
 

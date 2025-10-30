@@ -4,8 +4,9 @@
  */
 
 import { logger } from '@/lib/logger';
-import { qwenService } from '@/services/qwenService';
+import { deepseekService } from '@/services/deepseekService';
 import { AGENT_PROMPTS, MarketData, SentimentData, OnChainData, AnalystReports, FinalDecision, Portfolio, RiskApprovedTrade } from '@/lib/agentPrompts';
+import { DEEPSEEK_OPTIMIZED_PROMPTS } from '@/lib/agentPromptsOptimized';
 import { realBalanceService } from '@/services/realBalanceService';
 
 export interface AgentMessage {
@@ -93,10 +94,10 @@ export class AgentCoordinator {
    */
   private initializeAgents(): void {
     const agentConfigs = [
-      { id: 'technical', name: 'Technical Analyst', model: 'qwen2.5:7b-instruct' },
-      { id: 'chief', name: 'Chief Analyst', model: 'qwen2.5:14b-instruct' },
-      { id: 'risk', name: 'Risk Manager', model: 'qwen2.5:7b-instruct' },
-      { id: 'execution', name: 'Execution Specialist', model: 'qwen2.5:7b-instruct' }
+      { id: 'technical', name: 'Technical Analyst', model: 'deepseek-r1:32b' },
+      { id: 'chief', name: 'Chief Analyst', model: 'deepseek-r1:32b' },
+      { id: 'risk', name: 'Risk Manager', model: 'deepseek-r1:32b' },
+      { id: 'execution', name: 'Execution Specialist', model: 'deepseek-r1:32b' }
     ];
 
     agentConfigs.forEach(config => {
@@ -479,8 +480,15 @@ export class AgentCoordinator {
       const marketData = workflow.context.marketData;
       if (!marketData) throw new Error('Market data not available');
 
-      const prompt = AGENT_PROMPTS.TECHNICAL_ANALYST.analysisTemplate(marketData);
-      const result = await qwenService.chat(prompt, 'qwen2.5:7b-instruct');
+      // Use OPTIMIZED prompts for DeepSeek R1's advanced reasoning
+      const systemPrompt = DEEPSEEK_OPTIMIZED_PROMPTS.TECHNICAL_ANALYST.systemPrompt;
+      const prompt = DEEPSEEK_OPTIMIZED_PROMPTS.TECHNICAL_ANALYST.analysisTemplate(marketData);
+      const result = await deepseekService.chatWithSystem(systemPrompt, prompt, undefined, {
+        format: 'json',
+        temperature: 0.6,
+        thinking: true, // Enable Chain-of-Thought reasoning
+        max_tokens: 3000 // More tokens for detailed analysis
+      });
 
       agent.status = 'idle';
       agent.currentTask = undefined;
@@ -553,7 +561,7 @@ export class AgentCoordinator {
   }
 
   /**
-   * Execute risk assessment step
+   * Execute risk assessment step - USING DEEPSEEK R1 LLM
    */
   private async executeRiskAssessment(workflow: TradingWorkflow): Promise<any> {
     const agent = this.agents.get('risk');
@@ -564,9 +572,12 @@ export class AgentCoordinator {
     agent.lastActivity = Date.now();
 
     try {
-      // Get real balance data
+      // Get real balance data from API (no fallback - fail if unavailable)
       const balanceConfig = realBalanceService.getBalanceConfig();
-      const balance = balanceConfig?.availableBalance || 42.16;
+      if (!balanceConfig || balanceConfig.availableBalance === undefined) {
+        throw new Error('Unable to fetch real-time balance from Aster DEX API');
+      }
+      const balance = balanceConfig.availableBalance;
       
       // Ensure we have the final decision from Chief Analyst
       const finalDecision = workflow.context.finalDecision;
@@ -574,148 +585,220 @@ export class AgentCoordinator {
         throw new Error('Final decision not available for risk assessment');
       }
 
-      // PRODUCTION RISK ASSESSMENT - Real trading logic
       const currentPrice = workflow.context.marketData?.price || 0;
-      const confidence = finalDecision.confidence || 0.3;
       
-      // Get configuration
-      const { asterConfig } = await import('@/lib/configService');
-      
-      // Check minimum balance
-      if (balance < asterConfig.trading.minBalanceForTrade) {
-        const rejection = {
-          approved: false,
-          action: 'HOLD' as const,
-          positionSize: 0,
-          leverage: 1,
-          stopLoss: currentPrice,
-          takeProfit: currentPrice,
-          riskPercentage: 0,
-          expectedRisk: 0,
-          expectedReward: 0,
-          riskRewardRatio: 0,
-          reasoning: `Insufficient balance: $${balance.toFixed(2)} < $${asterConfig.trading.minBalanceForTrade} minimum`
-        };
-        
-        logger.warn('Trade rejected: Insufficient balance', {
-          context: 'AgentCoordinator',
-          data: rejection
-        });
-        
-        agent.status = 'idle';
-        agent.performance.totalTasks++;
-        return rejection;
-      }
-      
-      // Check confidence threshold
-      if (confidence < asterConfig.trading.confidenceThreshold) {
-        const rejection = {
-          approved: false,
-          action: 'HOLD' as const,
-          positionSize: 0,
-          leverage: 1,
-          stopLoss: currentPrice,
-          takeProfit: currentPrice,
-          riskPercentage: 0,
-          expectedRisk: 0,
-          expectedReward: 0,
-          riskRewardRatio: 0,
-          reasoning: `Confidence ${(confidence * 100).toFixed(1)}% below ${(asterConfig.trading.confidenceThreshold * 100).toFixed(1)}% threshold`
-        };
-        
-        logger.info('Trade rejected: Low confidence', {
-          context: 'AgentCoordinator',
-          data: rejection
-        });
-        
-        agent.status = 'idle';
-        agent.performance.totalTasks++;
-        return rejection;
-      }
-      
-      // Respect AI decision - don't override HOLD
-      if (finalDecision.action === 'HOLD') {
-        const rejection = {
-          approved: false,
-          action: 'HOLD' as const,
-          positionSize: 0,
-          leverage: 1,
-          stopLoss: currentPrice,
-          takeProfit: currentPrice,
-          riskPercentage: 0,
-          expectedRisk: 0,
-          expectedReward: 0,
-          riskRewardRatio: 0,
-          reasoning: 'AI decision: HOLD - market conditions not favorable'
-        };
-        
-        logger.info('Trade rejected: AI recommended HOLD', {
-          context: 'AgentCoordinator',
-          data: { finalDecision }
-        });
-        
-        agent.status = 'idle';
-        agent.performance.totalTasks++;
-        return rejection;
-      }
-      
-      // Calculate position size (10-30% of balance based on confidence)
-      const riskPercent = Math.min(Math.max(confidence * 30, 10), 30);
-      const positionValue = balance * (riskPercent / 100);
-      
-      // Dynamic leverage (1-3x based on confidence, conservative)
-      const leverage = Math.min(Math.max(Math.floor(confidence * 5), 1), 3);
-      const positionSize = positionValue / currentPrice;
-      
-      // Adaptive stop loss and take profit
-      const volatility = workflow.context.marketData?.volatility || 5;
-      const stopLossPercent = Math.max(asterConfig.trading.stopLossPercent, volatility * 0.5);
-      const takeProfitPercent = stopLossPercent * (asterConfig.trading.takeProfitPercent / asterConfig.trading.stopLossPercent);
-      
-      const stopLoss = finalDecision.action === 'BUY' 
-        ? currentPrice * (1 - stopLossPercent / 100)
-        : currentPrice * (1 + stopLossPercent / 100);
-        
-      const takeProfit = finalDecision.action === 'BUY'
-        ? currentPrice * (1 + takeProfitPercent / 100)
-        : currentPrice * (1 - takeProfitPercent / 100);
-
-      const riskAssessment = {
-        approved: true, // Approved after all checks passed
-        action: finalDecision.action, // Respect AI decision (BUY/SELL)
-        positionSize: positionSize,
-        leverage: leverage,
-        stopLoss: stopLoss,
-        takeProfit: takeProfit,
-        riskPercentage: riskPercent,
-        expectedRisk: stopLossPercent,
-        expectedReward: takeProfitPercent,
-        riskRewardRatio: takeProfitPercent / stopLossPercent,
-        reasoning: `${finalDecision.action} ${workflow.symbol}: ${positionSize.toFixed(4)} units ($${positionValue.toFixed(2)}, ${riskPercent.toFixed(1)}% of balance) with ${leverage}x leverage. SL: ${stopLossPercent.toFixed(2)}%, TP: ${takeProfitPercent.toFixed(2)}% (${(takeProfitPercent/stopLossPercent).toFixed(2)}:1 R/R). Confidence: ${(confidence * 100).toFixed(1)}%`
-      };
-
-      logger.info('Risk Assessment - Trade Approved', {
+      // CALL DEEPSEEK R1 LLM FOR RISK ASSESSMENT
+      logger.info('🤖 Calling DeepSeek R1 for Risk Assessment', {
         context: 'AgentCoordinator',
         data: { 
+          symbol: workflow.symbol,
           balance,
-          confidence,
+          chiefDecision: finalDecision.action,
+          confidence: finalDecision.confidence
+        }
+      });
+
+      const systemPrompt = DEEPSEEK_OPTIMIZED_PROMPTS.RISK_MANAGER.systemPrompt;
+      const prompt = DEEPSEEK_OPTIMIZED_PROMPTS.RISK_MANAGER.assessmentTemplate({
+        symbol: workflow.symbol,
+        availableBalance: balance,
+        currentPrice: currentPrice,
+        marketData: workflow.context.marketData,
+        technicalAnalysis: workflow.context.technicalAnalysis,
+        chiefDecision: finalDecision
+      });
+
+      const result = await deepseekService.chatWithSystem(systemPrompt, prompt, undefined, {
+        format: 'json',
+        temperature: 0.4, // Conservative for risk assessment
+        thinking: true,
+        max_tokens: 2000
+      });
+
+      let riskAssessment: any;
+      try {
+        riskAssessment = JSON.parse(result);
+      } catch (parseError) {
+        logger.error('Failed to parse Risk Manager response', parseError as Error, {
+          context: 'AgentCoordinator',
+          response: result
+        });
+        throw new Error('Invalid Risk Manager response format');
+      }
+
+      // Validate required fields
+      if (typeof riskAssessment.approved !== 'boolean' ||
+          !riskAssessment.action ||
+          typeof riskAssessment.positionSize !== 'number') {
+        throw new Error('Risk Manager response missing required fields');
+      }
+
+      // ENFORCE CONCURRENT POSITION LIMITS (CRITICAL FOR SMALL ACCOUNTS)
+      if (riskAssessment.approved) {
+        const { asterConfig } = await import('@/lib/configService');
+        const { positionMonitorService } = await import('@/services/positionMonitorService');
+        const openPositions = positionMonitorService.getOpenPositions();
+        const maxConcurrentPositions = asterConfig.trading.maxConcurrentPositions || 2;
+        const maxPortfolioRiskPercent = asterConfig.trading.maxPortfolioRiskPercent || 10;
+
+        // Check concurrent positions limit (STRICTER for <$100 accounts)
+        const maxPositionsForAccount = balance < 100 ? 1 : maxConcurrentPositions;
+        if (openPositions.length >= maxPositionsForAccount) {
+          logger.warn(`⛔ Trade REJECTED: Max concurrent positions (${maxPositionsForAccount}) reached`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              currentPositions: openPositions.length,
+              maxPositions: maxPositionsForAccount,
+              accountBalance: balance,
+              openPositions: openPositions.map(p => p.symbol)
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Maximum concurrent positions (${maxPositionsForAccount}) already open. Current positions: ${openPositions.map(p => p.symbol).join(', ')}`;
+        }
+
+        // Check portfolio risk limit (STRICTER for <$100 accounts)
+        const maxRiskForAccount = balance < 100 ? 5 : maxPortfolioRiskPercent;
+        const totalRisk = openPositions.reduce((sum, pos) => {
+          const positionRisk = Math.abs((pos.stopLoss - pos.entryPrice) / pos.entryPrice * 100);
+          return sum + (positionRisk * (pos.entryPrice * pos.size) / balance * 100);
+        }, 0);
+        
+        const newPositionRisk = riskAssessment.riskPercentage || 0;
+        const totalRiskAfter = totalRisk + newPositionRisk;
+        
+        if (totalRiskAfter > maxRiskForAccount) {
+          logger.warn(`⛔ Trade REJECTED: Portfolio risk would exceed ${maxRiskForAccount}%`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              currentRisk: totalRisk.toFixed(2),
+              newPositionRisk: newPositionRisk.toFixed(2),
+              totalRiskAfter: totalRiskAfter.toFixed(2),
+              maxRisk: maxRiskForAccount,
+              accountBalance: balance
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Portfolio risk would exceed ${maxRiskForAccount}% limit (currently ${totalRisk.toFixed(2)}% + ${newPositionRisk.toFixed(2)}% = ${totalRiskAfter.toFixed(2)}%)`;
+        }
+
+        // ENFORCE LEVERAGE LIMIT FOR SMALL ACCOUNTS
+        if (balance < 500 && riskAssessment.leverage > 1) {
+          logger.warn(`⛔ Trade REJECTED: Account <$500 cannot use leverage`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              balance,
+              requestedLeverage: riskAssessment.leverage
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Accounts <$500 cannot use leverage (requested ${riskAssessment.leverage}x, must be 1x)`;
+        }
+
+        // ENFORCE POSITION SIZE LIMIT FOR MICRO ACCOUNTS (ULTRA STRICT)
+        const positionRiskPercent = riskAssessment.riskPercentage || 0;
+        if (balance < 100 && positionRiskPercent > 3) {
+          logger.warn(`⛔ Trade REJECTED: Position risk exceeds 3% limit for accounts <$100`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              balance,
+              riskPercent: positionRiskPercent
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds 3% maximum for accounts <$100`;
+        } else if (balance < 200 && positionRiskPercent > 5) {
+          logger.warn(`⛔ Trade REJECTED: Position risk exceeds 5% limit for accounts <$200`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              balance,
+              riskPercent: positionRiskPercent
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds 5% maximum for accounts <$200`;
+        } else if (balance < 500 && positionRiskPercent > 5) {
+          logger.warn(`⛔ Trade REJECTED: Position risk exceeds 5% limit for accounts <$500`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              balance,
+              riskPercent: positionRiskPercent
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds 5% maximum for accounts <$500`;
+        }
+        
+      // ENFORCE MINIMUM R:R RATIO FOR MICRO ACCOUNTS
+      const minRRForAccount = balance < 100 ? 4.0 : balance < 200 ? 3.5 : balance < 500 ? 3.0 : 2.5;
+      const actualRR = riskAssessment.riskRewardRatio || 0;
+      if (actualRR < minRRForAccount) {
+        logger.warn(`⛔ Trade REJECTED: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum for account size`, {
+          context: 'AgentCoordinator',
+          data: {
+            symbol: workflow.symbol,
+            balance,
+            actualRR,
+            minRR: minRRForAccount
+          }
+        });
+        riskAssessment.approved = false;
+        riskAssessment.reasoning = `Trade rejected: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum required for accounts of this size`;
+      }
+
+      // FINAL CHECK: Verify coin is not problematic (COSMO/APE-like issues)
+      const { problematicCoinDetector } = await import('@/services/problematicCoinDetector');
+      if (problematicCoinDetector.isProblematic(workflow.symbol)) {
+        const problematicCoin = problematicCoinDetector.getProblematicCoin(workflow.symbol);
+        logger.warn(`⛔ Trade REJECTED: Coin is problematic (execution issues like COSMO/APE)`, {
+          context: 'AgentCoordinator',
+          data: {
+            symbol: workflow.symbol,
+            reason: problematicCoin?.reason || 'Execution problems detected',
+            metrics: problematicCoin?.metrics
+          }
+        });
+        riskAssessment.approved = false;
+        riskAssessment.reasoning = `Trade rejected: ${workflow.symbol} is problematic - ${problematicCoin?.reason || 'Execution issues detected (similar to COSMO/APE)'}`;
+      }
+
+      logger.info(`🛡️ Risk Manager Decision: ${riskAssessment.approved ? 'APPROVED' : 'REJECTED'}`, {
+        context: 'AgentCoordinator',
+        data: {
+          symbol: workflow.symbol,
           approved: riskAssessment.approved,
+          action: riskAssessment.action,
           positionSize: riskAssessment.positionSize,
           leverage: riskAssessment.leverage,
-          riskRewardRatio: riskAssessment.riskRewardRatio
+          riskRewardRatio: riskAssessment.riskRewardRatio,
+          reasoning: riskAssessment.reasoning
         }
       });
 
       agent.status = 'idle';
       agent.currentTask = undefined;
       agent.performance.totalTasks++;
-      agent.performance.successfulTasks++;
+      if (riskAssessment.approved) {
+        agent.performance.successfulTasks++;
+      }
 
       return riskAssessment;
     } catch (error) {
       agent.status = 'error';
       agent.performance.totalTasks++;
       agent.performance.errorRate = agent.performance.errorRate + (1 / agent.performance.totalTasks);
+      
+      logger.error('Risk Assessment failed', error as Error, {
+        context: 'AgentCoordinator',
+        symbol: workflow.symbol
+      });
+      
       throw error;
     }
   }
@@ -734,6 +817,33 @@ export class AgentCoordinator {
     try {
       const riskAssessment = workflow.context.riskAssessment;
       
+      // Check blacklist FIRST
+      const { asterConfig } = await import('@/lib/configService');
+      const blacklist = asterConfig.trading.blacklistedSymbols || [];
+      const symbolVariants = [workflow.symbol, workflow.symbol.replace('/', '')];
+      const isBlacklisted = blacklist.some(b => symbolVariants.includes(b));
+
+      if (isBlacklisted) {
+        logger.warn('⛔ Symbol is blacklisted - trade blocked', {
+          context: 'AgentCoordinator',
+          data: { 
+            symbol: workflow.symbol,
+            blacklist
+          }
+        });
+        
+        agent.status = 'idle';
+        agent.currentTask = undefined;
+        agent.performance.totalTasks++;
+        agent.performance.successfulTasks++;
+        
+        return {
+          readyToExecute: false,
+          reason: 'Symbol is blacklisted',
+          action: 'HOLD'
+        };
+      }
+
       if (!riskAssessment || !riskAssessment.approved) {
         logger.info('Trade not approved by Risk Manager', {
           context: 'AgentCoordinator',
@@ -897,6 +1007,49 @@ export class AgentCoordinator {
           leverage: riskAssessment.leverage,
           orderId: tradeResult.orderId
         });
+
+        // Save trade to database for trade journal/chat
+        try {
+          const { addTrade } = await import('@/lib/db');
+          const tradeEntry = {
+            id: `trade-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+            timestamp: new Date().toISOString(),
+            model: 'Multi-Agent AI',
+            symbol: workflow.symbol,
+            side: (riskAssessment.action === 'BUY' ? 'LONG' : 'SHORT') as 'LONG' | 'SHORT',
+            size: riskAssessment.positionSize,
+            entryPrice: finalDecision?.currentPrice || 0,
+            exitPrice: 0, // Will be updated when position closes
+            pnl: 0, // Will be updated when position closes
+            pnlPercent: 0,
+            leverage: riskAssessment.leverage,
+            entryReason: `Multi-Agent Analysis: ${finalDecision?.reasoning?.substring(0, 200) || 'High confidence opportunity'}`,
+            entryConfidence: finalDecision?.confidence || 0,
+            entrySignals: {
+              volumeScore: (workflow.context.marketData as any)?.volumeScore || 0,
+              momentumScore: (workflow.context.marketData as any)?.momentumScore || 0,
+              liquidityScore: (workflow.context.marketData as any)?.liquidityScore || 0,
+              technicalAnalysis: workflow.context.technicalAnalysis || {},
+              sentiment: (workflow.context.sentimentData as any)?.sentiment || 'neutral'
+            },
+            entryMarketRegime: (workflow.context.marketData as any)?.regime || 'unknown',
+            entryScore: (finalDecision as any)?.opportunityScore || 0,
+            exitReason: '', // Will be set when position closes
+            exitTimestamp: null,
+            duration: 0
+          };
+          
+          await addTrade(tradeEntry);
+          logger.info('📝 Trade saved to database for journal', {
+            context: 'AgentCoordinator',
+            data: { tradeId: tradeEntry.id, symbol: workflow.symbol }
+          });
+        } catch (dbError) {
+          logger.error('Failed to save trade to database (non-critical)', dbError, {
+            context: 'AgentCoordinator'
+          });
+          // Non-critical error, continue with position monitoring
+        }
 
         // Add position to monitor
         try {

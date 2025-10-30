@@ -363,11 +363,18 @@ export class AdvancedCacheManager {
     }, this.warmingInterval);
   }
 
+  private cleanupInterval?: NodeJS.Timeout;
+
   /**
    * Start cleanup process
    */
   private startCleanupProcess(): void {
-    setInterval(() => {
+    // Clear existing interval if any (prevent duplicates)
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+
+    this.cleanupInterval = setInterval(() => {
       const now = Date.now();
       let cleanedCount = 0;
 
@@ -394,6 +401,12 @@ export class AdvancedCacheManager {
    * Clear all cache
    */
   clear(): void {
+    // Clear cleanup interval
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = undefined;
+    }
+
     // Clear all timers
     this.invalidationTimers.forEach(timer => clearTimeout(timer));
     this.invalidationTimers.clear();
