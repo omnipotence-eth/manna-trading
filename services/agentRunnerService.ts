@@ -55,16 +55,36 @@ export class AgentRunnerService {
       
       const exchangeInfo = await asterDexService.getExchangeInfo();
       
+      // CRITICAL FIX: Validate exchangeInfo response
+      if (!exchangeInfo) {
+        throw new Error('Exchange info is null or undefined');
+      }
+      
       // Get blacklist from config
       const { asterConfig } = await import('@/lib/configService');
       const blacklist = asterConfig.trading.blacklistedSymbols || [];
 
       if (this.config.focusOnHighVolume) {
+        // CRITICAL FIX: Use correct property name (topSymbolsByVolume, not topVolumeSymbols)
+        const topSymbols = exchangeInfo.topSymbolsByVolume || exchangeInfo.symbols || [];
+        
         // Filter for high volume pairs (excluding blacklist)
-        const highVolumeSymbols = exchangeInfo.topVolumeSymbols
-          .filter((symbol: any) => symbol.quoteVolume24h >= this.config.minVolumeThreshold)
-          .map((symbol: any) => symbol.symbol.replace('USDT', '/USDT')) // Convert BTCUSDT to BTC/USDT
-          .filter((symbol: string) => !blacklist.includes(symbol) && !blacklist.includes(symbol.replace('/', '')));
+        const highVolumeSymbols = topSymbols
+          .filter((symbol: any) => {
+            // Ensure symbol has required properties
+            if (!symbol || !symbol.symbol) return false;
+            const volume = symbol.quoteVolume24h || 0;
+            return volume >= this.config.minVolumeThreshold;
+          })
+          .map((symbol: any) => {
+            // Convert BTCUSDT to BTC/USDT format
+            const symbolStr = symbol.symbol || '';
+            return symbolStr.replace('USDT', '/USDT');
+          })
+          .filter((symbol: string) => {
+            // Filter out blacklisted symbols
+            return symbol && !blacklist.includes(symbol) && !blacklist.includes(symbol.replace('/', ''));
+          });
         
         this.config.symbols = highVolumeSymbols;
         
@@ -77,9 +97,17 @@ export class AgentRunnerService {
         });
       } else {
         // Use all available symbols (excluding blacklist)
-        const allSymbols = exchangeInfo.symbols
-          .map((symbol: any) => symbol.symbol.replace('USDT', '/USDT'))
-          .filter((symbol: string) => !blacklist.includes(symbol) && !blacklist.includes(symbol.replace('/', '')));
+        const allSymbols = (exchangeInfo.symbols || [])
+          .filter((symbol: any) => symbol && symbol.symbol) // Validate symbol exists
+          .map((symbol: any) => {
+            // Convert BTCUSDT to BTC/USDT format
+            const symbolStr = symbol.symbol || '';
+            return symbolStr.replace('USDT', '/USDT');
+          })
+          .filter((symbol: string) => {
+            // Filter out blacklisted symbols
+            return symbol && !blacklist.includes(symbol) && !blacklist.includes(symbol.replace('/', ''));
+          });
         
         this.config.symbols = allSymbols;
         
@@ -90,10 +118,20 @@ export class AgentRunnerService {
         });
       }
       
+      // Ensure we have at least some symbols
+      if (this.config.symbols.length === 0) {
+        logger.warn('No symbols found after filtering, using fallback symbols', { context: 'AgentRunner' });
+        // Fallback to common pairs
+        this.config.symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT'];
+      }
+      
       this.lastSymbolUpdate = Date.now();
     } catch (error) {
       logger.error('Failed to update symbols', error, { context: 'AgentRunner' });
-      throw error; // Re-throw to fail the operation
+      // Use fallback symbols instead of throwing
+      logger.warn('Using fallback symbols due to error', { context: 'AgentRunner' });
+      this.config.symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT'];
+      this.lastSymbolUpdate = Date.now();
     }
   }
 

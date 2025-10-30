@@ -35,6 +35,7 @@ export interface MultiAgentDecision {
 export class MultiAgentTradingSystem {
   private isRunning: boolean = false;
   private currentCycle: number = 0;
+  private cycleIntervalId: NodeJS.Timeout | null = null;
 
   constructor() {
     logger.info('Multi-Agent Trading System initialized', {
