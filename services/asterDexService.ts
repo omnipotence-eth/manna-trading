@@ -1581,9 +1581,9 @@ class AsterDexService {
             
             // Log retry attempt
             if (attempt < maxRetries - 1) {
-              logger.warn(`getBalance request failed (attempt ${attempt + 1}/${maxRetries})`, lastError, {
+              logger.warn(`getBalance request failed (attempt ${attempt + 1}/${maxRetries})`, {
                 context: 'AsterDex',
-                data: { attempt: attempt + 1, maxRetries }
+                data: { attempt: attempt + 1, maxRetries, error: lastError?.message }
               });
             } else {
               // Final attempt failed
