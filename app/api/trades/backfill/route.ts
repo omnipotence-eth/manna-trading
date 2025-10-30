@@ -28,7 +28,7 @@ export async function GET() {
     for (const position of positions) {
       try {
         // Skip positions with 0 amount (already closed)
-        if (parseFloat(position.positionAmt) === 0) {
+        if (position.size === 0) {
           continue;
         }
 
@@ -41,13 +41,13 @@ export async function GET() {
           timestamp: new Date().toISOString(),
           model: 'Multi-Agent AI',
           symbol: normalizedSymbol,
-          side: (parseFloat(position.positionAmt) > 0 ? 'LONG' : 'SHORT') as 'LONG' | 'SHORT',
-          size: Math.abs(parseFloat(position.positionAmt)),
-          entryPrice: parseFloat(position.entryPrice),
+          side: (position.size > 0 ? 'LONG' : 'SHORT') as 'LONG' | 'SHORT',
+          size: Math.abs(position.size),
+          entryPrice: position.entryPrice,
           exitPrice: 0, // Still open
-          pnl: parseFloat(position.unrealizedProfit),
+          pnl: position.unrealizedPnl,
           pnlPercent: 0,
-          leverage: parseInt(position.leverage),
+          leverage: position.leverage,
           entryReason: `Backfilled open position (opened before logging was implemented)`,
           entryConfidence: 50,
           entrySignals: {

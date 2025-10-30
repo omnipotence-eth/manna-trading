@@ -735,37 +735,38 @@ export class AgentCoordinator {
           riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds 5% maximum for accounts <$500`;
         }
         
-      // ENFORCE MINIMUM R:R RATIO FOR MICRO ACCOUNTS
-      const minRRForAccount = balance < 100 ? 4.0 : balance < 200 ? 3.5 : balance < 500 ? 3.0 : 2.5;
-      const actualRR = riskAssessment.riskRewardRatio || 0;
-      if (actualRR < minRRForAccount) {
-        logger.warn(`⛔ Trade REJECTED: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum for account size`, {
-          context: 'AgentCoordinator',
-          data: {
-            symbol: workflow.symbol,
-            balance,
-            actualRR,
-            minRR: minRRForAccount
-          }
-        });
-        riskAssessment.approved = false;
-        riskAssessment.reasoning = `Trade rejected: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum required for accounts of this size`;
-      }
+        // ENFORCE MINIMUM R:R RATIO FOR MICRO ACCOUNTS
+        const minRRForAccount = balance < 100 ? 4.0 : balance < 200 ? 3.5 : balance < 500 ? 3.0 : 2.5;
+        const actualRR = riskAssessment.riskRewardRatio || 0;
+        if (actualRR < minRRForAccount) {
+          logger.warn(`⛔ Trade REJECTED: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum for account size`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              balance,
+              actualRR,
+              minRR: minRRForAccount
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum required for accounts of this size`;
+        }
 
-      // FINAL CHECK: Verify coin is not problematic (COSMO/APE-like issues)
-      const { problematicCoinDetector } = await import('@/services/problematicCoinDetector');
-      if (problematicCoinDetector.isProblematic(workflow.symbol)) {
-        const problematicCoin = problematicCoinDetector.getProblematicCoin(workflow.symbol);
-        logger.warn(`⛔ Trade REJECTED: Coin is problematic (execution issues like COSMO/APE)`, {
-          context: 'AgentCoordinator',
-          data: {
-            symbol: workflow.symbol,
-            reason: problematicCoin?.reason || 'Execution problems detected',
-            metrics: problematicCoin?.metrics
-          }
-        });
-        riskAssessment.approved = false;
-        riskAssessment.reasoning = `Trade rejected: ${workflow.symbol} is problematic - ${problematicCoin?.reason || 'Execution issues detected (similar to COSMO/APE)'}`;
+        // FINAL CHECK: Verify coin is not problematic (COSMO/APE-like issues)
+        const { problematicCoinDetector } = await import('@/services/problematicCoinDetector');
+        if (problematicCoinDetector.isProblematic(workflow.symbol)) {
+          const problematicCoin = problematicCoinDetector.getProblematicCoin(workflow.symbol);
+          logger.warn(`⛔ Trade REJECTED: Coin is problematic (execution issues like COSMO/APE)`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              reason: problematicCoin?.reason || 'Execution problems detected',
+              metrics: problematicCoin?.metrics
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: ${workflow.symbol} is problematic - ${problematicCoin?.reason || 'Execution issues detected (similar to COSMO/APE)'}`;
+        }
       }
 
       logger.info(`🛡️ Risk Manager Decision: ${riskAssessment.approved ? 'APPROVED' : 'REJECTED'}`, {

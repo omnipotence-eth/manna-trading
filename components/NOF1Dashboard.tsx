@@ -26,6 +26,7 @@ export default function NOF1Dashboard() {
   const addModelMessage = useStore((state) => state.addModelMessage);
   // OPTIMIZED: useRef for isMounted flag (better than let variable)
   const isMountedRef = useRef(true);
+  const initRef = useRef(false);
 
   useEffect(() => {
     if (initRef.current) return;

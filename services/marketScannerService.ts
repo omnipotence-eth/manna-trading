@@ -132,7 +132,6 @@ class MarketScannerService {
 
       // Analyze top 50 symbols (excluding blacklisted)
       const opportunities: MarketOpportunity[] = [];
-      const { asterConfig } = await import('@/lib/configService');
       const blacklist = asterConfig.trading.blacklistedSymbols || [];
 
       for (const symbolInfo of symbols.slice(0, 30)) { // Analyze top 30 by volume
@@ -149,7 +148,7 @@ class MarketScannerService {
             const problematicCoin = problematicCoinDetector.getProblematicCoin(symbolInfo.symbol);
             logger.warn(`⛔ Skipping problematic coin: ${symbolInfo.symbol} - ${problematicCoin?.reason || 'Execution issues detected'}`, {
               context: 'MarketScanner',
-              data: problematicCoin
+              data: problematicCoin as any
             });
             continue;
           }
