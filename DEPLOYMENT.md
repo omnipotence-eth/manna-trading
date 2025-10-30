@@ -1,5 +1,19 @@
 # Vercel Deployment Guide
 
+## ⚠️ IMPORTANT: LLM Architecture Consideration
+
+**Your local machine will NOT be used when deployed to Vercel.**
+
+Vercel runs serverless functions in the cloud, which cannot access `localhost` on your machine. You have three options:
+
+1. **Deploy Ollama to VPS** (Recommended for production)
+2. **Use tunneling service** (Development only - requires local machine running)
+3. **Hybrid architecture** (Frontend on Vercel, agents on local machine)
+
+See [DEPLOYMENT_ARCHITECTURE.md](./DEPLOYMENT_ARCHITECTURE.md) for detailed architecture options.
+
+---
+
 ## Prerequisites
 
 1. **Vercel Account** - Sign up at https://vercel.com
