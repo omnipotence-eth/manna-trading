@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { frontendLogger } from '@/lib/frontendLogger';
 
 export function StartupInitializer() {
   const [initialized, setInitialized] = useState(false);
@@ -13,22 +14,19 @@ export function StartupInitializer() {
   useEffect(() => {
     async function initializeServices() {
       try {
-        console.log('[STARTUP] Initializing trading services...');
+        frontendLogger.info('[STARTUP] Initializing trading services...', { component: 'StartupInitializer' });
         
         const response = await fetch('/api/startup?action=initialize');
         const data = await response.json();
         
         if (data.success) {
-          // Use logger instead of console.log for consistency
-          // logger.info('[STARTUP] ✅ Trading services initialized successfully', { context: 'StartupInitializer' });
+          frontendLogger.info('[STARTUP] ✅ Trading services initialized successfully', { component: 'StartupInitializer' });
           setInitialized(true);
         } else {
-          // Use logger instead of console.error for consistency
-          // logger.error('[STARTUP] ❌ Failed to initialize services', new Error(data.error || 'Unknown error'), { context: 'StartupInitializer' });
+          frontendLogger.error('[STARTUP] ❌ Failed to initialize services', new Error(data.error || 'Unknown error'), { component: 'StartupInitializer' });
         }
       } catch (error) {
-        // Use logger instead of console.error for consistency
-        // logger.error('[STARTUP] ❌ Error initializing services', error as Error, { context: 'StartupInitializer' });
+        frontendLogger.error('[STARTUP] ❌ Error initializing services', error as Error, { component: 'StartupInitializer' });
         // Retry after 5 seconds
         setTimeout(initializeServices, 5000);
       }
