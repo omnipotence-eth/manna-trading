@@ -61,19 +61,28 @@ export interface Trade {
   leverage: number;
   entryReason: string;
   entryConfidence: number;
-  entrySignals: string[];
+  entrySignals: any; // JSON object with trade entry signals
   entryMarketRegime: string;
-  entryScore: string;
+  entryScore: number;
   exitReason: string;
-  exitTimestamp: string;
+  exitTimestamp: string | null;
   duration: number;
   createdAt?: Date;
 }
 
+// Cache for database initialization status
+let dbInitialized = false;
+
 /**
  * Initialize database - create tables if they don't exist
+ * OPTIMIZED: Cached initialization status to prevent repeated calls
  */
 export async function initializeDatabase() {
+  // Return immediately if already initialized
+  if (dbInitialized) {
+    return true;
+  }
+
   try {
     // Create trades table
     await sql(`
@@ -117,10 +126,21 @@ export async function initializeDatabase() {
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp DESC);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_model ON trades(model);`);
+    
+    // OPTIMIZED: Add composite index for common query patterns (symbol + model + timestamp)
+    await sql(`CREATE INDEX IF NOT EXISTS idx_trades_symbol_model_timestamp ON trades(symbol, model, timestamp DESC);`);
+    
+    // OPTIMIZED: Add index for P&L filtering and sorting
+    await sql(`CREATE INDEX IF NOT EXISTS idx_trades_pnl ON trades(pnl);`);
+    
+    // OPTIMIZED: Add partial index for recent trades (last 30 days) - improves query performance for recent data
+    await sql(`CREATE INDEX IF NOT EXISTS idx_trades_recent ON trades(timestamp DESC) WHERE timestamp > NOW() - INTERVAL '30 days';`);
+    
     await sql(`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON model_messages(timestamp DESC);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_messages_model ON model_messages(model);`);
 
     logger.info('✅ Database initialized successfully', { context: 'Database' });
+    dbInitialized = true; // Mark as initialized
     return true;
   } catch (error) {
     logger.error('Failed to initialize database', error, { context: 'Database' });
@@ -133,6 +153,17 @@ export async function initializeDatabase() {
  */
 export async function addTrade(trade: Trade): Promise<boolean> {
   try {
+    logger.info('Attempting to insert trade', {
+      context: 'Database',
+      data: {
+        id: trade.id,
+        symbol: trade.symbol,
+        side: trade.side,
+        entryConfidence: trade.entryConfidence,
+        entrySignals: trade.entrySignals
+      }
+    });
+
     await sql(`
       INSERT INTO trades (
         id, timestamp, model, symbol, side, size,
@@ -140,7 +171,7 @@ export async function addTrade(trade: Trade): Promise<boolean> {
         entry_reason, entry_confidence, entry_signals,
         entry_market_regime, entry_score, exit_reason,
         exit_timestamp, duration
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       ON CONFLICT (id) DO NOTHING;
     `, [
       trade.id,
@@ -155,7 +186,7 @@ export async function addTrade(trade: Trade): Promise<boolean> {
       trade.pnlPercent,
       trade.leverage,
       trade.entryReason,
-      trade.entryConfidence,
+      trade.entryConfidence ? trade.entryConfidence / 100 : 0, // Convert percentage to decimal (50 -> 0.50)
       JSON.stringify(trade.entrySignals),
       trade.entryMarketRegime,
       trade.entryScore,
@@ -173,7 +204,12 @@ export async function addTrade(trade: Trade): Promise<boolean> {
   } catch (error) {
     logger.error('Failed to save trade to database', error, { 
       context: 'Database',
-      data: { tradeId: trade.id, symbol: trade.symbol }
+      data: { 
+        tradeId: trade.id, 
+        symbol: trade.symbol,
+        fullError: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined
+      }
     });
     return false;
   }
@@ -181,6 +217,7 @@ export async function addTrade(trade: Trade): Promise<boolean> {
 
 /**
  * Get all trades with optional filters
+ * OPTIMIZED: Single parameterized query instead of multiple branches
  */
 export async function getTrades(filters?: {
   symbol?: string;
@@ -190,37 +227,22 @@ export async function getTrades(filters?: {
 }): Promise<Trade[]> {
   try {
     const limit = filters?.limit || 100;
+    const offset = filters?.offset || 0;
     
-    let result;
-    
-    if (filters?.symbol && filters?.model) {
-      result = await sql(`
-        SELECT * FROM trades 
-        WHERE symbol = $1 AND model = $2
-        ORDER BY timestamp DESC 
-        LIMIT $3
-      `, [filters.symbol, filters.model, limit]);
-    } else if (filters?.symbol) {
-      result = await sql(`
-        SELECT * FROM trades 
-        WHERE symbol = $1
-        ORDER BY timestamp DESC 
-        LIMIT $2
-      `, [filters.symbol, limit]);
-    } else if (filters?.model) {
-      result = await sql(`
-        SELECT * FROM trades 
-        WHERE model = $1
-        ORDER BY timestamp DESC 
-        LIMIT $2
-      `, [filters.model, limit]);
-    } else {
-      result = await sql(`
-        SELECT * FROM trades 
-        ORDER BY timestamp DESC 
-        LIMIT $1
-      `, [limit]);
-    }
+    // OPTIMIZED: Single parameterized query with optional WHERE clauses
+    const result = await sql(`
+      SELECT * FROM trades 
+      WHERE ($1::text IS NULL OR symbol = $1)
+        AND ($2::text IS NULL OR model = $2)
+      ORDER BY timestamp DESC 
+      LIMIT $3
+      OFFSET $4
+    `, [
+      filters?.symbol || null,
+      filters?.model || null,
+      limit,
+      offset
+    ]);
     
     // Transform rows to Trade objects
     const trades: Trade[] = result.rows.map((row: any) => ({
@@ -236,7 +258,7 @@ export async function getTrades(filters?: {
       pnlPercent: parseFloat(row.pnl_percent),
       leverage: parseInt(row.leverage),
       entryReason: row.entry_reason,
-      entryConfidence: parseFloat(row.entry_confidence),
+      entryConfidence: parseFloat(row.entry_confidence) * 100, // Convert decimal back to percentage (0.50 -> 50)
       entrySignals: row.entry_signals,
       entryMarketRegime: row.entry_market_regime,
       entryScore: row.entry_score,
@@ -309,11 +331,12 @@ export async function getTradeStats() {
  */
 export async function deleteOldTrades(daysOld: number = 90) {
   try {
+    // FIXED: Use parameterized query to prevent SQL injection
     const result = await sql(`
       DELETE FROM trades
-      WHERE created_at < NOW() - INTERVAL '${daysOld} days'
+      WHERE created_at < NOW() - INTERVAL '1 day' * $1
       RETURNING id;
-    `);
+    `, [daysOld]);
 
     logger.info(`🗑️ Deleted ${result.rowCount} trades older than ${daysOld} days`, {
       context: 'Database',

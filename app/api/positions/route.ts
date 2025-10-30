@@ -142,6 +142,28 @@ export async function POST(request: NextRequest) {
           data: { positionId, closedPercent: percent }
         });
 
+      case 'force-close':
+        // Force close 100% of the position immediately
+        const forceClosedSuccess = await positionMonitorService.forceClose(positionId);
+        
+        if (!forceClosedSuccess) {
+          return NextResponse.json({
+            success: false,
+            error: 'Failed to force close position'
+          }, { status: 500 });
+        }
+
+        logger.info('Position force closed', {
+          context: 'PositionsAPI',
+          data: { positionId, action: 'force-close' }
+        });
+
+        return NextResponse.json({
+          success: true,
+          message: 'Position force closed successfully',
+          data: { positionId, closedPercent: 100 }
+        });
+
       default:
         return NextResponse.json({
           success: false,

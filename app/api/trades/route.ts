@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTrades, getTradeStats, addTrade, initializeDatabase } from '@/lib/db';
 import { getTrades as getTradesMemory, getTradeStats as getTradeStatsMemory, addTrade as addTradeMemory, initializeDatabase as initMemory } from '@/lib/tradeMemory';
 import { logger } from '@/lib/logger';
+import { dbConfig } from '@/lib/configService'; // OPTIMIZED: Use configService instead of direct process.env
 
 /**
  * GET /api/trades - Fetch trade history from Postgres database
@@ -17,9 +18,11 @@ export async function GET(request: NextRequest) {
     const model = searchParams.get('model') || undefined;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 100;
 
+    // OPTIMIZED: Use configService instead of direct process.env access
     // Try database first if available
-    if (process.env.DATABASE_URL) {
+    if (dbConfig.connectionString && dbConfig.connectionString !== 'postgresql://localhost:5432/manna_dev') {
       try {
+        // OPTIMIZED: initializeDatabase() is now cached - won't recreate tables on every request
         await initializeDatabase();
         const trades = await getTrades({ symbol, model, limit });
         const stats = await getTradeStats();

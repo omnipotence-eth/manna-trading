@@ -25,10 +25,10 @@ export async function GET(request: NextRequest) {
       pnlPercent: 5.72, // From logs: ROE
       leverage: 20,
       entryReason: '🟢 BULLISH [Score:4/4, Conf:45.0%, RANGING]: 📊 Uptrend: +0.86% above MA. 🟢 Strong bullish candle (63% body). 💧 High liquidity (113637 trades)',
-      entryConfidence: 45,
-      entrySignals: ['Trend', 'Volume', 'Price Action'],
+      entryConfidence: 0.45, // Store as decimal (0.45 = 45%)
+      entrySignals: { primary: 'Trend', confirming: ['Volume', 'Price Action'], contradicting: [] },
       entryMarketRegime: 'RANGING',
-      entryScore: '4/4',
+      entryScore: 4,
       exitReason: 'Position closed manually before automated logging was implemented',
       exitTimestamp: new Date().toISOString(),
       duration: 3600, // Estimate: 1 hour (60 minutes)

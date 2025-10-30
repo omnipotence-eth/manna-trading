@@ -26,9 +26,10 @@ export async function GET(req: NextRequest) {
       // Build signed query with fresh timestamp (AFTER rate limiter)
       // Subtract 1000ms to account for server time difference
       const queryString = await buildSignedQuery({ timestamp: Date.now() - 1000 }, API_SECRET);
-      const url = `${ASTER_BASE_URL}/fapi/v1/position?${queryString}`;
+      // Use positionRisk endpoint as per Aster DEX API docs
+      const url = `${ASTER_BASE_URL}/fapi/v1/positionRisk?${queryString}`;
 
-      logger.debug('Fetching Aster positions', { context: 'AsterAPI', data: { url } });
+      logger.debug('Fetching Aster positions from positionRisk endpoint', { context: 'AsterAPI', data: { url: url.substring(0, 100) + '...' } });
 
       const response = await fetch(url, {
         headers: {

@@ -1,325 +1,316 @@
-# 🤖 AI Trading System for Aster DEX
-**Autonomous 24/7 Crypto Trading Bot with Multi-Agent Intelligence**
+# 🚀 Manna - AI Trading Bot
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yourusername/manna-ai-arena)
+**Advanced Multi-Agent Trading System powered by DeepSeek R1**
+
+> *"Give us this day our daily bread"* - Matthew 6:11
 
 ---
 
-## 🎯 Overview
+## 📊 Overview
 
-An intelligent, autonomous cryptocurrency trading system that uses multi-agent AI to analyze markets, make decisions, and execute trades on Aster DEX (Binance-compatible API). Built with Next.js, TypeScript, and LLM-powered agents.
+Manna is a professional-grade cryptocurrency trading system that uses multiple AI agents to analyze markets, assess risks, and execute profitable trades automatically on Aster DEX.
 
-### Key Features
+### **Key Features:**
+- ✅ **Multi-Agent AI System** - Technical Analyst, Chief Analyst, Risk Manager, Execution Specialist
+- ✅ **DeepSeek R1 32B** - Advanced LLM with Chain-of-Thought reasoning
+- ✅ **24/7 Automated Trading** - Continuous market monitoring and execution
+- ✅ **Risk Management** - Kelly Criterion, ATR-based stops, dynamic leverage
+- ✅ **Real-Time Monitoring** - Live position tracking and P&L updates
+- ✅ **Symbol Blacklist** - Prevent trading on unwanted symbols
+- ✅ **Enterprise-Grade** - Comprehensive logging, error handling, circuit breakers
 
-- 🤖 **Multi-Agent AI System** - Technical analysts, risk managers, and execution specialists
-- 📊 **Real-Time Analysis** - RSI, Moving Averages, Volume, Momentum calculations
-- 🛡️ **Risk Management** - Dynamic position sizing, stop-loss, take-profit
-- 🔄 **24/7 Trading** - Continuous market scanning and opportunity detection
-- 📈 **Position Monitoring** - Automatic trade management with trailing stops
-- 📉 **Performance Tracking** - Win rate, P&L, Sharpe ratio, drawdown metrics
+---
+
+## 🎯 System Architecture
+
+### **Trading Workflow:**
+```
+Market Scanner → Technical Analysis → Chief Analysis → Risk Assessment → Execution
+      ↓              ↓                    ↓                ↓                ↓
+  Top 50 by      Price/Volume         Opportunity      Position Size    Trade Order
+   Volume         Indicators           Scoring          Leverage         Placement
+```
+
+### **AI Agents:**
+1. **Technical Analyst** - Analyzes price action, volume, indicators
+2. **Chief Analyst** - Makes final BUY/SELL/HOLD decision with confidence
+3. **Risk Manager** - Determines position size, leverage, stop-loss, take-profit
+4. **Execution Specialist** - Executes trades and monitors positions
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-- Node.js 18+ and npm
-- PostgreSQL database (or Neon/Supabase)
+### **Prerequisites:**
+- Node.js 18+
+- PostgreSQL (Neon or Supabase)
+- Ollama with DeepSeek R1 32B
 - Aster DEX API credentials
-- Ollama (for local LLM) or OpenAI API key
 
-### 1. Clone & Install
+### **Installation:**
 
 ```bash
-git clone https://github.com/yourusername/manna-ai-arena.git
-cd manna-ai-arena
+# Clone the repository
+git clone <repository-url>
+cd Manna
+
+# Install dependencies
 npm install
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your credentials
+
+# Set up database
+npm run setup:database
+
+# Start the development server
+npm run dev
 ```
 
-### 2. Environment Setup
-
-Create `.env.local`:
+### **Environment Variables:**
 
 ```env
-# Aster DEX API (Required)
-ASTER_API_KEY=your_api_key_here
-ASTER_SECRET_KEY=your_secret_key_here
+# Aster DEX API
+ASTER_API_KEY=your_api_key
+ASTER_SECRET_KEY=your_secret_key
 ASTER_BASE_URL=https://fapi.asterdex.com
 
-# Database (Required)
+# Database
 DATABASE_URL=postgresql://user:password@host:5432/database
 
-# LLM Configuration (Choose one)
-# Option 1: Local Ollama (Recommended for cost)
+# Ollama (DeepSeek R1)
 OLLAMA_BASE_URL=http://localhost:11434
 
-# Option 2: OpenAI (Cloud-based, costs apply)
-# OPENAI_API_KEY=sk-...
-# USE_OPENAI=true
-
-# Cron Secret (For automated trading)
-CRON_SECRET=your_random_secret_here
-
-# Trading Configuration (Optional - defaults shown)
-TRADING_CONFIDENCE_THRESHOLD=0.25
-TRADING_MIN_BALANCE=10
+# Trading Configuration
+TRADING_CONFIDENCE_THRESHOLD=0.45
 TRADING_STOP_LOSS=3.0
 TRADING_TAKE_PROFIT=5.0
-```
+TRADING_MIN_BALANCE=5
 
-### 3. Database Setup
-
-```bash
-# The app will auto-create tables on first run
-# Or manually create them:
-npm run setup:db
-```
-
-### 4. Run Locally
-
-```bash
-# Development
-npm run dev
-
-# Production
-npm run build
-npm start
-```
-
-Visit `http://localhost:3000`
-
----
-
-## 🌐 Vercel Deployment
-
-### **IMPORTANT: LLM Configuration for Cloud Deployment**
-
-Since Ollama runs locally, you have 3 options for Vercel:
-
-#### Option 1: Use OpenAI API (Recommended for Vercel)
-```env
-# .env in Vercel
-OPENAI_API_KEY=sk-your-key-here
-USE_OPENAI=true
-```
-
-**Cost**: ~$0.002 per analysis (~$0.02-0.10 per day with moderate trading)
-
-#### Option 2: Deploy Ollama to Cloud
-- Deploy Ollama on a VPS (DigitalOcean, AWS EC2, etc.)
-- Expose via secure endpoint
-- Set `OLLAMA_BASE_URL=https://your-ollama-server.com`
-
-#### Option 3: Hybrid Approach
-- Use local Ollama for development
-- Switch to OpenAI for production Vercel deployment
-
-### Deploy to Vercel
-
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel
-
-# Set environment variables
-vercel env add ASTER_API_KEY
-vercel env add ASTER_SECRET_KEY
-vercel env add DATABASE_URL
-vercel env add OPENAI_API_KEY  # If using OpenAI
-vercel env add CRON_SECRET
-
-# Deploy to production
-vercel --prod
-```
-
-### 24/7 Trading with Vercel Cron
-
-Vercel has limitations for 24/7 processes, so we use **Vercel Cron Jobs**:
-
-#### 1. Add to `vercel.json`:
-```json
-{
-  "crons": [{
-    "path": "/api/cron/trading",
-    "schedule": "*/5 * * * *"
-  }]
-}
-```
-
-This runs trading analysis every 5 minutes.
-
-#### 2. Protect Cron Endpoint
-
-The endpoint checks for `CRON_SECRET`:
-
-```bash
-# Vercel will call:
-https://your-app.vercel.app/api/cron/trading?secret=YOUR_CRON_SECRET
-```
-
-#### 3. Alternative: External Cron Services
-
-For more control, use external cron services:
-
-**EasyCron** (Free tier available):
-```
-URL: https://your-app.vercel.app/api/cron/trading?secret=YOUR_SECRET
-Frequency: Every 5 minutes
-```
-
-**Uptime Robot** (Free):
-- Monitor endpoint + trigger trading
-- Interval: 5 minutes
-
----
-
-## 📊 How It Works
-
-### Trading Workflow
-
-1. **Market Scanning** - Scans all Aster DEX pairs for opportunities
-2. **Technical Analysis** - Calculates RSI, MA, volatility from real-time data
-3. **AI Decision** - Multi-agent system analyzes and makes BUY/SELL/HOLD decision
-4. **Risk Assessment** - Validates balance, confidence, position sizing
-5. **Trade Execution** - Places market order with retry logic
-6. **Position Monitoring** - Manages stop-loss, take-profit, trailing stops
-7. **Performance Tracking** - Records metrics and results
-
-### Multi-Agent System
-
-- **Technical Analyst** - Analyzes price action, indicators, patterns
-- **Chief Analyst** - Makes final trading decision based on all data
-- **Risk Manager** - Validates trade safety and position sizing
-- **Execution Specialist** - Handles order placement and timing
-
----
-
-## 🔒 Security Best Practices
-
-1. **Never commit `.env` files** - Keep API keys secret
-2. **Use read-only API keys** for testing (if available)
-3. **Start with small balance** - Test with $10-50 initially
-4. **Monitor actively** - Check positions regularly
-5. **Set stop-losses** - Always protect capital
-6. **Use strong secrets** - For CRON_SECRET, use long random strings
-
----
-
-## 📈 Performance & Risk
-
-### Conservative Settings (Default)
-- **Position Size**: 10-20% of balance
-- **Leverage**: 1-2x
-- **Stop Loss**: 3%
-- **Take Profit**: 5%
-- **Expected Win Rate**: 60%+
-
-### Aggressive Settings
-- **Position Size**: 20-30% of balance
-- **Leverage**: 2-3x
-- **Stop Loss**: 2-5% (adaptive)
-- **Take Profit**: 5-10% (adaptive)
-- **Expected Win Rate**: 65%+
-
-**Disclaimer**: Cryptocurrency trading involves significant risk. Past performance does not guarantee future results.
-
----
-
-## 🛠️ API Endpoints
-
-### Trading
-- `POST /api/multi-agent?action=start&symbol=BTCUSDT` - Start analysis
-- `GET /api/multi-agent?action=workflows` - Get workflow status
-- `GET /api/positions` - View open positions
-- `GET /api/performance` - Get performance metrics
-
-### Market Data
-- `GET /api/prices` - Real-time prices
-- `GET /api/agent-insights?limit=10` - AI insights
-
-### System
-- `GET /api/health` - Health check
-- `POST /api/cron/trading?secret=XXX` - Trigger trading cycle
-
----
-
-## 🧪 Testing
-
-```bash
-# Run tests
-npm test
-
-# Test trading workflow
-curl http://localhost:3000/api/multi-agent?action=start&symbol=BTCUSDT
-
-# Check positions
-curl http://localhost:3000/api/positions
-
-# View performance
-curl http://localhost:3000/api/performance
+# Enable 24/7 Trading
+ENABLE_24_7_AGENTS=true
+AGENT_RUNNER_INTERVAL=2
 ```
 
 ---
 
 ## 📝 Configuration
 
-Edit `lib/configService.ts` or use environment variables:
+### **Trading Parameters:**
+
+Edit `lib/configService.ts` to customize:
 
 ```typescript
-{
-  confidenceThreshold: 0.25,    // 25% minimum confidence
-  minBalanceForTrade: 10,       // $10 minimum balance
-  stopLossPercent: 3.0,         // 3% stop loss
-  takeProfitPercent: 5.0,       // 5% take profit
-  maxLeverage: 3,               // Max 3x leverage
-  positionSize: "10-30%",       // Based on confidence
+trading: {
+  confidenceThreshold: 0.45,  // Minimum confidence for trades
+  stopLossPercent: 3.0,        // Stop-loss %
+  takeProfitPercent: 5.0,      // Take-profit %
+  minBalanceForTrade: 5,       // Minimum balance ($5 or 5%)
+  
+  // Symbol Blacklist
+  blacklistedSymbols: [
+    'APEUSDT',
+    'APE/USDT'
+  ]
 }
 ```
+
+### **Agent Runner:**
+- Scans markets every **2 minutes**
+- Analyzes top **50 coins by volume**
+- Trades top **30 opportunities**
+- Maximum **3 concurrent workflows**
+
+---
+
+## 🛡️ Risk Management
+
+### **Position Sizing:**
+- **Kelly Criterion** - Optimal position size based on win rate and R:R
+- **Dynamic Minimum** - 5% of balance or $5 minimum
+- **Leverage Control** - 1-2x recommended, 20x maximum
+
+### **Exit Strategy:**
+- **Stop-Loss** - ATR-based, typically -3%
+- **Take-Profit** - Dynamic, typically +5-7%
+- **Trailing Stop** - Activates at +4-8% profit
+- **Time-Based** - Maximum 24-48 hour hold time
+
+### **Symbol Blacklist:**
+Prevents trading on specific symbols:
+- Protects against problematic pairs
+- Three-layer protection (scanner, runner, execution)
+- Configured in `lib/configService.ts`
+
+---
+
+## 📊 API Endpoints
+
+### **Trading:**
+- `GET /api/trading/status` - System status
+- `POST /api/trading/start` - Start trading
+- `POST /api/trading/stop` - Stop trading
+
+### **Positions:**
+- `GET /api/aster/positions` - Live positions
+- `GET /api/positions` - Database positions
+- `POST /api/positions` - Manage positions (force-close, trailing-stop)
+
+### **Data:**
+- `GET /api/agent-insights` - AI agent insights
+- `GET /api/optimized-data` - Market data
+- `GET /api/trades` - Trade history
+- `GET /api/performance` - Performance metrics
+
+### **System:**
+- `GET /api/startup` - Initialize services
+- `GET /api/health` - Health check
+- `POST /api/setup/database` - Database setup
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suite
+npm test -- components/ErrorBoundary.test.tsx
+
+# Run with coverage
+npm test -- --coverage
+```
+
+---
+
+## 📁 Project Structure
+
+```
+Manna/
+├── app/                    # Next.js application
+│   ├── api/                # API routes
+│   ├── layout.tsx          # Root layout
+│   └── page.tsx            # Main dashboard
+├── components/             # React components
+│   ├── NOF1Dashboard.tsx   # Main dashboard
+│   ├── EnhancedAIChat.tsx  # AI insights display
+│   ├── Positions.tsx       # Position management
+│   └── TradeJournal.tsx    # Trade history
+├── services/               # Trading services
+│   ├── agentCoordinator.ts # AI agent orchestration
+│   ├── agentRunnerService.ts # 24/7 trading runner
+│   ├── asterDexService.ts  # Exchange API
+│   ├── marketScannerService.ts # Market analysis
+│   └── positionMonitorService.ts # Position tracking
+├── lib/                    # Utilities
+│   ├── configService.ts    # Configuration
+│   ├── db.ts               # Database
+│   └── logger.ts           # Logging
+├── scripts/                # Setup scripts
+│   ├── create-trades-table.sql
+│   └── create-position-tables.sql
+└── types/                  # TypeScript types
+```
+
+---
+
+## 📈 Performance Tracking
+
+The system tracks comprehensive metrics:
+- **Win Rate** - Percentage of profitable trades
+- **Profit Factor** - Gross profit / gross loss
+- **Sharpe Ratio** - Risk-adjusted returns
+- **Max Drawdown** - Largest peak-to-trough decline
+- **Average P&L** - Per trade profitability
+- **Trade Duration** - Average hold time
+
+View performance at: `http://localhost:3000` (Performance section)
+
+---
+
+## 🔧 Troubleshooting
+
+### **System Won't Start:**
+```bash
+# Check Ollama is running
+ollama list
+
+# Restart Ollama
+ollama serve
+
+# Check database connection
+npm run test:db
+```
+
+### **No Trades Executing:**
+- Check confidence threshold (lower to 0.35-0.40 for more trades)
+- Verify minimum balance is met
+- Check logs for rejected opportunities
+- Ensure Agent Runner is active
+
+### **Position Monitor Errors:**
+- Clean test positions: `npm run clean:positions`
+- Verify symbol is not blacklisted
+- Check exchange API connectivity
+
+---
+
+## 📚 Documentation
+
+- **AI Models**: `docs/AI_MODELS_REFERENCE.md`
+- **Codebase Audit**: `COMPLETE_CODEBASE_AUDIT_2025.md`
+- **Blacklist Guide**: `APE_BLACKLIST_COMPLETE.md`
+- **Cleanup Report**: `CODEBASE_CLEANUP_COMPLETE.md`
 
 ---
 
 ## 🤝 Contributing
 
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
+This is a personal trading project. Contributions, issues, and feature requests are welcome!
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
+MIT License - See `LICENSE` file for details
 
 ---
 
 ## ⚠️ Disclaimer
 
-This software is for educational purposes. Cryptocurrency trading involves substantial risk of loss. The authors are not responsible for any financial losses incurred through use of this software. Always trade responsibly and only with funds you can afford to lose.
+**Trading cryptocurrencies carries substantial risk of loss.**
+
+This software is provided "as is" without warranty. The authors are not responsible for any financial losses incurred through the use of this system. Trade at your own risk.
 
 ---
 
 ## 🙏 Acknowledgments
 
-- Built with [Next.js](https://nextjs.org/)
-- AI powered by [Ollama](https://ollama.ai/) / [OpenAI](https://openai.com/)
-- Deployed on [Vercel](https://vercel.com/)
-- Trading on [Aster DEX](https://asterdex.com/)
+**All glory to God!**
+
+> *"For every house is built by someone, but God is the builder of everything."* - Hebrews 3:4
+
+Built with:
+- [DeepSeek R1](https://deepseek.com/) - Advanced AI model
+- [Next.js](https://nextjs.org/) - React framework
+- [Aster DEX](https://asterdex.com/) - Cryptocurrency exchange
+- [PostgreSQL](https://postgresql.org/) - Database
+- [Ollama](https://ollama.ai/) - Local LLM runtime
 
 ---
 
 ## 📞 Support
 
-- 📧 Email: your-email@example.com
-- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/manna-ai-arena/issues)
-- 💬 Discord: [Join Server](https://discord.gg/your-invite)
+For questions or support:
+- Create an issue on GitHub
+- Review documentation in `/docs`
+- Check `COMPLETE_CODEBASE_AUDIT_2025.md` for system details
 
 ---
 
-**Built with ❤️ and faith. "I can do all things through Christ who strengthens me." - Philippians 4:13** 🙏
+**Happy Trading! 🚀**
+
+*Remember: The system is a tool. Wisdom, prudence, and prayer are essential.*
+

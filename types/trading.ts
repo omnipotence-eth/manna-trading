@@ -53,6 +53,14 @@ export interface Trade {
   pnlPercent: number;
   leverage?: number;
   fee?: number;
+  entryReason?: string;
+  entryConfidence?: number;
+  entrySignals?: any;
+  entryMarketRegime?: string;
+  entryScore?: number;
+  exitReason?: string;
+  exitTimestamp?: string | null;
+  duration?: number;
 }
 
 export interface ModelStats {

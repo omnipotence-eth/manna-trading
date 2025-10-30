@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { StartupInitializer } from "@/components/StartupInitializer";
 
 export const metadata: Metadata = {
   title: "Manna AI Arena - Decentralized AI Trading Competition",
@@ -14,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
+        <StartupInitializer />
         {children}
       </body>
     </html>

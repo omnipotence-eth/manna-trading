@@ -11,7 +11,7 @@ const API_SECRET = process.env.ASTER_SECRET_KEY;
  * Places an order on Aster DEX (authenticated)
  */
 export async function POST(req: NextRequest) {
-  if (!API_KEY || !API_SECRET) {
+  if (!asterConfig.apiKey || !asterConfig.secretKey) {
     logger.error('Aster API credentials not configured', undefined, { context: 'AsterAPI' });
     return NextResponse.json(
       { error: 'API credentials not configured' },
@@ -30,67 +30,102 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Build order parameters
-    const orderParams: Record<string, string | number> = {
-      symbol: body.symbol.replace('/', ''), // Convert BTC/USDT to BTCUSDT
-      side: body.side, // BUY or SELL
-      type: body.type, // MARKET or LIMIT
-      quantity: body.quantity,
-    };
+    // Apply rate limiting and circuit breaker protection
+    return await withRateLimit(async () => {
+      return await circuitBreakers.asterApi.execute(async () => {
+        // Build order parameters
+        const orderParams: Record<string, string | number> = {
+          symbol: body.symbol.replace('/', ''), // Convert BTC/USDT to BTCUSDT
+          side: body.side, // BUY or SELL
+          type: body.type, // MARKET or LIMIT
+          quantity: body.quantity,
+        };
 
-    // Add price for LIMIT orders
-    if (body.type === 'LIMIT' && body.price) {
-      orderParams.price = body.price;
-      orderParams.timeInForce = body.timeInForce || 'GTC';
-    }
+        // Add price for LIMIT orders
+        if (body.type === 'LIMIT' && body.price) {
+          orderParams.price = body.price;
+          orderParams.timeInForce = body.timeInForce || 'GTC';
+        }
 
-    // Add leverage if specified
-    if (body.leverage) {
-      orderParams.leverage = body.leverage;
-    }
+        // Add leverage if specified
+        if (body.leverage) {
+          orderParams.leverage = body.leverage;
+        }
 
-    // Add reduceOnly flag for closing positions (Aster DEX API param)
-    if (body.reduceOnly === true) {
-      orderParams.reduceOnly = 'true';
-    }
+        // Build signed query with fresh timestamp FIRST
+        orderParams.timestamp = Date.now();
+        
+        // Add reduceOnly flag AFTER timestamp but BEFORE signing (Aster DEX API param)
+        if (body.reduceOnly === true) {
+          orderParams.reduceOnly = 'true';
+        }
+        
+        const queryString = await buildSignedQuery(orderParams, asterConfig.secretKey);
+        const url = `${asterConfig.baseUrl}/fapi/v1/order?${queryString}`;
 
-    // Build signed query with fresh timestamp
-    orderParams.timestamp = Date.now();
-    const queryString = await buildSignedQuery(orderParams, API_SECRET);
-    const url = `${ASTER_BASE_URL}/fapi/v1/order?${queryString}`;
+        logger.info('Placing Aster order', {
+          context: 'AsterAPI',
+          data: { symbol: body.symbol, side: body.side, type: body.type, quantity: body.quantity },
+        });
 
-    logger.info('Placing Aster order', {
-      context: 'AsterAPI',
-      data: { symbol: body.symbol, side: body.side, type: body.type, quantity: body.quantity },
-    });
+        // OPTIMIZED: Add timeout to prevent hanging requests
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'X-MBX-APIKEY': API_KEY,
-        'Content-Type': 'application/json',
-      },
-    });
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'X-MBX-APIKEY': asterConfig.apiKey,
+              'Content-Type': 'application/json',
+            },
+            signal: controller.signal,
+          });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('Aster API order placement failed', undefined, {
-        context: 'AsterAPI',
-        data: { status: response.status, error: errorText, params: orderParams },
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('Aster API order placement failed', undefined, {
+              context: 'AsterAPI',
+              data: { 
+                status: response.status, 
+                error: errorText, 
+                params: orderParams,
+                url: url.substring(0, 100) + '...' 
+              },
+            });
+            return NextResponse.json(
+              { 
+                error: `Aster API error: ${errorText}`,
+                status: response.status,
+                params: orderParams,
+                details: errorText
+              },
+              { status: response.status }
+            );
+          }
+
+          const data = await response.json();
+          logger.info('Successfully placed Aster order', {
+            context: 'AsterAPI',
+            data: { orderId: data.orderId, status: data.status },
+          });
+
+          return NextResponse.json(data);
+        } catch (error: any) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            logger.error('Order placement timeout', error, { context: 'AsterAPI' });
+            return NextResponse.json(
+              { error: 'Request timeout - order placement took too long' },
+              { status: 408 }
+            );
+          }
+          throw error;
+        }
       });
-      return NextResponse.json(
-        { error: `Aster API error: ${errorText}` },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
-    logger.info('Successfully placed Aster order', {
-      context: 'AsterAPI',
-      data: { orderId: data.orderId, status: data.status },
     });
-
-    return NextResponse.json(data);
   } catch (error: any) {
     logger.error('Failed to place Aster order', error, { context: 'AsterAPI' });
     return NextResponse.json(

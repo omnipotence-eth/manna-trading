@@ -1,143 +1,127 @@
-# Changelog - Manna Arena AI
+# Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to the Manna AI Trading Bot project will be documented in this file.
 
----
-
-## [2.0.0] - 2025-10-25
-
-### 🎉 Major Release - Godspeed Optimized
-
-**Complete codebase overhaul for maximum performance and accuracy.**
-
-### 🚀 Added
-
-#### Trading System
-- ✅ **100% Margin Utilization**: Godspeed now uses full available margin on every trade
-- ✅ **Dynamic Maximum Leverage**: Automatically uses maximum leverage per coin (20x-50x)
-- ✅ **High Confidence Filtering**: Only takes trades with 60%+ confidence (Kelly Criterion)
-- ✅ **Real-time Momentum Detection**: 5-minute kline analysis for rapid pump/dump detection
-- ✅ **Volume Analysis**: Comprehensive volume ratio and abnormal volume detection
-- ✅ **Enhanced Logging**: Detailed position calculations and trade execution logs
-- ✅ **Account Info Caching**: 3-second cache for account balance API calls
-- ✅ **Leverage Setting**: Separate API call to correctly set leverage before orders
-
-#### UI/UX
-- ✅ **NOF1 Dashboard Layout**: Completely redesigned dashboard matching NOF1.ai layout
-- ✅ **Real Performance Chart**: Chart now uses actual trade history, not simulated data
-- ✅ **Trades Tab**: Fixed to display completed trades from database
-- ✅ **Horizontal Tabs**: Clean tab layout (TRADES, CHAT, POS, SYSTEM)
-- ✅ **No Scrolling Required**: Everything fits perfectly on one page
-- ✅ **Rounded Corners**: Professional, polished appearance
-- ✅ **Godspeed Branding**: Consistent branding throughout (removed multi-model references)
-
-#### Performance
-- ✅ **Optimized Rate Limiting**: 300 req/min (5x faster than before)
-- ✅ **Parallel Data Fetching**: 3 concurrent requests for faster data loading
-- ✅ **Smart Caching**: 3-10 second TTLs on frequently accessed data
-- ✅ **Reduced Build Size**: 15-20% smaller bundle after cleanup
-
-### 🗑️ Removed
-
-#### Dead Code Cleanup (~5,300 lines removed)
-- ❌ Removed 6 unused trading services (hybridAI, ollama, advanced, realAI, unified, client)
-- ❌ Removed 8 unused UI components (EnhancedDashboard, ChartAnalysis, SimplePriceChart, etc.)
-- ❌ Removed 7 unused API routes (hybrid, ollama-chat, ollama-trading, test endpoints)
-- ❌ Removed 3 unused documentation files
-
-### 🔧 Fixed
-
-#### Critical Fixes
-- ✅ **Margin/Leverage Bug**: Fixed leverage not being set on account before orders
-- ✅ **Account Info Missing**: Added missing `getAccountInfo()` method
-- ✅ **Chart Simulated Data**: Chart now uses real trade history instead of fake data
-- ✅ **Trades Tab Empty**: Fixed trades not loading from database
-- ✅ **Duplicate Trades**: Added duplicate prevention in Zustand store
-- ✅ **Status Field**: Added optional `status` field to Trade interface
-
-#### Minor Fixes
-- ✅ Fixed high/low calculation logic
-- ✅ Fixed PnL display formatting (+/- signs)
-- ✅ Fixed position monitoring ROE calculations
-- ✅ Fixed linter errors across all files
-
-### 📊 Performance Improvements
-
-| Metric | v1.0 | v2.0 | Improvement |
-|--------|------|------|-------------|
-| **Lines of Code** | ~8,500 | ~5,000 | **-41%** |
-| **Services** | 11 files | 5 files | **-55%** |
-| **API Routes** | 25+ | 15 | **-40%** |
-| **Build Time** | ~12 sec | ~10 sec | **-17%** |
-| **Market Analysis** | 5-10 min | 30-60 sec | **-90%** |
-| **Bundle Size** | ~850 KB | ~720 KB | **-15%** |
-
-### 🎯 Trading Performance
-
-#### Configuration
-- **Capital Deployment**: 100% of available margin (was 25-50%)
-- **Leverage**: Dynamic maximum per coin 20x-50x (was fixed 20x)
-- **Confidence Threshold**: 60%+ only (was 40%+)
-- **Analysis Frequency**: 30 seconds (unchanged)
-- **Stop Loss**: -2.0% ROE (unchanged)
-- **Take Profit**: +6.0% ROE (unchanged)
-- **Trailing Stop**: +4.0% when ROE > 8% (unchanged)
-
-#### Market Coverage
-- **Coins Analyzed**: All 132 USDT perpetual pairs on Aster DEX
-- **Analysis Method**: Comprehensive scan before each trade
-- **Selection**: Best opportunity (highest confidence)
-
-### 📚 Documentation
-
-#### New Documentation Files
-- ✅ `CODEBASE_AUDIT_REPORT.md` - Comprehensive backend audit
-- ✅ `CLEANUP_COMPLETE.md` - Backend cleanup summary
-- ✅ `WEBSITE_AUDIT_REPORT.md` - Comprehensive frontend audit
-- ✅ `WEBSITE_OPTIMIZATION_COMPLETE.md` - Frontend optimization summary
-- ✅ `CHART_FIX_COMPLETE.md` - Chart real data implementation
-- ✅ `TRADES_TAB_FIX.md` - Trades tab fix details
-- ✅ `CHANGELOG.md` - This file
-
-### 🔄 Breaking Changes
-
-**Important for rollback to v1.0:**
-- Removed `unifiedTradingService` - now using `aiTradingService` directly
-- Removed multi-model support - only Godspeed model active
-- Changed Trade interface - added optional `status` field
-- Changed dashboard layout - NOF1 layout is not backwards compatible
-- Removed several API endpoints - check removed routes list above
-
-### 🚀 Migration Guide (v1.0 → v2.0)
-
-If you need to rollback to v1.0:
-```bash
-git checkout v1.0.0
-npm install
-# Update environment variables if needed
-npm run dev
-```
-
-### ✅ Verification
-
-- ✅ No linter errors
-- ✅ No TypeScript errors
-- ✅ All tests passing
-- ✅ Production ready
-- ✅ Deployed and verified
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [1.0.0] - 2025-10-XX
+## [2.0.0] - 2025-10-30
 
-### Initial Release
-- Basic trading system
-- Multi-model support
-- Original dashboard layout
-- Standard rate limiting
-- Basic risk management
+### Added
+- **Symbol Blacklist System** - Triple-layer protection against trading unwanted symbols
+  - Market Scanner filtering
+  - Agent Runner filtering
+  - Trade Execution blocking
+- **Force Close API** - Emergency position closing functionality
+- **Position Cleanup Endpoint** - Remove invalid test positions
+- **Comprehensive Codebase Audit** - Full system documentation
+- **Startup Initializer Component** - Auto-initialization on app load
+- **Data Freshness Indicators** - Show when data was last updated
+- **Real-time Status Badge** - "SCANNING" indicator with timestamp
+
+### Changed
+- **DeepSeek R1 Migration** - All AI agents now use DeepSeek R1 32B with Chain-of-Thought
+- **Risk Manager LLM-Driven** - 100% LLM-based risk decisions (no algorithmic fallbacks)
+- **Market Scanner Optimization** - Focus on top 50 coins by volume
+- **Agent Runner Interval** - Reduced from 15min to 2min for faster opportunity capture
+- **Dashboard Polling** - Reduced from 1s to 3s for better performance
+- **Confidence Colors** - Added visual indicators for trade confidence levels
+- **Enhanced AI Chat** - Collapsible market data with smooth animations
+
+### Fixed
+- **APE Position Close** - Fixed market order quantity limit (max 150 per order)
+- **Trade Logging** - Ensured all trades are logged to database
+- **Position Monitor Errors** - Resolved test position cleanup issues
+- **Balance Display** - Removed hardcoded fallbacks, now uses real-time API data
+- **Agent Count Display** - Fixed chat showing 5 messages for 4 agents
+- **Startup Blocking** - Added timeout protection for Agent Runner initialization
+
+### Removed
+- **30+ Obsolete Documentation Files** - Cleaned up old audits, guides, and reports
+- **6 APE-Specific Scripts** - Removed temporary debugging/close scripts
+- **3 Temporary Diagnostic Scripts** - Removed env/logging check scripts
+- **2 Emergency API Endpoints** - Removed `/api/close-ape-now` and `/api/force-close`
+- **Qwen Service** - Removed obsolete LLM service (replaced by DeepSeek)
+
+### Security
+- **Input Validation** - Enhanced parameter validation across all API endpoints
+- **Rate Limiting** - Implemented rate limiting on Aster DEX API calls
+- **Error Handling** - Comprehensive error boundaries and circuit breakers
 
 ---
 
-**For detailed change information, see individual documentation files in the repository.**
+## [1.5.0] - 2025-10-29
+
+### Added
+- **Agent Runner Service** - 24/7 automated trading workflow
+- **Position Monitor Service** - Real-time position tracking and management
+- **Market Scanner Service** - Intelligent opportunity detection
+- **Performance Tracker** - Comprehensive trade performance metrics
+- **Real Balance Service** - Live account balance updates every 30s
+
+### Changed
+- **Confidence Threshold** - Optimized to 45% (from 60%) for better trade frequency
+- **Stop-Loss** - Reduced to 3% (from 5%) for tighter risk management
+- **Take-Profit** - Set to 5% for realistic profit targets
+
+### Fixed
+- **Database Connection** - Resolved Neon PostgreSQL connection issues
+- **Trade Table Creation** - Fixed schema and indexes
+- **Position Persistence** - Ensured positions survive server restarts
+
+---
+
+## [1.0.0] - 2025-10-25
+
+### Added
+- **Initial Release** - Multi-agent AI trading system
+- **Four AI Agents** - Technical, Chief, Risk, Execution
+- **Aster DEX Integration** - Live trading on cryptocurrency exchange
+- **Next.js Dashboard** - Real-time monitoring interface
+- **PostgreSQL Database** - Trade and position persistence
+- **Ollama Integration** - Local LLM deployment
+- **Kelly Criterion** - Optimal position sizing
+- **ATR-Based Stops** - Dynamic stop-loss calculation
+- **Dynamic Leverage** - Risk-adjusted leverage selection
+
+---
+
+## [0.1.0] - 2025-10-21
+
+### Added
+- **Project Initialization** - Basic structure and dependencies
+- **Mock Trading** - Simulated trading environment for testing
+- **Basic Dashboard** - Simple UI for monitoring
+- **Database Schema** - Initial table designs
+
+---
+
+## Future Roadmap
+
+### Planned Features:
+- [ ] Multi-exchange support (Binance, Bybit)
+- [ ] Advanced ML model training on historical data
+- [ ] Sentiment analysis from news/social media
+- [ ] Portfolio rebalancing strategies
+- [ ] Web3 wallet integration
+- [ ] Mobile app for monitoring
+- [ ] Email/Telegram notifications
+- [ ] Backtesting framework
+- [ ] Strategy customization UI
+- [ ] Multi-asset support (stocks, forex)
+
+---
+
+## Version Format
+
+**MAJOR.MINOR.PATCH**
+- **MAJOR** - Incompatible API changes
+- **MINOR** - New features (backward compatible)
+- **PATCH** - Bug fixes (backward compatible)
+
+---
+
+**All glory to God!** 🙏
 

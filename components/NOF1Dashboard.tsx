@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import ModelChat from './ModelChat';
@@ -24,16 +24,17 @@ export default function NOF1Dashboard() {
   const updatePosition = useStore((state) => state.updatePosition);
   const addTrade = useStore((state) => state.addTrade);
   const addModelMessage = useStore((state) => state.addModelMessage);
-  const initRef = useRef(false);
+  // OPTIMIZED: useRef for isMounted flag (better than let variable)
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
     if (initRef.current) return;
     initRef.current = true;
     
-    let isMounted = true;
+    isMountedRef.current = true;
 
     const updateData = async () => {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       
       const timer = frontendPerformanceMonitor.startComponentTimer('NOF1Dashboard:updateData');
       
@@ -47,7 +48,7 @@ export default function NOF1Dashboard() {
         if (cachedAccountData) {
           frontendLogger.debug('Using cached account data', { component: 'NOF1Dashboard' });
           const { accountValue, positions } = cachedAccountData;
-          if (isMounted) {
+          if (isMountedRef.current) {
             setAccountValue(accountValue);
             if (positions && Array.isArray(positions) && positions.length > 0) {
               positions.forEach((position: any) => {
@@ -65,7 +66,7 @@ export default function NOF1Dashboard() {
           
           if (accountResponse.ok) {
             const data = await accountResponse.json();
-            if (isMounted && data.success) {
+            if (isMountedRef.current && data.success) {
               const { accountValue, positions } = data.data;
               setAccountValue(accountValue);
               if (positions && Array.isArray(positions) && positions.length > 0) {
@@ -87,7 +88,7 @@ export default function NOF1Dashboard() {
         
         if (cachedTradesData) {
           frontendLogger.debug('Using cached trades data', { component: 'NOF1Dashboard' });
-          if (isMounted) {
+          if (isMountedRef.current) {
             cachedTradesData.trades.forEach((trade: any) => {
               addTrade(trade);
             });
@@ -100,7 +101,7 @@ export default function NOF1Dashboard() {
           
           if (tradesResponse.ok) {
             const tradesData = await tradesResponse.json();
-            if (isMounted && tradesData.success && tradesData.trades) {
+            if (isMountedRef.current && tradesData.success && tradesData.trades) {
               tradesData.trades.forEach((trade: any) => {
                 addTrade(trade);
               });
@@ -116,7 +117,7 @@ export default function NOF1Dashboard() {
         
         if (cachedMessagesData) {
           frontendLogger.debug('Using cached messages data', { component: 'NOF1Dashboard' });
-          if (isMounted) {
+          if (isMountedRef.current) {
             cachedMessagesData.messages.forEach((message: any) => {
               addModelMessage(message);
             });
@@ -129,7 +130,7 @@ export default function NOF1Dashboard() {
           
           if (messagesResponse.ok) {
             const messagesData = await messagesResponse.json();
-            if (isMounted && messagesData.success && messagesData.messages) {
+            if (isMountedRef.current && messagesData.success && messagesData.messages) {
               messagesData.messages.forEach((message: any) => {
                 addModelMessage(message);
               });
@@ -150,21 +151,21 @@ export default function NOF1Dashboard() {
       }
     };
 
-    // Start data updates every 250ms for ultra real-time updates
+    // Start data updates every 3 seconds for real-time updates (optimized)
     updateData();
-    const dataIntervalId = setInterval(updateData, 1000); // 1x per second (reduced from 250ms)
+    const dataIntervalId = setInterval(updateData, 3000); // Every 3 seconds (optimized from 1s)
 
     // 🤖 GODSPEED AUTO-TRADING: Trigger trading cycle every 60 seconds
     // This ensures 24/7 trading even if Vercel cron fails
     let tradingCycleCount = 0;
     const runTradingCycle = async () => {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       
       const timer = frontendPerformanceMonitor.startComponentTimer('NOF1Dashboard:tradingCycle');
       
       try {
         tradingCycleCount++;
-        frontendLogger.info(`Godspeed Auto-Trading Cycle #${tradingCycleCount} starting`, {
+        frontendLogger.info(`Multi-Agent Auto-Trading Cycle #${tradingCycleCount} starting`, {
           component: 'NOF1Dashboard',
           data: { cycleNumber: tradingCycleCount }
         });
@@ -176,7 +177,7 @@ export default function NOF1Dashboard() {
         
         if (response.ok) {
           const data = await response.json();
-          frontendLogger.info(`Godspeed cycle #${tradingCycleCount} completed`, {
+          frontendLogger.info(`Multi-Agent cycle #${tradingCycleCount} completed`, {
             component: 'NOF1Dashboard',
             data: {
               cycleNumber: tradingCycleCount,
@@ -201,41 +202,54 @@ export default function NOF1Dashboard() {
     const tradingIntervalId = setInterval(runTradingCycle, 30000); // Every 30 seconds
 
     return () => {
-      isMounted = false;
+      isMountedRef.current = false;
       clearInterval(dataIntervalId);
       clearInterval(tradingIntervalId);
     };
   }, [setAccountValue, updatePosition, addTrade, addModelMessage]);
 
-  // Calculate real PnL and account metrics
-  const totalPnL = positions.reduce((sum, pos) => sum + (pos.pnl || 0), 0);
-  const pnlPercent = accountValue > 0 ? (totalPnL / accountValue) * 100 : 0;
-  
-  // Calculate real high/low from completed trades
-  // All trades from database are completed (no status field needed)
-  const completedTrades = trades.filter(t => !t.status || t.status === 'completed');
-  let highestValue = accountValue;
-  let lowestValue = accountValue;
-  
-  if (completedTrades.length > 0) {
-    // Calculate cumulative account value at each trade
-    let runningBalance = accountValue;
-    completedTrades.forEach(trade => {
-      runningBalance -= trade.pnl; // Go backwards
-    });
+  // OPTIMIZED: Memoize expensive calculations
+  const dashboardMetrics = useMemo(() => {
+    const totalPnL = positions.reduce((sum, pos) => sum + (pos.pnl || 0), 0);
+    const pnlPercent = accountValue > 0 ? (totalPnL / accountValue) * 100 : 0;
     
-    // Now go forward
-    let currentMax = runningBalance;
-    let currentMin = runningBalance;
-    completedTrades.forEach(trade => {
-      runningBalance += trade.pnl;
-      currentMax = Math.max(currentMax, runningBalance);
-      currentMin = Math.min(currentMin, runningBalance);
-    });
+    // Calculate real high/low from completed trades
+    const completedTrades = trades.filter(t => !t.status || t.status === 'completed');
+    let highestValue = accountValue;
+    let lowestValue = accountValue;
     
-    highestValue = currentMax;
-    lowestValue = currentMin;
-  }
+    if (completedTrades.length > 0) {
+      // Calculate cumulative account value at each trade
+      let runningBalance = accountValue;
+      completedTrades.forEach(trade => {
+        runningBalance -= trade.pnl; // Go backwards
+      });
+      
+      // Now go forward
+      let currentMax = runningBalance;
+      let currentMin = runningBalance;
+      completedTrades.forEach(trade => {
+        runningBalance += trade.pnl;
+        currentMax = Math.max(currentMax, runningBalance);
+        currentMin = Math.min(currentMin, runningBalance);
+      });
+      
+      highestValue = currentMax;
+      lowestValue = currentMin;
+    }
+    
+    return { totalPnL, pnlPercent, highestValue, lowestValue, completedTrades };
+  }, [positions, accountValue, trades]);
+
+  // OPTIMIZED: Memoize displayed trades (slice + reverse)
+  const displayedTrades = useMemo(() => {
+    return trades.slice(-10).reverse();
+  }, [trades]);
+
+  // OPTIMIZED: Memoize tab change handler
+  const handleTabChange = useCallback((tab: 'trades' | 'chat' | 'positions' | 'readme') => {
+    setActiveTab(tab);
+  }, []);
 
   return (
     <div className="h-full overflow-hidden relative">
@@ -287,18 +301,18 @@ export default function NOF1Dashboard() {
                 <div className="text-xl font-bold text-green-400">
                   ${accountValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-                <div className={`text-lg font-bold ${pnlPercent >= 0 ? 'text-green-400' : 'text-red-500'}`}>
-                  {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+                <div className={`text-lg font-bold ${dashboardMetrics.pnlPercent >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+                  {dashboardMetrics.pnlPercent >= 0 ? '+' : ''}{dashboardMetrics.pnlPercent.toFixed(2)}%
                 </div>
               </div>
               <div className="flex gap-4 text-xs">
                 <div>
                   <span className="text-green-400/60 uppercase">24h High: </span>
-                  <span className="text-green-400 font-bold">${highestValue.toFixed(2)}</span>
+                  <span className="text-green-400 font-bold">${dashboardMetrics.highestValue.toFixed(2)}</span>
                 </div>
                 <div>
                   <span className="text-green-400/60 uppercase">24h Low: </span>
-                  <span className="text-red-500 font-bold">${lowestValue.toFixed(2)}</span>
+                  <span className="text-red-500 font-bold">${dashboardMetrics.lowestValue.toFixed(2)}</span>
                 </div>
                 <div>
                   <span className="text-green-400/60 uppercase">Open Positions: </span>
@@ -317,7 +331,7 @@ export default function NOF1Dashboard() {
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-400/60 to-transparent animate-pulse"></div>
             
             <button
-              onClick={() => setActiveTab('trades')}
+              onClick={() => handleTabChange('trades')}
               className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all relative ${
                 activeTab === 'trades'
                   ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
@@ -327,7 +341,7 @@ export default function NOF1Dashboard() {
               TRADES
             </button>
             <button
-              onClick={() => setActiveTab('chat')}
+              onClick={() => handleTabChange('chat')}
               className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all ${
                 activeTab === 'chat'
                   ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
@@ -337,7 +351,7 @@ export default function NOF1Dashboard() {
               CHAT
             </button>
             <button
-              onClick={() => setActiveTab('positions')}
+              onClick={() => handleTabChange('positions')}
               className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all ${
                 activeTab === 'positions'
                   ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
@@ -347,7 +361,7 @@ export default function NOF1Dashboard() {
               POS
             </button>
             <button
-              onClick={() => setActiveTab('readme')}
+              onClick={() => handleTabChange('readme')}
               className={`flex-1 px-2 py-1.5 text-xs font-bold uppercase tracking-tight border-r border-green-400/30 transition-all ${
                 activeTab === 'readme'
                   ? 'bg-green-400/10 text-green-400 border-b-2 border-b-green-400'
@@ -383,7 +397,8 @@ export default function NOF1Dashboard() {
                   className="flex-1 overflow-y-auto space-y-2 px-3 py-2"
                 >
                   {/* Trade List Items - Full Details */}
-                  {trades.slice(-10).reverse().map((trade) => (
+                  {/* OPTIMIZED: Use memoized displayedTrades */}
+                  {displayedTrades.map((trade) => (
                     <div key={trade.id} className="p-3 border border-green-500/20 rounded hover:border-green-500/40 transition-all bg-black/20">
                       {/* Header */}
                       <div className="flex items-center justify-between mb-2">
@@ -498,7 +513,7 @@ export default function NOF1Dashboard() {
                       </div>
                       <div className="flex justify-between items-center">
                         <span className="text-green-400/60">Completed Trades</span>
-                        <span className="text-green-400 font-bold">{completedTrades.length}</span>
+                        <span className="text-green-400 font-bold">{dashboardMetrics.completedTrades.length}</span>
                       </div>
                     </div>
                     

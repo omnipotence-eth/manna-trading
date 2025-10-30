@@ -28,16 +28,21 @@ export class AgentRunnerService {
   constructor() {
     this.config = {
       symbols: [], // Will be populated from Aster API
-      intervalMinutes: 15, // Run every 15 minutes
-      maxConcurrentWorkflows: 3,
-      enabled: true,
+      intervalMinutes: asterConfig.trading.agentRunnerInterval || 2, // OPTIMIZED: 2 minutes for faster response
+      maxConcurrentWorkflows: asterConfig.trading.maxConcurrentWorkflows || 3,
+      enabled: asterConfig.trading.enable24_7Agents !== false,
       focusOnHighVolume: true,
       minVolumeThreshold: 1000000 // 1M USDT minimum volume
     };
 
-    logger.info('Agent Runner Service initialized', {
+    logger.info('🚀 Agent Runner Service initialized (OPTIMIZED)', {
       context: 'AgentRunner',
-      config: this.config
+      config: {
+        intervalMinutes: this.config.intervalMinutes,
+        maxConcurrentWorkflows: this.config.maxConcurrentWorkflows,
+        enabled: this.config.enabled,
+        focusOnHighVolume: this.config.focusOnHighVolume
+      }
     });
   }
 
@@ -50,30 +55,38 @@ export class AgentRunnerService {
       
       const exchangeInfo = await asterDexService.getExchangeInfo();
       
+      // Get blacklist from config
+      const { asterConfig } = await import('@/lib/configService');
+      const blacklist = asterConfig.trading.blacklistedSymbols || [];
+
       if (this.config.focusOnHighVolume) {
-        // Filter for high volume pairs
+        // Filter for high volume pairs (excluding blacklist)
         const highVolumeSymbols = exchangeInfo.topVolumeSymbols
           .filter((symbol: any) => symbol.quoteVolume24h >= this.config.minVolumeThreshold)
-          .map((symbol: any) => symbol.symbol.replace('USDT', '/USDT')); // Convert BTCUSDT to BTC/USDT
+          .map((symbol: any) => symbol.symbol.replace('USDT', '/USDT')) // Convert BTCUSDT to BTC/USDT
+          .filter((symbol: string) => !blacklist.includes(symbol) && !blacklist.includes(symbol.replace('/', '')));
         
         this.config.symbols = highVolumeSymbols;
         
-        logger.info('Updated symbols to high volume pairs', {
+        logger.info('Updated symbols to high volume pairs (excluding blacklist)', {
           context: 'AgentRunner',
           symbolCount: this.config.symbols.length,
           symbols: this.config.symbols.slice(0, 10), // Log first 10
-          minVolume: this.config.minVolumeThreshold
+          minVolume: this.config.minVolumeThreshold,
+          blacklisted: blacklist.length
         });
       } else {
-        // Use all available symbols
+        // Use all available symbols (excluding blacklist)
         const allSymbols = exchangeInfo.symbols
-          .map((symbol: any) => symbol.symbol.replace('USDT', '/USDT'));
+          .map((symbol: any) => symbol.symbol.replace('USDT', '/USDT'))
+          .filter((symbol: string) => !blacklist.includes(symbol) && !blacklist.includes(symbol.replace('/', '')));
         
         this.config.symbols = allSymbols;
         
-        logger.info('Updated symbols to all available pairs', {
+        logger.info('Updated symbols to all available pairs (excluding blacklist)', {
           context: 'AgentRunner',
-          symbolCount: this.config.symbols.length
+          symbolCount: this.config.symbols.length,
+          blacklisted: blacklist.length
         });
       }
       
@@ -93,11 +106,18 @@ export class AgentRunnerService {
       return;
     }
 
-    // Update symbols before starting
-    await this.updateSymbols();
+    try {
+      // Update symbols before starting (with timeout)
+      logger.info('Fetching symbols from Aster DEX...', { context: 'AgentRunner' });
+      await this.updateSymbols();
+      logger.info(`Loaded ${this.config.symbols.length} trading symbols`, { context: 'AgentRunner' });
+    } catch (error) {
+      logger.error('Failed to load symbols, will retry on first cycle', error as Error, { context: 'AgentRunner' });
+      // Continue anyway - will retry in runTradingCycle
+    }
 
     this.isRunning = true;
-    logger.info('Starting 24/7 Agent Runner', {
+    logger.info('✅ 24/7 Agent Runner STARTED', {
       context: 'AgentRunner',
       symbols: this.config.symbols.slice(0, 10), // Log first 10
       totalSymbols: this.config.symbols.length,
@@ -112,8 +132,10 @@ export class AgentRunnerService {
       });
     }, this.config.intervalMinutes * 60 * 1000);
 
-    // Run immediately
-    await this.runTradingCycle();
+    // Run first cycle in background (don't await)
+    this.runTradingCycle().catch(error => {
+      logger.error('Error in first trading cycle', error, { context: 'AgentRunner' });
+    });
   }
 
   /**
@@ -140,25 +162,13 @@ export class AgentRunnerService {
 
   /**
    * Run a complete trading cycle for all symbols
+   * OPTIMIZED: Uses market scanner to find best opportunities instead of trading fixed symbols
    */
   private async runTradingCycle(): Promise<void> {
     if (!this.config.enabled) {
       logger.debug('Agent Runner is disabled', { context: 'AgentRunner' });
       return;
     }
-
-    // Check if we need to update symbols (every 24 hours)
-    if (Date.now() - this.lastSymbolUpdate > this.symbolUpdateInterval) {
-      await this.updateSymbols();
-    }
-
-    logger.info('Starting trading cycle', {
-      context: 'AgentRunner',
-      symbols: this.config.symbols.slice(0, 10), // Log first 10
-      totalSymbols: this.config.symbols.length,
-      activeWorkflows: this.activeWorkflows.size,
-      maxConcurrent: this.config.maxConcurrentWorkflows
-    });
 
     // Clean up completed workflows
     this.cleanupCompletedWorkflows();
@@ -173,13 +183,99 @@ export class AgentRunnerService {
       return;
     }
 
-    // Start workflows for symbols that don't have active workflows
-    const availableSlots = this.config.maxConcurrentWorkflows - this.activeWorkflows.size;
-    const symbolsToProcess = this.config.symbols.slice(0, availableSlots);
+    logger.info('🔍 Running market scan to find best opportunities', {
+      context: 'AgentRunner',
+      activeWorkflows: this.activeWorkflows.size,
+      maxConcurrent: this.config.maxConcurrentWorkflows
+    });
 
-    for (const symbol of symbolsToProcess) {
-      if (!this.activeWorkflows.has(symbol)) {
-        await this.startWorkflowForSymbol(symbol);
+    // OPTIMIZED: Use market scanner to find best opportunities
+    try {
+      const { marketScannerService } = await import('./marketScannerService');
+      const scanResult = await marketScannerService.scanMarkets();
+      
+      logger.info('✅ Market scan completed', {
+        context: 'AgentRunner',
+        totalSymbols: scanResult.totalSymbols,
+        opportunities: scanResult.opportunities.length,
+        volumeSpikes: scanResult.volumeSpikes.length,
+        bestOpportunity: scanResult.bestOpportunity?.symbol
+      });
+
+      // OPTIMIZED: Get ONLY the BEST opportunities (ultra-selective for profitability)
+      // Increased thresholds for higher win rate
+      const topOpportunities = scanResult.opportunities
+        .filter(opp => opp.score >= 80) // Only STRONG_BUY (was 70)
+        .filter(opp => opp.confidence >= 0.65) // Confidence >= 65% (was 35%)
+        .filter(opp => opp.recommendation === 'STRONG_BUY') // Only STRONG_BUY recommendations
+        .filter(opp => {
+          // Additional quality filters - STRICT for execution safety
+          const volumeStrength = (opp as any).volumeStrength || 0;
+          const liquidityScore = (opp as any).liquidityScore || 0;
+          const quoteVolume = (opp as any).marketData?.quoteVolume24h || 0;
+          const spread = (opp as any).marketData?.spread || 999;
+          
+          // CRITICAL: Enforce minimum liquidity to prevent COSMO/APE issues
+          const hasMinimumLiquidity = quoteVolume >= 500000; // Minimum $500K quote volume
+          const hasReasonableSpread = spread < 0.5; // Spread < 0.5%
+          
+          return volumeStrength > 0.6 && 
+                 liquidityScore > 0.7 && 
+                 hasMinimumLiquidity &&
+                 hasReasonableSpread; // High volume + high liquidity + execution safety
+        })
+        .slice(0, this.config.maxConcurrentWorkflows); // Limit to max concurrent
+      
+      if (topOpportunities.length === 0) {
+        logger.info('No ULTRA-HIGH-QUALITY opportunities found (score >= 80, confidence >= 65%, STRONG_BUY only, volume >60%, liquidity >70%)', {
+          context: 'AgentRunner',
+          totalOpportunities: scanResult.opportunities.length,
+          topScore: scanResult.bestOpportunity?.score || 0,
+          topConfidence: scanResult.bestOpportunity?.confidence || 0,
+          message: 'Being ultra-selective for maximum profitability - waiting for perfect setups'
+        });
+        return;
+      }
+
+      logger.info(`🎯 Found ${topOpportunities.length} ULTRA-HIGH-QUALITY opportunities (STRONG_BUY only, score >=80, confidence >=65%)`, {
+        context: 'AgentRunner',
+        opportunities: topOpportunities.map(opp => ({
+          symbol: opp.symbol,
+          score: opp.score,
+          confidence: (opp.confidence * 100).toFixed(0) + '%',
+          recommendation: opp.recommendation,
+          volumeStrength: ((opp as any).volumeStrength * 100).toFixed(0) + '%',
+          liquidityScore: ((opp as any).liquidityScore * 100).toFixed(0) + '%'
+        }))
+      });
+
+      // Start workflows for top opportunities that don't have active workflows
+      const availableSlots = this.config.maxConcurrentWorkflows - this.activeWorkflows.size;
+      const opportunitiesToTrade = topOpportunities.slice(0, availableSlots);
+
+      for (const opportunity of opportunitiesToTrade) {
+        const symbol = opportunity.symbol.replace('USDT', '/USDT'); // Convert format
+        if (!this.activeWorkflows.has(symbol)) {
+          logger.info(`💼 Starting workflow for opportunity: ${symbol}`, {
+            context: 'AgentRunner',
+            score: opportunity.score,
+            confidence: (opportunity.confidence * 100).toFixed(0) + '%',
+            signals: opportunity.signals.slice(0, 3)
+          });
+          await this.startWorkflowForSymbol(symbol);
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to run market scan', error, {
+        context: 'AgentRunner'
+      });
+      // Fallback to default symbols if scanner fails
+      const availableSlots = this.config.maxConcurrentWorkflows - this.activeWorkflows.size;
+      const symbolsToProcess = this.config.symbols.slice(0, availableSlots);
+      for (const symbol of symbolsToProcess) {
+        if (!this.activeWorkflows.has(symbol)) {
+          await this.startWorkflowForSymbol(symbol);
+        }
       }
     }
   }

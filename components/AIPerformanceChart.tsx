@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 
@@ -124,6 +124,11 @@ export default function AIPerformanceChart() {
     return points;
   }
 
+  // OPTIMIZED: Memoize expensive equity curve calculation
+  const equityCurveData = useMemo(() => {
+    return buildRealEquityCurve(trades, accountValue, timeRange);
+  }, [trades, accountValue, timeRange]);
+
   useEffect(() => {
     // Update with real trading data from store
     setIsLoading(true);
@@ -138,16 +143,14 @@ export default function AIPerformanceChart() {
     const totalTradeCount = completedTrades.length;
     
     // Build real equity curve from actual trade history
-    const realData = buildRealEquityCurve(trades, accountValue, timeRange);
-    
     const currentValue = accountValue;
-    const startValue = realData[0]?.value || accountValue;
+    const startValue = equityCurveData[0]?.value || accountValue;
     const change = startValue > 0 ? ((currentValue - startValue) / startValue) * 100 : 0;
     
     setModelsPerformance([{
       name: 'Godspeed',
       color: '#00ff41',
-      data: realData,
+      data: equityCurveData,
       currentValue,
       change,
       winRate: realWinRate,
@@ -155,7 +158,7 @@ export default function AIPerformanceChart() {
     }]);
     
     setIsLoading(false);
-  }, [timeRange, accountValue, trades]);
+  }, [timeRange, accountValue, trades, equityCurveData]);
 
   // Calculate chart dimensions and scales - Smaller for better fit
   const chartWidth = 1200; // Base width for full-screen chart
@@ -202,8 +205,8 @@ export default function AIPerformanceChart() {
   const getX = (timestamp: number) => padding.left + ((timestamp - minTime) / timeRange_ms) * innerWidth;
   const getY = (value: number) => padding.top + innerHeight - ((value - minValue) / valueRange) * innerHeight;
 
-  // Handle mouse interaction - only show tooltip when near the line
-  const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
+  // OPTIMIZED: Memoize event handlers
+  const handleMouseMove = useCallback((event: React.MouseEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
@@ -254,11 +257,11 @@ export default function AIPerformanceChart() {
     } else {
       setHoveredPoint(null);
     }
-  };
+  }, [modelsPerformance, padding, innerWidth, innerHeight, minTime, timeRange_ms, getY]);
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
     setHoveredPoint(null);
-  };
+  }, []);
 
   // Generate SVG path for a model
   const generatePath = (data: ChartDataPoint[]) => {

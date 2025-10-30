@@ -148,13 +148,13 @@ class OptimizedDataService {
             id: symbol,
             symbol: symbol,
             side: side,
-            size: size,
-            entryPrice: entryPrice,
-            currentPrice: currentPrice,
-            pnl: pnl,
-            pnlPercent: pnlPercent,
-            leverage: leverage,
-            model: 'DeepSeek R1',
+            size: isNaN(size) ? 0 : size,
+            entryPrice: isNaN(entryPrice) ? 0 : entryPrice,
+            currentPrice: isNaN(currentPrice) ? 0 : currentPrice,
+            pnl: isNaN(pnl) ? 0 : pnl,
+            pnlPercent: isNaN(pnlPercent) ? 0 : pnlPercent,
+            leverage: isNaN(leverage) ? 1 : leverage,
+            model: 'Multi-Agent AI',
           };
         }));
       }
@@ -235,10 +235,10 @@ class OptimizedDataService {
         const positions = data.map((pos: any) => ({
           symbol: pos.symbol.replace('USDT', '/USDT'),
           side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
-          size: Math.abs(parseFloat(pos.positionAmt)),
-          entryPrice: parseFloat(pos.entryPrice),
-          leverage: parseInt(pos.leverage),
-          unrealizedPnl: parseFloat(pos.unRealizedProfit),
+          size: Math.abs(parseFloat(pos.positionAmt) || 0),
+          entryPrice: parseFloat(pos.entryPrice) || 0,
+          leverage: parseInt(pos.leverage) || 1,
+          unrealizedPnl: parseFloat(pos.unRealizedProfit) || 0,
         }));
         
         logger.debug('Positions from API', { 
