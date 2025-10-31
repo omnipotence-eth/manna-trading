@@ -65,16 +65,27 @@ class RealBalanceService {
     try {
       logger.debug('Fetching real balance from AsterDEX', { context: 'RealBalance' });
 
+      // CRITICAL FIX: Use account API endpoint instead of non-existent getAccountInfo()
       const accountInfo = await circuitBreakers.asterApi.execute(async () => {
-        return await asterDexService.getAccountInfo();
+        const baseUrl = process.env.VERCEL_URL 
+          ? `https://${process.env.VERCEL_URL}` 
+          : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+        const response = await fetch(`${baseUrl}/api/aster/account`);
+        
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+        
+        const result = await response.json();
+        return result.success ? result.data : null;
       });
 
       if (accountInfo) {
         this.balanceConfig = {
-          totalBalance: accountInfo.totalWalletBalance,
-          availableBalance: accountInfo.availableBalance,
-          marginBalance: accountInfo.totalWalletBalance, // Assuming total balance is margin balance
-          unrealizedPnl: 0, // Would need to calculate from positions
+          totalBalance: parseFloat(accountInfo.totalWalletBalance || accountInfo.balance || 0),
+          availableBalance: parseFloat(accountInfo.availableBalance || accountInfo.balance || 0),
+          marginBalance: parseFloat(accountInfo.totalMarginBalance || accountInfo.totalWalletBalance || 0),
+          unrealizedPnl: parseFloat(accountInfo.totalUnrealizedProfit || 0),
           lastUpdated: Date.now()
         };
 

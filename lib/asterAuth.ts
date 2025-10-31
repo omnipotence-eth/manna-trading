@@ -3,6 +3,8 @@
  * Based on Binance Futures API (Aster-compatible)
  */
 
+import { logger } from './logger';
+
 /**
  * Generate HMAC SHA256 signature for Aster DEX API requests
  * @param queryString - The query string to sign (e.g., "symbol=BTCUSDT&timestamp=1234567890")
@@ -91,13 +93,17 @@ export async function testAsterConnection(
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('Aster API test failed:', error);
+      logger.error('Aster API test failed', new Error(error), {
+        context: 'AsterAuth'
+      });
       return null;
     }
 
     return await response.json();
   } catch (error) {
-    console.error('Aster API connection error:', error);
+    logger.error('Aster API connection error', error as Error, {
+      context: 'AsterAuth'
+    });
     return null;
   }
 }
