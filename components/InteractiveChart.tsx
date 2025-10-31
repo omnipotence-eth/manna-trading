@@ -76,7 +76,7 @@ export default function InteractiveChart({
     return data;
   }, []);
 
-  // Fetch real balance data
+  // Fetch real balance data - update frequently for real-time tracking
   useEffect(() => {
     const fetchRealBalance = async () => {
       try {
@@ -85,7 +85,21 @@ export default function InteractiveChart({
 
         if (result.success && result.data && result.data.data) {
           const balance = result.data.data.balance;
+          const prevBalance = currentBalance;
           setCurrentBalance(balance);
+          
+          // Log balance changes
+          if (prevBalance !== 0 && Math.abs(balance - prevBalance) >= 0.01) {
+            frontendLogger.info('Account equity changed', {
+              component: 'InteractiveChart',
+              data: {
+                previous: prevBalance.toFixed(2),
+                current: balance.toFixed(2),
+                change: (balance - prevBalance).toFixed(2),
+                changePercent: ((balance - prevBalance) / prevBalance * 100).toFixed(2) + '%'
+              }
+            });
+          }
         }
       } catch (err) {
         frontendLogger.error('Failed to fetch real balance', err as Error, { 
@@ -96,10 +110,11 @@ export default function InteractiveChart({
     };
 
     fetchRealBalance();
-    const interval = setInterval(fetchRealBalance, 30000); // Update every 30 seconds
+    // Update every 2 seconds for real-time tracking
+    const interval = setInterval(fetchRealBalance, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [currentBalance]);
 
   // Fetch real chart data from API
   useEffect(() => {

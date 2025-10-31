@@ -68,7 +68,7 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
   return (
     <header className="border-b border-green-400/30 bg-black/90 backdrop-blur-sm sticky top-0 z-50 relative overflow-hidden">
       {/* Futuristic Background Effects */}
-      <div className="absolute inset-0 opacity-20">
+      <div className="absolute inset-0 opacity-20 pointer-events-none">
         {/* Scanning Lines */}
         <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-400/60 to-transparent animate-pulse"></div>
         <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-400/60 to-transparent animate-pulse" style={{animationDelay: '1.5s'}}></div>
