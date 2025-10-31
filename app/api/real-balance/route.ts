@@ -48,19 +48,18 @@ async function getChartData(timeRange: string, request: NextRequest) {
       data: { timeRange }
     });
 
-    // Fetch account equity from Aster API
-    const response = await fetch(new URL('/api/aster/account', request.url).toString());
-    if (!response.ok) {
-      throw new Error(`Failed to fetch account info: ${response.status}`);
-    }
-    const accountInfo = await response.json();
+    // Fetch account equity directly from asterDexService
+    const { asterDexService } = await import('@/services/asterDexService');
+    const balance = await asterDexService.getBalance();
     
-    if (!accountInfo || accountInfo.accountEquity === undefined) {
-      throw new Error('No account equity data available from Aster API');
+    if (!balance || balance === 0) {
+      logger.warn('No balance data from Aster API, using fallback', {
+        context: 'BalanceChartAPI'
+      });
     }
     
-    // Use account equity (totalMarginBalance which includes unrealized P&L)
-    const currentBalance = parseFloat(accountInfo.accountEquity);
+    // Use account equity (balance already returns totalMarginBalance which includes unrealized P&L)
+    const currentBalance = balance;
 
     // Calculate time range in milliseconds
     const now = Date.now();
@@ -187,34 +186,27 @@ async function getChartData(timeRange: string, request: NextRequest) {
 
 async function getCurrentBalance(request: NextRequest) {
   try {
-    // Fetch account equity from Aster API (account equity = totalMarginBalance)
-    const response = await fetch(new URL('/api/aster/account', request.url).toString());
-    if (!response.ok) {
-      throw new Error(`Failed to fetch account info: ${response.status}`);
-    }
-    const accountInfo = await response.json();
+    // Fetch account equity directly from asterDexService
+    const { asterDexService } = await import('@/services/asterDexService');
+    const balance = await asterDexService.getBalance();
     
-    if (!accountInfo || accountInfo.accountEquity === undefined) {
-      throw new Error('No account equity data from Aster API');
+    if (!balance || balance === 0) {
+      logger.warn('No balance data from Aster API', {
+        context: 'BalanceChartAPI'
+      });
     }
-    
-    // Use account equity (which includes unrealized P&L)
-    const accountEquity = parseFloat(accountInfo.accountEquity);
-    const unrealizedPnL = parseFloat(accountInfo.totalUnrealizedProfit || 0);
       
     logger.info('Real account equity fetched from Aster API', {
       context: 'BalanceChartAPI',
       data: { 
-        accountEquity,
-        unrealizedPnL
+        accountEquity: balance
       }
     });
 
     return createSuccessResponse({
       message: 'Current balance retrieved successfully',
       data: {
-        balance: accountEquity,
-        unrealizedPnL,
+        balance,
         timestamp: Date.now(),
         source: 'aster_api'
       }
