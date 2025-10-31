@@ -81,7 +81,15 @@ class ProblematicCoinDetector {
       
       logger.warn(`🚨 PROBLEMATIC COIN DETECTED: ${symbol}`, {
         context: 'ProblematicCoinDetector',
-        data: problematicCoin
+        data: {
+          symbol: problematicCoin.symbol,
+          reason: problematicCoin.reason,
+          quoteVolume24h: problematicCoin.metrics.quoteVolume24h,
+          liquidityScore: problematicCoin.metrics.liquidityScore,
+          spreadPercent: problematicCoin.metrics.spreadPercent,
+          avgSpread: problematicCoin.metrics.avgSpread,
+          detectionDate: problematicCoin.detectionDate
+        } as Record<string, unknown>
       });
       
       return problematicCoin;
@@ -125,32 +133,49 @@ class ProblematicCoinDetector {
       });
 
       const exchangeInfo = await asterDexService.getExchangeInfo();
-      const tickers = await asterDexService.getAllTickers();
-      const tickerMap = new Map(tickers.map(t => [t.symbol, t]));
+      
+      // CRITICAL FIX: exchangeInfo.symbols already contains ticker data (volume, price, etc.)
+      // No need to fetch separate tickers
+      const symbols = exchangeInfo.symbols || [];
 
       const problematicCoins: ProblematicCoin[] = [];
 
-      for (const symbolInfo of exchangeInfo.symbols || []) {
-        const symbol = symbolInfo.symbol;
-        const ticker = tickerMap.get(symbol);
-        
-        if (!ticker) continue;
+      // Skip already blacklisted symbols
+      const { asterConfig } = await import('@/lib/configService');
+      const blacklist = asterConfig.trading.blacklistedSymbols || [];
 
-        // Skip already blacklisted symbols
-        const { asterConfig } = await import('@/lib/configService');
-        const blacklist = asterConfig.trading.blacklistedSymbols || [];
+      for (const symbolInfo of symbols) {
+        if (!symbolInfo || !symbolInfo.symbol) continue;
+        
+        const symbol = symbolInfo.symbol;
+        
+        // Skip blacklisted symbols
         if (blacklist.some(b => symbol.includes(b.replace('/', '')))) {
           continue;
         }
 
         try {
+          // CRITICAL FIX: Use symbolInfo directly as ticker (it already has volume/price data)
+          // Convert to ticker format expected by detectProblematicCoin
+          const ticker = {
+            quoteVolume: symbolInfo.quoteVolume24h || 0,
+            highPrice: symbolInfo.high24h || symbolInfo.lastPrice || 0,
+            lowPrice: symbolInfo.low24h || symbolInfo.lastPrice || 0,
+            lastPrice: symbolInfo.lastPrice || 0,
+            volume: symbolInfo.volume24h || 0
+          };
+          
           const problematic = await this.detectProblematicCoin(symbol, ticker);
           if (problematic) {
             problematicCoins.push(problematic);
           }
         } catch (error) {
-          logger.debug(`Error checking ${symbol}`, error as Error, {
-            context: 'ProblematicCoinDetector'
+          logger.debug(`Error checking ${symbol}`, {
+            context: 'ProblematicCoinDetector',
+            data: { 
+              symbol,
+              error: error instanceof Error ? error.message : String(error)
+            }
           });
         }
       }
