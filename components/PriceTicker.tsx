@@ -28,7 +28,7 @@ export default function PriceTicker() {
   const updateLivePrice = useStore((state) => state.updateLivePrice);
 
   useEffect(() => {
-    // Fetch prices from our API (which uses CoinGecko - no geo-restrictions)
+    // Fetch prices from our API (which uses Aster DEX - actual trading prices)
     const fetchPrices = async () => {
       const timer = frontendPerformanceMonitor.startComponentTimer('PriceTicker:fetchPrices');
       

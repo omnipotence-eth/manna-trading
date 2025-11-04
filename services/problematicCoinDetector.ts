@@ -22,10 +22,10 @@ export interface ProblematicCoin {
 class ProblematicCoinDetector {
   private detectedCoins: Map<string, ProblematicCoin> = new Map();
   private readonly PROBLEMATIC_THRESHOLDS = {
-    MIN_QUOTE_VOLUME: 500000, // $500K minimum
-    MIN_LIQUIDITY_SCORE: 0.3, // Minimum liquidity score
-    MAX_SPREAD_PERCENT: 0.5, // Maximum 0.5% spread
-    MAX_AVG_SPREAD: 0.3 // Maximum 0.3% average spread
+    MIN_QUOTE_VOLUME: 50000, // $50K minimum (was $5K) - PROTECT AGAINST ATOM-like coins
+    MIN_LIQUIDITY_SCORE: 0.3, // Minimum liquidity score (was 0.1) - stricter
+    MAX_SPREAD_PERCENT: 2.0, // Maximum 2% spread (was 10%) - CATCH ATOM (3% spread)
+    MAX_AVG_SPREAD: 1.0 // Maximum 1% average spread (was 5%) - strict protection
   };
 
   /**

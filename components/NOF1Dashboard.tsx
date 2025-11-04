@@ -23,6 +23,7 @@ export default function NOF1Dashboard() {
   const setAccountValue = useStore((state) => state.setAccountValue);
   const updatePosition = useStore((state) => state.updatePosition);
   const addTrade = useStore((state) => state.addTrade);
+  const clearOldTrades = useStore((state) => state.clearOldTrades);
   const addModelMessage = useStore((state) => state.addModelMessage);
   // OPTIMIZED: useRef for isMounted flag (better than let variable)
   const isMountedRef = useRef(true);
@@ -46,8 +47,10 @@ export default function NOF1Dashboard() {
         const accountCacheKey = cacheKeys.api('optimized-data');
         const cachedAccountData = frontendCaches.api.get(accountCacheKey);
         
-        if (cachedAccountData) {
-          frontendLogger.debug('Using cached account data', { component: 'NOF1Dashboard' });
+        // ENTERPRISE: Check cache but prefer fresh data for real-time updates
+        // Use cache only on initial load, then fetch live data
+        if (cachedAccountData && accountValue === 0) {
+          frontendLogger.debug('Using cached account data (initial load)', { component: 'NOF1Dashboard' });
           const { accountValue, positions } = cachedAccountData;
           if (isMountedRef.current) {
             setAccountValue(accountValue);
@@ -59,16 +62,26 @@ export default function NOF1Dashboard() {
               });
             }
           }
-        } else {
-          const accountResponse = await frontendPerformanceMonitor.measureApiCall(
-            'optimized-data',
-            () => fetch('/api/optimized-data')
-          );
-          
-          if (accountResponse.ok) {
-            const data = await accountResponse.json();
-            if (isMountedRef.current && data.success) {
-              const { accountValue, positions } = data.data;
+        }
+        
+        // Always fetch live data (with cache headers for fresh data)
+        const accountResponse = await frontendPerformanceMonitor.measureApiCall(
+          'optimized-data',
+          () => fetch('/api/optimized-data', {
+            headers: {
+              'Cache-Control': 'no-cache', // Force fresh data
+              'Pragma': 'no-cache'
+            }
+          })
+        );
+        
+        if (!accountResponse.ok) {
+          frontendLogger.warn('Failed to fetch account data, using cached if available', {
+            component: 'NOF1Dashboard'
+          });
+          if (cachedAccountData) {
+            const { accountValue, positions } = cachedAccountData;
+            if (isMountedRef.current) {
               setAccountValue(accountValue);
               if (positions && Array.isArray(positions) && positions.length > 0) {
                 positions.forEach((position: any) => {
@@ -77,67 +90,102 @@ export default function NOF1Dashboard() {
                   }
                 });
               }
-              // Cache the response
-              frontendCaches.api.set(accountCacheKey, data.data);
             }
+          }
+        } else {
+          // Process fresh data
+          const data = await accountResponse.json();
+          if (isMountedRef.current && data.success) {
+            const { accountValue, positions } = data.data;
+            setAccountValue(accountValue);
+            if (positions && Array.isArray(positions) && positions.length > 0) {
+              positions.forEach((position: any) => {
+                if (position && typeof position === 'object') {
+                  updatePosition(position);
+                }
+              });
+            }
+            // Cache the fresh response
+            frontendCaches.api.set(accountCacheKey, data.data);
           }
         }
         
-        // Fetch completed trades with caching
+        // Fetch completed trades - always fetch live data
         const tradesCacheKey = cacheKeys.api('trades', { limit: 100 });
         const cachedTradesData = frontendCaches.api.get(tradesCacheKey);
         
-        if (cachedTradesData) {
-          frontendLogger.debug('Using cached trades data', { component: 'NOF1Dashboard' });
+        // Use cache only on initial load
+        if (cachedTradesData && trades.length === 0) {
+          frontendLogger.debug('Using cached trades data (initial load)', { component: 'NOF1Dashboard' });
           if (isMountedRef.current) {
             cachedTradesData.trades.forEach((trade: any) => {
               addTrade(trade);
             });
           }
-        } else {
-          const tradesResponse = await frontendPerformanceMonitor.measureApiCall(
-            'trades',
-            () => fetch('/api/trades?limit=100')
-          );
-          
-          if (tradesResponse.ok) {
-            const tradesData = await tradesResponse.json();
-            if (isMountedRef.current && tradesData.success && tradesData.trades) {
-              tradesData.trades.forEach((trade: any) => {
-                addTrade(trade);
-              });
-              // Cache the response
-              frontendCaches.api.set(tradesCacheKey, tradesData);
+        }
+        
+        // Always fetch live trades data (with 30-day filter applied by API)
+        const tradesResponse = await frontendPerformanceMonitor.measureApiCall(
+          'trades',
+          () => fetch('/api/trades?limit=100&days=30', {
+            headers: {
+              'Cache-Control': 'no-cache' // Force fresh data
             }
+          })
+        );
+        
+        if (tradesResponse.ok) {
+          const tradesData = await tradesResponse.json();
+          if (isMountedRef.current && tradesData.success && tradesData.trades) {
+            // CRITICAL FIX: Clear old trades from store first (older than 30 days)
+            clearOldTrades(30);
+            
+            // Then add new trades from API (already filtered by API, but avoiding duplicates)
+            tradesData.trades.forEach((trade: any) => {
+              addTrade(trade);
+            });
+            
+            // Cache the fresh response
+            frontendCaches.api.set(tradesCacheKey, tradesData);
           }
+        } else if (cachedTradesData && trades.length > 0) {
+          // Only use cache on error if we already have trades (don't overwrite)
+          frontendLogger.warn('Failed to fetch trades, keeping existing data', {
+            component: 'NOF1Dashboard'
+          });
         }
 
-        // Fetch model messages with caching
-        const messagesCacheKey = cacheKeys.api('model-message', { limit: 50 });
-        const cachedMessagesData = frontendCaches.api.get(messagesCacheKey);
+        // ENTERPRISE: Always fetch fresh model messages (no cache for live updates)
+        // FIXED: Request messages from last 7 days (168 hours) to prevent old chat logs
+        const messagesResponse = await frontendPerformanceMonitor.measureApiCall(
+          'model-message',
+          () => fetch('/api/model-message?limit=50&hoursAgo=168', {
+            headers: {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            }
+          })
+        );
         
-        if (cachedMessagesData) {
-          frontendLogger.debug('Using cached messages data', { component: 'NOF1Dashboard' });
-          if (isMountedRef.current) {
-            cachedMessagesData.messages.forEach((message: any) => {
+        if (messagesResponse.ok) {
+          const messagesData = await messagesResponse.json();
+          if (isMountedRef.current && messagesData.success && messagesData.messages) {
+            // FIXED: Filter messages to only include recent ones (last 7 days)
+            // The API already filters, but we also filter in store to prevent old chat logs
+            const now = Date.now();
+            const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+            
+            const recentMessages = messagesData.messages.filter((message: any) => {
+              const messageTimestamp = typeof message.timestamp === 'number' 
+                ? message.timestamp 
+                : new Date(message.timestamp).getTime();
+              return messageTimestamp >= sevenDaysAgo;
+            });
+            
+            // Add only recent messages
+            recentMessages.forEach((message: any) => {
               addModelMessage(message);
             });
-          }
-        } else {
-          const messagesResponse = await frontendPerformanceMonitor.measureApiCall(
-            'model-message',
-            () => fetch('/api/model-message?limit=50')
-          );
-          
-          if (messagesResponse.ok) {
-            const messagesData = await messagesResponse.json();
-            if (isMountedRef.current && messagesData.success && messagesData.messages) {
-              messagesData.messages.forEach((message: any) => {
-                addModelMessage(message);
-              });
-              // Cache the response
-              frontendCaches.api.set(messagesCacheKey, messagesData);
-            }
           }
         }
         
@@ -152,9 +200,12 @@ export default function NOF1Dashboard() {
       }
     };
 
-    // Start data updates every 3 seconds for real-time updates (optimized)
+    // OPTIMIZED: Smart refresh intervals based on data type
+    // Account/positions: Every 5 seconds (balance doesn't change that fast)
+    // Trades: Every 10 seconds (trades are infrequent)
+    // This prevents unnecessary API load while keeping UI responsive
     updateData();
-    const dataIntervalId = setInterval(updateData, 3000); // Every 3 seconds (optimized from 1s)
+    const dataIntervalId = setInterval(updateData, 5000); // Every 5 seconds (optimized from 3s)
 
     // 🤖 GODSPEED AUTO-TRADING: Trigger trading cycle every 60 seconds
     // This ensures 24/7 trading even if Vercel cron fails
@@ -198,9 +249,37 @@ export default function NOF1Dashboard() {
       }
     };
 
-    // Run trading cycle immediately and then every 30 seconds (more aggressive)
-    runTradingCycle();
-    const tradingIntervalId = setInterval(runTradingCycle, 30000); // Every 30 seconds
+    // ENTERPRISE: Ensure trading system is initialized before running cycles
+    const initializeAndRunTrading = async () => {
+      // Check if services are initialized
+      try {
+        const statusResponse = await fetch('/api/startup?action=status');
+        const statusData = await statusResponse.json();
+        
+        if (!statusData.data?.status?.initialized) {
+          frontendLogger.info('Initializing trading services...', { component: 'NOF1Dashboard' });
+          const initResponse = await fetch('/api/startup?action=initialize');
+          const initData = await initResponse.json();
+          
+          if (initData.success) {
+            frontendLogger.info('✅ Trading services initialized', { component: 'NOF1Dashboard' });
+          } else {
+            frontendLogger.warn('Failed to initialize trading services', { component: 'NOF1Dashboard' });
+          }
+        }
+      } catch (error) {
+        frontendLogger.error('Error checking/initializing trading services', error as Error, { component: 'NOF1Dashboard' });
+      }
+      
+      // Run trading cycle after initialization check
+      runTradingCycle();
+    };
+    
+    // Initialize and run trading cycle immediately, then every 30 seconds
+    initializeAndRunTrading();
+    const tradingIntervalId = setInterval(() => {
+      runTradingCycle();
+    }, 30000); // Every 30 seconds
 
     // HIGH PRIORITY FIX: Cleanup intervals on unmount to prevent memory leaks
     return () => {
@@ -248,8 +327,18 @@ export default function NOF1Dashboard() {
   }, [positions, accountValue, trades]);
 
   // OPTIMIZED: Memoize displayed trades (slice + reverse)
+  // FIXED: Filter out old trades (older than 30 days) to match API filtering
   const displayedTrades = useMemo(() => {
-    return trades.slice(-10).reverse();
+    const now = Date.now();
+    const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
+    
+    // Filter to only show recent trades (last 30 days)
+    const recentTrades = trades.filter(trade => {
+      const tradeTimestamp = new Date(trade.timestamp).getTime();
+      return tradeTimestamp >= thirtyDaysAgo;
+    });
+    
+    return recentTrades.slice(-10).reverse();
   }, [trades]);
 
   // OPTIMIZED: Memoize tab change handler
@@ -298,7 +387,19 @@ export default function NOF1Dashboard() {
 
             {/* Chart Area - Fixed Height */}
             <div className="overflow-hidden">
-              <InteractiveChart initialBalance={accountValue} />
+              <InteractiveChart 
+                initialBalance={accountValue}
+                onBalanceUpdate={(balance) => {
+                  // ENTERPRISE: Sync chart balance with dashboard
+                  if (Math.abs(balance - accountValue) > 0.01) {
+                    setAccountValue(balance);
+                    frontendLogger.debug('Chart balance synced with dashboard', {
+                      component: 'NOF1Dashboard',
+                      data: { balance, previousAccountValue: accountValue }
+                    });
+                  }
+                }}
+              />
             </div>
 
             {/* Stats Bar - Ultra Compact */}

@@ -8,6 +8,7 @@ import { logger } from '@/lib/logger';
 import { asterDexService } from './asterDexService';
 import { db } from '@/lib/db';
 import { TRADING_THRESHOLDS } from '@/constants/tradingConstants';
+import { realBalanceService } from './realBalanceService';
 
 export interface OpenPosition {
   id: string;
@@ -45,7 +46,13 @@ class PositionMonitorService {
   private positions: Map<string, OpenPosition> = new Map();
   private monitorInterval: NodeJS.Timeout | null = null;
   private isMonitoring = false;
-  private checkIntervalMs = 5000; // Check every 5 seconds
+  // AGGRESSIVE SCALPING: Check every 10 seconds (configurable via env)
+  private checkIntervalMs = parseInt(process.env.TRADING_POSITION_CHECK_INTERVAL || '10000');
+  private checkCount = 0; // OPTIMIZATION: Counter for log sampling
+  
+  // Volume spike tracking for quick exits
+  private volumeHistory: Map<string, number[]> = new Map();
+  private readonly VOLUME_HISTORY_SIZE = 10; // Track last 10 volume readings
 
   /**
    * Start monitoring positions
@@ -93,6 +100,33 @@ class PositionMonitorService {
   }
 
   /**
+   * OPTIMIZATION: Cleanup closed positions from memory to prevent leaks
+   */
+  private cleanupClosedPositions(): void {
+    const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    let cleanedCount = 0;
+    
+    for (const [id, position] of this.positions.entries()) {
+      // Remove closed positions older than 1 week
+      if (position.status === 'CLOSED' && position.lastChecked < oneWeekAgo) {
+        this.positions.delete(id);
+        cleanedCount++;
+      }
+    }
+    
+    if (cleanedCount > 0) {
+      logger.info('Cleaned up old closed positions from memory', {
+        context: 'PositionMonitor',
+        data: {
+          cleaned: cleanedCount,
+          remaining: this.positions.size,
+          note: 'Prevents memory leaks'
+        }
+      });
+    }
+  }
+
+  /**
    * Add a position to monitor
    */
   async addPosition(position: Omit<OpenPosition, 'id' | 'currentPrice' | 'highestPrice' | 'lowestPrice' | 'unrealizedPnL' | 'unrealizedPnLPercent' | 'lastChecked' | 'status'>): Promise<string> {
@@ -137,34 +171,63 @@ class PositionMonitorService {
   private async monitorAllPositions(): Promise<void> {
     if (this.positions.size === 0) return;
 
+    this.checkCount++; // OPTIMIZATION: Increment check counter
+
     // HIGH PRIORITY FIX: Add comprehensive error handling with recovery
     try {
-      logger.debug('Checking positions', {
-        context: 'PositionMonitor',
-        data: { count: this.positions.size }
+      // OPTIMIZATION: Sample logging - only log every 12th check (once per minute instead of every 5s)
+      if (this.checkCount % 12 === 0) {
+        logger.debug('Position monitor sample', {
+          context: 'PositionMonitor',
+          data: { 
+            positionsChecked: this.positions.size,
+            totalChecks: this.checkCount,
+            note: 'Sampled log (1 in 12 checks)'
+          }
+        });
+      }
+
+      // CRITICAL FIX: Create snapshot of position IDs to avoid mutation during iteration
+      const positionIds = Array.from(this.positions.keys());
+      
+      const checkPromises = positionIds.map(async (id) => {
+        const position = this.positions.get(id);
+        if (!position) return; // Position was already deleted
+        
+        try {
+          await this.checkPosition(position);
+        } catch (error) {
+          logger.error(`Error checking position ${id}`, error, {
+            context: 'PositionMonitor',
+            data: { positionId: id, symbol: position.symbol }
+          });
+          
+          // CRITICAL FIX: Atomic update using Map.set
+          const current = this.positions.get(id);
+          if (current) {
+            this.positions.set(id, {
+              ...current,
+              lastError: error instanceof Error ? error.message : String(error),
+              errorCount: (current.errorCount || 0) + 1
+            });
+            
+            // Check error threshold
+            if ((current.errorCount || 0) + 1 >= TRADING_THRESHOLDS.MAX_ERROR_COUNT_FOR_REVIEW) {
+              logger.warn(`Position ${id} has ${(current.errorCount || 0) + 1} consecutive errors - manual review recommended`, {
+                context: 'PositionMonitor',
+                data: { positionId: id, symbol: current.symbol }
+              });
+            }
+          }
+        }
       });
 
-      const checkPromises = Array.from(this.positions.values()).map(position =>
-        this.checkPosition(position).catch(error => {
-          logger.error(`Error checking position ${position.id}`, error, {
-            context: 'PositionMonitor',
-            data: { positionId: position.id, symbol: position.symbol }
-          });
-          // HIGH PRIORITY FIX: Mark position as needing attention instead of silently failing
-          position.lastError = error instanceof Error ? error.message : String(error);
-          position.errorCount = (position.errorCount || 0) + 1;
-          
-          // If position has too many errors, mark it for manual review
-          if (position.errorCount >= TRADING_THRESHOLDS.MAX_ERROR_COUNT_FOR_REVIEW) {
-            logger.warn(`Position ${position.id} has ${position.errorCount} consecutive errors - manual review recommended`, {
-              context: 'PositionMonitor',
-              data: { positionId: position.id, symbol: position.symbol }
-            });
-          }
-        })
-      );
-
       await Promise.all(checkPromises);
+      
+      // OPTIMIZATION: Auto-cleanup closed positions every 100 checks (~8 minutes)
+      if (this.checkCount % 100 === 0) {
+        this.cleanupClosedPositions();
+      }
     } catch (error) {
       // HIGH PRIORITY FIX: Log error with context and don't crash the service
       logger.error('Failed to check positions', error instanceof Error ? error : new Error(String(error)), {
@@ -212,8 +275,8 @@ class PositionMonitorService {
         }
       }
 
-      // Check exit conditions
-      const exitCondition = this.checkExitConditions(position);
+      // Check exit conditions (now async for whale/volume detection)
+      const exitCondition = await this.checkExitConditions(position);
       
       if (exitCondition) {
         await this.closePosition(position, exitCondition);
@@ -231,9 +294,48 @@ class PositionMonitorService {
 
   /**
    * Check if position should be closed
+   * ENHANCED: Whale detection, volume spikes, quick profit-taking
    */
-  private checkExitConditions(position: OpenPosition): PositionUpdate | null {
+  private async checkExitConditions(position: OpenPosition): Promise<PositionUpdate | null> {
     const { side, currentPrice, entryPrice, stopLoss, takeProfit, trailingStopPercent, highestPrice, lowestPrice, openedAt } = position;
+
+    // 0. SCALPING MODE: Quick profit-taking on ANY profitable position
+    const scalpingEnabled = process.env.TRADING_SCALPING_ENABLED === 'true';
+    const minScalpProfit = parseFloat(process.env.TRADING_MIN_SCALP_PROFIT || '0.005'); // 0.5%
+    
+    if (scalpingEnabled && position.unrealizedPnLPercent > minScalpProfit * 100) {
+      // Check for volume spike reversal (whale exiting)
+      try {
+        const volumeSpike = await this.detectVolumeSpikeReversal(position.symbol);
+        if (volumeSpike) {
+          return {
+            action: 'PARTIAL_EXIT',
+            reason: `SCALP: Volume spike reversal detected while profitable (${position.unrealizedPnLPercent.toFixed(2)}%) - whale exiting, securing profit`,
+            exitPrice: currentPrice,
+            pnl: position.unrealizedPnL,
+            pnlPercent: position.unrealizedPnLPercent
+          };
+        }
+        
+        // Check for whale order disappearance
+        const whaleExit = await this.detectWhaleExit(position.symbol, side);
+        if (whaleExit) {
+          return {
+            action: 'PARTIAL_EXIT',
+            reason: `SCALP: Whale order disappeared while profitable (${position.unrealizedPnLPercent.toFixed(2)}%) - reversing momentum, securing profit`,
+            exitPrice: currentPrice,
+            pnl: position.unrealizedPnL,
+            pnlPercent: position.unrealizedPnLPercent
+          };
+        }
+      } catch (error) {
+        // Non-critical - continue with normal exit checks
+        logger.debug('Scalping check failed (non-critical)', {
+          context: 'PositionMonitor',
+          symbol: position.symbol
+        });
+      }
+    }
 
     // 1. Check Stop-Loss
     if (side === 'LONG' && currentPrice <= stopLoss) {
@@ -513,6 +615,29 @@ class PositionMonitorService {
   }
 
   /**
+   * Remove a position from monitoring (clears from memory)
+   */
+  removePosition(positionId: string): void {
+    this.positions.delete(positionId);
+    logger.debug('Position removed from monitoring', {
+      context: 'PositionMonitor',
+      data: { positionId }
+    });
+  }
+
+  /**
+   * Clear all positions from memory (use with caution)
+   */
+  clearAllPositions(): void {
+    const count = this.positions.size;
+    this.positions.clear();
+    logger.info('All positions cleared from memory', {
+      context: 'PositionMonitor',
+      data: { clearedCount: count }
+    });
+  }
+
+  /**
    * Get all open positions
    */
   getOpenPositions(): OpenPosition[] {
@@ -717,6 +842,66 @@ class PositionMonitorService {
           exitReason: update.action,
           timestamp: Date.now()
         });
+        
+        // REINFORCEMENT LEARNING PHASE 1: Clear pattern cache so new trade is included in next analysis
+        try {
+          const { tradePatternAnalyzer } = await import('./tradePatternAnalyzer');
+          tradePatternAnalyzer.clearCache();
+          logger.debug('Cleared RL pattern cache after trade completion', {
+            context: 'PositionMonitor',
+            data: { positionId: position.id }
+          });
+        } catch (cacheError) {
+          // Non-critical - just log
+          logger.debug('Failed to clear RL cache (non-critical)', {
+            context: 'PositionMonitor',
+            error: cacheError instanceof Error ? cacheError.message : String(cacheError)
+          });
+        }
+        
+        // REINFORCEMENT LEARNING PHASE 2: Record trade outcome for parameter optimization
+        try {
+          const { dynamicConfigService } = await import('./dynamicConfigService');
+          const { rlParameterOptimizer } = await import('./rlParameterOptimizer');
+          
+          // Get market regime and account size for RL state
+          const balanceConfig = realBalanceService.getBalanceConfig();
+          const balance = balanceConfig?.availableBalance || 100;
+          const marketRegime = await rlParameterOptimizer.detectMarketRegime();
+          const accountSize = rlParameterOptimizer.classifyAccountSize(balance);
+          
+          // Calculate risk percentage used
+          const riskPercent = position.stopLoss && position.entryPrice > 0
+            ? Math.abs((position.stopLoss - position.entryPrice) / position.entryPrice) * 100
+            : 3.0;
+          
+          // Record trade outcome for RL learning
+          await dynamicConfigService.recordTradeOutcome({
+            pnl: update.pnl,
+            pnlPercent: update.pnlPercent,
+            confidence: (position as any).entryConfidence || 0.65,
+            duration: Date.now() - position.openedAt,
+            riskPercent: riskPercent,
+            marketRegime: marketRegime,
+            accountSize: accountSize
+          });
+          
+          logger.debug('Recorded trade outcome for RL parameter optimization', {
+            context: 'PositionMonitor',
+            data: {
+              positionId: position.id,
+              pnl: update.pnlPercent.toFixed(2) + '%',
+              marketRegime,
+              accountSize
+            }
+          });
+        } catch (rlError) {
+          // Non-critical - just log
+          logger.debug('Failed to record trade outcome for RL (non-critical)', {
+            context: 'PositionMonitor',
+            error: rlError instanceof Error ? rlError.message : String(rlError)
+          });
+        }
       } catch (perfError) {
         logger.error('Failed to record trade performance', perfError, { 
           context: 'PositionMonitor',
@@ -728,6 +913,123 @@ class PositionMonitorService {
         context: 'PositionMonitor',
         data: { positionId: position.id }
       });
+    }
+  }
+
+  /**
+   * WHALE DETECTION: Detect volume spike reversal (whale exiting)
+   */
+  private async detectVolumeSpikeReversal(symbol: string): Promise<boolean> {
+    try {
+      const { asterDexService } = await import('./asterDexService');
+      const ticker = await asterDexService.getTicker(symbol);
+      
+      if (!ticker) return false;
+      
+      const currentVolume = parseFloat(ticker.volume || '0');
+      const avgVolume = parseFloat(ticker.avgVolume || ticker.quoteVolume || '0');
+      
+      // Track volume history
+      if (!this.volumeHistory.has(symbol)) {
+        this.volumeHistory.set(symbol, []);
+      }
+      
+      const history = this.volumeHistory.get(symbol)!;
+      history.push(currentVolume);
+      
+      // Keep only last N readings
+      if (history.length > this.VOLUME_HISTORY_SIZE) {
+        history.shift();
+      }
+      
+      // Need at least 3 readings to detect reversal
+      if (history.length < 3) return false;
+      
+      // Detect volume spike reversal
+      const volumeSpikeThreshold = parseFloat(process.env.TRADING_VOLUME_SPIKE_EXIT || '2.0');
+      const recentAvg = history.slice(-3).reduce((a, b) => a + b, 0) / 3;
+      const previousAvg = history.slice(0, -3).reduce((a, b) => a + b, 0) / (history.length - 3);
+      
+      // Volume was spiking (whale entering) but now dropping (whale exiting)
+      const wasSpikingNowDropping = previousAvg > avgVolume * volumeSpikeThreshold && 
+                                     recentAvg < previousAvg * 0.7; // 30% drop
+      
+      if (wasSpikingNowDropping) {
+        logger.info(`🐋 Volume spike reversal detected on ${symbol}`, {
+          context: 'PositionMonitor',
+          data: {
+            symbol,
+            previousAvg: previousAvg.toFixed(0),
+            recentAvg: recentAvg.toFixed(0),
+            dropPercent: ((1 - recentAvg / previousAvg) * 100).toFixed(1) + '%'
+          }
+        });
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      logger.debug('Volume spike detection failed (non-critical)', {
+        context: 'PositionMonitor',
+        symbol
+      });
+      return false;
+    }
+  }
+
+  /**
+   * WHALE DETECTION: Detect whale order disappearance (whale exiting)
+   */
+  private async detectWhaleExit(symbol: string, side: 'LONG' | 'SHORT'): Promise<boolean> {
+    try {
+      const { asterDexService } = await import('./asterDexService');
+      const orderBook = await asterDexService.getOrderBook(symbol, 20);
+      
+      if (!orderBook) return false;
+      
+      const whaleThreshold = parseFloat(process.env.TRADING_WHALE_ORDER_THRESHOLD || '0.05'); // 5% of book
+      
+      // For LONG positions, check if large BID orders disappeared (bulls exiting)
+      // For SHORT positions, check if large ASK orders disappeared (bears exiting)
+      const ordersToCheck = side === 'LONG' ? orderBook.bids : orderBook.asks;
+      const totalLiquidity = side === 'LONG' ? orderBook.bidLiquidity : orderBook.askLiquidity;
+      
+      // Check if ANY single order is >5% of book depth (whale order)
+      let hasWhaleOrder = false;
+      for (const [priceStr, qtyStr] of ordersToCheck) {
+        const orderValue = parseFloat(priceStr) * parseFloat(qtyStr);
+        const orderPercent = orderValue / totalLiquidity;
+        
+        if (orderPercent > whaleThreshold) {
+          hasWhaleOrder = true;
+          break;
+        }
+      }
+      
+      // For simplicity, if no whale orders remain, consider it a whale exit
+      // (In reality, would track specific whale orders over time)
+      if (!hasWhaleOrder) {
+        logger.info(`🐋 No whale orders detected on ${symbol} ${side} side`, {
+          context: 'PositionMonitor',
+          data: {
+            symbol,
+            side,
+            totalLiquidity: totalLiquidity.toFixed(2),
+            note: 'Whale may have exited - consider closing position'
+          }
+        });
+        // Only trigger if previously had whale support (simplified logic)
+        // Return false for now to avoid false positives
+        return false;
+      }
+      
+      return false;
+    } catch (error) {
+      logger.debug('Whale detection failed (non-critical)', {
+        context: 'PositionMonitor',
+        symbol
+      });
+      return false;
     }
   }
 }

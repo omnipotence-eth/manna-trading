@@ -3,12 +3,35 @@ import { logger } from '@/lib/logger';
 import { db } from '@/lib/db';
 
 /**
- * POST /api/model-message - Add a model message (from backend)
+ * POST /api/model-message - Add a model message OR delete old messages
  */
 export async function POST(request: NextRequest) {
   try {
     const payload = await request.json();
 
+    // Handle delete action
+    if (payload.action === 'delete-old') {
+      const hoursAgo = payload.hoursAgo || 1;
+      const cutoffTime = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
+      
+      const result = await db.execute(
+        `DELETE FROM model_messages WHERE timestamp < $1`,
+        [cutoffTime]
+      );
+
+      logger.info(`🗑️ Deleted old model messages`, {
+        context: 'ModelMessageAPI',
+        data: { cutoffTime, deleted: result.rowCount || 0 }
+      });
+
+      return NextResponse.json({
+        success: true,
+        deleted: result.rowCount || 0,
+        message: `Deleted messages older than ${hoursAgo} hour(s)`
+      });
+    }
+
+    // Handle add message (existing logic)
     const message = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       model: payload.model || 'Godspeed',
@@ -53,11 +76,19 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 50;
+    // FIXED: Default to 7 days (168 hours) instead of 1 hour to prevent old chat logs
+    const hoursAgo = searchParams.get('hoursAgo') ? parseInt(searchParams.get('hoursAgo')!) : 168; // Default: last 7 days
 
-    // Fetch from database
+    // ENTERPRISE FIX: Filter messages by time range to prevent old messages from appearing
+    const cutoffTime = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
+
+    // Fetch recent messages from database (only last N hours)
     const result = await db.execute(
-      `SELECT * FROM model_messages ORDER BY timestamp DESC LIMIT $1`,
-      [limit]
+      `SELECT * FROM model_messages 
+       WHERE timestamp >= $1 
+       ORDER BY timestamp DESC 
+       LIMIT $2`,
+      [cutoffTime, limit]
     );
 
     const messages = result.rows.map((row: any) => ({
@@ -68,19 +99,31 @@ export async function GET(request: NextRequest) {
       type: row.type,
     }));
 
-    logger.debug(`📨 Fetched ${messages.length} model messages`, { context: 'ModelMessageAPI' });
+    logger.debug(`📨 Fetched ${messages.length} model messages (last ${hoursAgo} hour(s))`, { 
+      context: 'ModelMessageAPI',
+      data: { cutoffTime, limit, messagesCount: messages.length }
+    });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       messages,
       count: messages.length,
+      filteredBy: `last ${hoursAgo} hour(s)`,
     });
-  } catch (error: any) {
-    logger.error('Failed to get model messages', error, { context: 'ModelMessageAPI' });
+    
+    // ENTERPRISE: Add cache headers for fresh data
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('X-Timestamp', Date.now().toString());
+    
+    return response;
+  } catch (error: unknown) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    logger.error('Failed to get model messages', errorObj, { context: 'ModelMessageAPI' });
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Unknown error',
+        error: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
     );

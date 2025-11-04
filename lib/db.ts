@@ -134,12 +134,15 @@ export async function initializeDatabase() {
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_pnl ON trades(pnl);`);
     
     // OPTIMIZED: Add partial index for recent trades (last 30 days) - improves query performance for recent data
-    await sql(`CREATE INDEX IF NOT EXISTS idx_trades_recent ON trades(timestamp DESC) WHERE timestamp > NOW() - INTERVAL '30 days';`);
+    // CRITICAL FIX: Use CURRENT_TIMESTAMP instead of NOW() for IMMUTABLE requirement, or remove function from predicate
+    // For MVP: Skip partial index with function predicate to avoid IMMUTABLE error
+    // await sql(`CREATE INDEX IF NOT EXISTS idx_trades_recent ON trades(timestamp DESC) WHERE timestamp > NOW() - INTERVAL '30 days';`);
+    // Instead, we'll use the timestamp index for recent queries (already created above)
     
     await sql(`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON model_messages(timestamp DESC);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_messages_model ON model_messages(model);`);
 
-    logger.info('✅ Database initialized successfully', { context: 'Database' });
+    logger.info('Database initialized successfully', { context: 'Database' });
     dbInitialized = true; // Mark as initialized
     return true;
   } catch (error) {
@@ -195,7 +198,7 @@ export async function addTrade(trade: Trade): Promise<boolean> {
       trade.duration
     ]);
 
-    logger.info(`✅ Trade saved to database: ${trade.symbol} | P&L: $${trade.pnl.toFixed(2)}`, {
+    logger.info(`Trade saved to database: ${trade.symbol} | P&L: $${trade.pnl.toFixed(2)}`, {
       context: 'Database',
       data: { symbol: trade.symbol, pnl: trade.pnl },
     });
@@ -338,13 +341,68 @@ export async function deleteOldTrades(daysOld: number = 90) {
       RETURNING id;
     `, [daysOld]);
 
-    logger.info(`🗑️ Deleted ${result.rowCount} trades older than ${daysOld} days`, {
+    logger.info(`Deleted ${result.rowCount} trades older than ${daysOld} days`, {
       context: 'Database',
     });
 
     return result.rowCount || 0;
   } catch (error) {
     logger.error('Failed to delete old trades', error, { context: 'Database' });
+    return 0;
+  }
+}
+
+/**
+ * Delete trades by symbol
+ */
+export async function deleteTradesBySymbol(symbol: string): Promise<number> {
+  try {
+    const result = await sql(`
+      DELETE FROM trades
+      WHERE symbol = $1
+      RETURNING id;
+    `, [symbol.toUpperCase()]);
+
+    const deletedCount = result.rowCount || 0;
+    logger.info(`Deleted ${deletedCount} trades for symbol ${symbol}`, {
+      context: 'Database',
+      data: { symbol, deletedCount }
+    });
+
+    return deletedCount;
+  } catch (error) {
+    logger.error('Failed to delete trades by symbol', error, { 
+      context: 'Database',
+      data: { symbol }
+    });
+    return 0;
+  }
+}
+
+/**
+ * Delete model messages containing a specific symbol in the message text
+ */
+export async function deleteModelMessagesBySymbol(symbol: string): Promise<number> {
+  try {
+    // Delete messages that contain the symbol (case-insensitive)
+    const result = await sql(`
+      DELETE FROM model_messages
+      WHERE LOWER(message) LIKE LOWER($1)
+      RETURNING id;
+    `, [`%${symbol.toUpperCase()}%`]);
+
+    const deletedCount = result.rowCount || 0;
+    logger.info(`Deleted ${deletedCount} model messages containing ${symbol}`, {
+      context: 'Database',
+      data: { symbol, deletedCount }
+    });
+
+    return deletedCount;
+  } catch (error) {
+    logger.error('Failed to delete model messages by symbol', error, { 
+      context: 'Database',
+      data: { symbol }
+    });
     return 0;
   }
 }

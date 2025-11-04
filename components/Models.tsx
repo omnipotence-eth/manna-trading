@@ -32,7 +32,7 @@ function Models() {
     
     return {
     name: 'Multi-Agent AI System',
-    description: 'Advanced LLM-powered multi-agent trading system with Technical Analyst, Risk Manager, Chief Analyst, and Execution Specialist. Powered by DeepSeek R1 32B with GPU acceleration for superior reasoning and intelligent decision-making with comprehensive market analysis across all timeframes.',
+    description: 'Advanced LLM-powered multi-agent trading system with Technical Analyst, Risk Manager, Chief Analyst, and Execution Specialist. Powered by DeepSeek R1 14B with GPU acceleration for superior reasoning and intelligent decision-making with comprehensive market analysis across all timeframes.',
       strategy: 'Multi-Agent LLM Coordination + Risk Management + Market Analysis',
       status: 'active' as const,
       performance: performancePercent,
@@ -101,7 +101,7 @@ function Models() {
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-green-500/60">AI Model:</span>
-                <span className="text-neon-blue">DeepSeek R1 32B (GPU)</span>
+                <span className="text-neon-blue">DeepSeek R1 14B (GPU)</span>
               </div>
             </div>
 

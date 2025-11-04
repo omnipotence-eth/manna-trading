@@ -145,7 +145,7 @@ export default function AgentsSystem() {
       >
         <h1 className="text-3xl font-bold terminal-text mb-2">MULTI-AGENT TRADING SYSTEM</h1>
         <p className="text-green-500/60 text-sm">
-          4 Specialized AI Agents • DeepSeek R1 32B • GPU Accelerated • Chain-of-Thought Reasoning
+          4 Specialized AI Agents • 1 Market Scanner Service • DeepSeek R1 14B • GPU Accelerated • Chain-of-Thought Reasoning
         </p>
       </motion.div>
 
@@ -194,12 +194,28 @@ export default function AgentsSystem() {
             <span className="text-green-500 font-bold">Every 2 minutes</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-green-500/60">Confidence Threshold:</span>
-            <span className="text-green-500 font-bold">65% (70% for accounts &lt;$500)</span>
+            <span className="text-green-500/60">Base Confidence:</span>
+            <span className="text-green-500 font-bold">25% (RL-adapted)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-green-500/60">RL Optimizer:</span>
+            <span className="text-purple-400 font-bold">ACTIVE (30-35%)</span>
           </div>
           <div className="flex justify-between">
             <span className="text-green-500/60">Max Leverage:</span>
-            <span className="text-green-500 font-bold">1x (for accounts &lt;$500)</span>
+            <span className="text-green-500 font-bold">1x (accounts &lt;$500)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-green-500/60">Rate Limit:</span>
+            <span className="text-green-500 font-bold">1 RPS/key (30 total)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-green-500/60">Market Scanner:</span>
+            <span className="text-green-500 font-bold">Top 50, batch 5/5s</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-green-500/60">Order Book:</span>
+            <span className="text-yellow-500 font-bold">OFF (stability)</span>
           </div>
         </div>
       </motion.div>
@@ -263,12 +279,12 @@ export default function AgentsSystem() {
         <div className="space-y-3 text-sm">
           <div className="flex items-start gap-3">
             <span className="text-blue-400 font-bold shrink-0">1. SCAN</span>
-            <p className="text-green-500/80">Market Scanner analyzes all Aster DEX pairs every 2 minutes, scoring opportunities using multi-factor algorithm (Volume 30%, Momentum 25%, RSI 20%, Volatility 15%, Liquidity 15%)</p>
+            <p className="text-green-500/80">Market Scanner Service (algorithmic, non-AI) analyzes <strong>top 50 symbols</strong> from Aster DEX every 2 minutes using batch processing (5 symbols per 5 seconds). Multi-factor scoring: Volume 30%, Momentum 25%, RSI 20%, Volatility 15%, Liquidity 10%. <span className="text-yellow-500/80">Order book analysis disabled for stability.</span></p>
           </div>
           
           <div className="flex items-start gap-3">
             <span className="text-blue-400 font-bold shrink-0">2. ANALYZE</span>
-            <p className="text-green-500/80">Technical Analyst performs deep Chain-of-Thought analysis on top opportunities (score ≥70, confidence ≥35%) using DeepSeek R1 32B model</p>
+            <p className="text-green-500/80">Technical Analyst performs deep Chain-of-Thought analysis on top opportunities (score ≥70, confidence ≥35%) using DeepSeek R1 14B model</p>
           </div>
           
           <div className="flex items-start gap-3">
@@ -293,11 +309,56 @@ export default function AgentsSystem() {
         </div>
       </motion.div>
 
-      {/* Key Features */}
+      {/* RL Optimizer Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5 }}
+        className="glass-effect p-6 rounded-lg border border-purple-500/30"
+      >
+        <h2 className="text-xl font-bold text-purple-400 mb-4">🤖 Reinforcement Learning Optimizer</h2>
+        
+        <div className="space-y-4 text-sm text-green-500/80">
+          <p>
+            Advanced RL system that <strong>learns from every trade</strong> and adapts parameters in real-time based on market conditions and performance.
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-purple-300 font-bold mb-2">📊 Adapts To:</h3>
+              <ul className="space-y-1 text-xs">
+                <li>• <strong>Market Regime:</strong> Trending/Ranging/Volatile</li>
+                <li>• <strong>Account Size:</strong> Micro/Small/Medium/Large</li>
+                <li>• <strong>Performance:</strong> Win rate & volatility</li>
+                <li>• <strong>Risk Profile:</strong> Recent drawdowns</li>
+              </ul>
+            </div>
+            
+            <div>
+              <h3 className="text-purple-300 font-bold mb-2">⚙️ Optimizes:</h3>
+              <ul className="space-y-1 text-xs">
+                <li>• <strong>Confidence:</strong> 30-65% (adaptive)</li>
+                <li>• <strong>R:R Ratio:</strong> 1.5-3.0x</li>
+                <li>• <strong>Position Size:</strong> 0.6-1.2% of balance</li>
+                <li>• <strong>Stops:</strong> 2.5-4.0% (ATR-based)</li>
+                <li>• <strong>Targets:</strong> 6-12% (dynamic)</li>
+              </ul>
+            </div>
+          </div>
+          
+          <div className="bg-purple-500/10 border border-purple-500/30 rounded p-3 mt-4">
+            <p className="text-xs text-purple-300">
+              <strong>Current Status:</strong> ACTIVE • Micro account mode ({"<"}$100) • 30% confidence threshold • 2.5x R:R ratio • Conservative risk profile
+            </p>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Key Features */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
         className="glass-effect p-6 rounded-lg"
       >
         <h2 className="text-xl font-bold text-neon-green mb-4">Key Features</h2>
@@ -306,7 +367,7 @@ export default function AgentsSystem() {
           <div>
             <h3 className="text-green-500 font-bold mb-2">🧠 AI Technology</h3>
             <ul className="space-y-1 text-xs text-green-500/70">
-              <li>• DeepSeek R1 32B (32 billion parameters)</li>
+              <li>• DeepSeek R1 14B (14 billion parameters)</li>
               <li>• RTX 5070 Ti GPU acceleration</li>
               <li>• Chain-of-Thought reasoning enabled</li>
               <li>• 3000-3500 token analysis depth</li>
@@ -317,11 +378,11 @@ export default function AgentsSystem() {
           <div>
             <h3 className="text-green-500 font-bold mb-2">📊 Market Analysis</h3>
             <ul className="space-y-1 text-xs text-green-500/70">
-              <li>• Scans ALL Aster DEX pairs</li>
+              <li>• Scans top 50 Aster DEX pairs</li>
               <li>• Multi-factor scoring algorithm</li>
-              <li>• Order book depth analysis</li>
+              <li>• Batch processing (5 symbols / 5 seconds)</li>
               <li>• Volume microstructure (4 timeframes)</li>
-              <li>• Advanced pattern recognition</li>
+              <li>• Pattern recognition & divergence detection</li>
             </ul>
           </div>
           

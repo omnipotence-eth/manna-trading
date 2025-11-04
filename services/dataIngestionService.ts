@@ -111,7 +111,7 @@ export class DataIngestionService {
   constructor() {
     logger.info('Data Ingestion Service initialized', {
       context: 'DataIngestion',
-      sources: ['AsterDEX', 'CoinGecko', 'CryptoPanic', 'FearGreedIndex', 'OnChainAPIs']
+      sources: ['Aster DEX ONLY (actual trading prices with 30-key pool)']
     });
   }
 
@@ -129,21 +129,22 @@ export class DataIngestionService {
         symbol
       });
 
-      // Get data from multiple sources in parallel
-      const [asterData, coinGeckoData, technicalData] = await Promise.all([
+      // CRITICAL: Use ONLY Aster DEX data (actual exchange prices with 30-key pool)
+      // NO external APIs (CoinGecko, etc.) - only real trading prices from Aster DEX
+      const [asterData, technicalData] = await Promise.all([
         this.getAsterMarketData(symbol),
-        this.getCoinGeckoData(symbol),
         this.calculateTechnicalIndicators(symbol)
       ]);
 
+      // CRITICAL FIX: Use only Aster DEX data (all we need!)
       const marketData: MarketData = {
         symbol,
-        price: asterData.price || coinGeckoData.price,
-        priceChange24h: coinGeckoData.priceChange24h || 0,
-        high24h: asterData.high24h || coinGeckoData.high24h,
-        low24h: asterData.low24h || coinGeckoData.low24h,
-        volume: asterData.volume || coinGeckoData.volume,
-        avgVolume: asterData.avgVolume || coinGeckoData.avgVolume,
+        price: asterData.price,
+        priceChange24h: technicalData.change1h || 0,
+        high24h: asterData.high24h,
+        low24h: asterData.low24h,
+        volume: asterData.volume,
+        avgVolume: asterData.avgVolume,
         volatility: technicalData.volatility,
         change1h: technicalData.change1h,
         change4h: technicalData.change4h,
@@ -152,8 +153,8 @@ export class DataIngestionService {
         ma50: technicalData.ma50,
         ma200: technicalData.ma200,
         priceVsMA20: technicalData.priceVsMA20,
-        marketCap: coinGeckoData.marketCap,
-        circulatingSupply: coinGeckoData.circulatingSupply,
+        marketCap: undefined, // Don't need for trading
+        circulatingSupply: undefined, // Don't need for trading
         // Order book and liquidity data
         orderBookDepth: asterData.orderBookDepth,
         bidAskSpread: asterData.bidAskSpread,
@@ -341,65 +342,49 @@ export class DataIngestionService {
           throw new Error('Invalid price from AsterDEX');
         }
       } catch (error) {
-        logger.warn('AsterDEX data unavailable, using fallback', { 
+        logger.error('Aster DEX data unavailable - NO FALLBACK (trading system requires actual exchange prices)', { 
           context: 'DataIngestion',
           symbol,
           error: error instanceof Error ? error.message : String(error)
         });
         
-        // Fallback to CoinGecko data
-        const coinGeckoData = await this.getCoinGeckoData(symbol);
-        return {
-          price: coinGeckoData.price,
-          volume: coinGeckoData.volume,
-          avgVolume: coinGeckoData.avgVolume,
-          high24h: coinGeckoData.high24h,
-          low24h: coinGeckoData.low24h,
-          orderBookDepth: null,
-          bidAskSpread: 0,
-          liquidityScore: 0
-        };
+        // CRITICAL: No CoinGecko fallback!
+        // We MUST use actual Aster DEX prices for trading decisions
+        // Fallback prices from external sources would cause:
+        // 1. Price mismatch between displayed price and actual trade execution
+        // 2. Bad trade decisions based on wrong prices
+        // 3. Potential losses due to arbitrage gaps
+        throw error;
       }
     });
   }
 
   /**
    * Get Aster DEX order book depth for liquidity analysis
+   * OPTIMIZED: Now uses asterDexService.getOrderBook() with 30-key support and caching
    */
   private async getAsterOrderBookDepth(symbol: string): Promise<any> {
     try {
-      // Convert BTC/USDT to BTCUSDT for Aster DEX API
-      const asterSymbol = symbol.replace('/', '');
+      // OPTIMIZED: Use asterDexService.getOrderBook() which has:
+      // - 30-key load balancing for 600 req/sec capacity
+      // - 2-second caching for performance
+      // - 10-second timeout protection
+      // - Automatic retry logic via rate limiter
+      const orderBookData = await asterDexService.getOrderBook(symbol, 20);
       
-      // Get order book data from Aster DEX
-      const response = await fetch(`https://fapi.asterdex.com/fapi/v1/depth?symbol=${asterSymbol}&limit=20`);
-      
-      if (!response.ok) {
-        throw new Error(`Order book API returned ${response.status}`);
+      if (!orderBookData) {
+        throw new Error('Order book data unavailable');
       }
       
-      const orderBook = await response.json();
-      
-      // Calculate liquidity metrics
-      const bids = orderBook.bids || [];
-      const asks = orderBook.asks || [];
-      
-      const bidLiquidity = bids.reduce((sum: number, [price, qty]: [string, string]) => 
-        sum + (parseFloat(price) * parseFloat(qty)), 0);
-      const askLiquidity = asks.reduce((sum: number, [price, qty]: [string, string]) => 
-        sum + (parseFloat(price) * parseFloat(qty)), 0);
-      
-      const spread = asks.length > 0 && bids.length > 0 ? 
-        parseFloat(asks[0][0]) - parseFloat(bids[0][0]) : 0;
-      
+      // Return in expected format (asterDexService already calculates all metrics)
       return {
-        bidLiquidity,
-        askLiquidity,
-        totalLiquidity: bidLiquidity + askLiquidity,
-        spread,
-        liquidityScore: Math.min(100, (bidLiquidity + askLiquidity) / 1000000 * 100), // Score out of 100
-        bidDepth: bids.length,
-        askDepth: asks.length
+        bidLiquidity: orderBookData.bidLiquidity,
+        askLiquidity: orderBookData.askLiquidity,
+        totalLiquidity: orderBookData.totalLiquidity,
+        spread: orderBookData.spread,
+        liquidityScore: orderBookData.liquidityScore,
+        bidDepth: orderBookData.bidDepth,
+        askDepth: orderBookData.askDepth
       };
     } catch (error) {
       logger.warn('Failed to get order book depth', { 
@@ -564,59 +549,77 @@ export class DataIngestionService {
 
   private async getNewsSentiment(symbol: string): Promise<any[]> {
     return circuitBreakers.externalApi.execute(async () => {
-      // Mock news data - in production, integrate with CryptoPanic API
-      return [
-        {
-          source: 'CoinDesk',
-          headline: `${symbol} reaches new monthly high`,
-          sentiment: 'positive' as const,
-          timestamp: Date.now(),
-          url: 'https://example.com'
-        },
-        {
-          source: 'CryptoNews',
-          headline: `Institutional adoption continues for ${symbol}`,
-          sentiment: 'positive' as const,
-          timestamp: Date.now() - 3600000,
-          url: 'https://example.com'
-        }
-      ];
+      // REAL DATA ONLY: Return empty array if news API unavailable
+      // TODO: Integrate with real news APIs (CryptoPanic, CoinDesk API, etc.)
+      logger.debug('News sentiment data not available - returning empty array', {
+        context: 'DataIngestion',
+        data: { symbol }
+      });
+      return [];
     });
   }
 
   private async getSocialSentiment(symbol: string): Promise<any> {
     return circuitBreakers.externalApi.execute(async () => {
-      // Mock social data - in production, integrate with Reddit/Twitter APIs
+      // REAL DATA ONLY: Return neutral/empty values if social APIs unavailable
+      // TODO: Integrate with real social APIs (Reddit API, Twitter API, etc.)
+      logger.debug('Social sentiment data not available - returning neutral values', {
+        context: 'DataIngestion',
+        data: { symbol }
+      });
       return {
-        redditMentions: 1250,
-        redditChange: 15,
-        redditSentiment: 0.6,
-        twitterMentions: 5000,
-        twitterChange: 8,
-        twitterSentiment: 0.7
+        redditMentions: 0,
+        redditChange: 0,
+        redditSentiment: 0.5, // Neutral
+        twitterMentions: 0,
+        twitterChange: 0,
+        twitterSentiment: 0.5 // Neutral
       };
     });
   }
 
   private async getFearGreedIndex(): Promise<any> {
     return circuitBreakers.externalApi.execute(async () => {
-      // Mock fear/greed data - in production, use real API
+      // REAL DATA ONLY: Try to fetch from alternative.me API, fallback to neutral
+      try {
+        const response = await fetch('https://api.alternative.me/fng/', {
+          signal: AbortSignal.timeout(5000) // 5 second timeout
+        });
+        if (response.ok) {
+          const data = await response.json();
+          return {
+            index: data.data?.[0]?.value || 50, // Neutral if unavailable
+            trendingRank: 1
+          };
+        }
+      } catch (error) {
+        logger.debug('Fear/Greed Index API unavailable - using neutral value', {
+          context: 'DataIngestion',
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      // Fallback to neutral (50 = neutral)
       return {
-        index: 65,
-        trendingRank: 1
+        index: 50,
+        trendingRank: 0
       };
     });
   }
 
   private async getWhaleActivity(symbol: string): Promise<any> {
     return circuitBreakers.externalApi.execute(async () => {
-      // Mock whale data - in production, integrate with on-chain APIs
+      // REAL DATA ONLY: Return empty values if on-chain APIs unavailable
+      // TODO: Integrate with real on-chain APIs (Glassnode, CryptoQuant, etc.)
+      logger.debug('Whale activity data not available - returning empty values', {
+        context: 'DataIngestion',
+        data: { symbol }
+      });
       return {
-        whaleBuys: 15,
-        whaleBuyVolume: 5000000,
-        whaleSells: 8,
-        whaleSellVolume: 2000000,
-        netWhaleFlow: 3000000,
+        whaleBuys: 0,
+        whaleBuyVolume: 0,
+        whaleSells: 0,
+        whaleSellVolume: 0,
+        netWhaleFlow: 0,
         whaleThreshold: 100000
       };
     });
@@ -624,46 +627,65 @@ export class DataIngestionService {
 
   private async getLiquidityData(symbol: string): Promise<any> {
     return circuitBreakers.externalApi.execute(async () => {
-      // Mock liquidity data - in production, get from DEX APIs
+      // REAL DATA ONLY: Get from Aster DEX order book API
+      // If unavailable, return minimal values (not fake data)
+      try {
+        const { asterDexService } = await import('@/services/asterDexService');
+        const orderBook = await asterDexService.getOrderBook(symbol);
+        if (orderBook) {
+          const bidDepth = orderBook.bids.reduce((sum, bid) => sum + bid.quantity, 0);
+          const askDepth = orderBook.asks.reduce((sum, ask) => sum + ask.quantity, 0);
+          return {
+            totalLiquidity: bidDepth + askDepth,
+            liquidityChange: 0,
+            depthAnalysis: Math.min(bidDepth, askDepth),
+            slippageEstimate: orderBook.spreadPercent || 0
+          };
+        }
+      } catch (error) {
+        logger.debug('Liquidity data unavailable from Aster DEX - returning minimal values', {
+          context: 'DataIngestion',
+          data: { symbol },
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+      // Minimal fallback (not fake data)
       return {
-        totalLiquidity: 50000000,
-        liquidityChange: 2.1,
-        depthAnalysis: 1000000,
-        slippageEstimate: 0.1
+        totalLiquidity: 0,
+        liquidityChange: 0,
+        depthAnalysis: 0,
+        slippageEstimate: 0
       };
     });
   }
 
   private async getExchangeFlows(symbol: string): Promise<any> {
     return circuitBreakers.externalApi.execute(async () => {
-      // Mock exchange flow data - in production, use on-chain APIs
+      // REAL DATA ONLY: Return zero values if on-chain APIs unavailable
+      // TODO: Integrate with real exchange flow APIs (Glassnode, CryptoQuant, etc.)
+      logger.debug('Exchange flow data not available - returning zero values', {
+        context: 'DataIngestion',
+        data: { symbol }
+      });
       return {
-        inflows: 15000000,
-        inflowChange: 5.2,
-        outflows: 12000000,
-        outflowChange: -2.1,
-        netFlow: 3000000
+        inflows: 0,
+        inflowChange: 0,
+        outflows: 0,
+        outflowChange: 0,
+        netFlow: 0
       };
     });
   }
 
   private async getSmartContractEvents(symbol: string): Promise<any[]> {
     return circuitBreakers.externalApi.execute(async () => {
-      // Mock smart contract events - in production, use blockchain APIs
-      return [
-        {
-          type: 'Large Transfer',
-          description: '1000 BTC moved to cold storage',
-          timestamp: Date.now(),
-          value: 1000
-        },
-        {
-          type: 'Exchange Deposit',
-          description: '500 BTC deposited to Binance',
-          timestamp: Date.now() - 1800000,
-          value: 500
-        }
-      ];
+      // REAL DATA ONLY: Return empty array if blockchain APIs unavailable
+      // TODO: Integrate with real blockchain APIs (Etherscan, Blockchair, etc.)
+      logger.debug('Smart contract events not available - returning empty array', {
+        context: 'DataIngestion',
+        data: { symbol }
+      });
+      return [];
     });
   }
 

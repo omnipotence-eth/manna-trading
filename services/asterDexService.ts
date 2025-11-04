@@ -8,6 +8,7 @@ import { generateSignature, buildSignedQuery } from '@/lib/asterAuth';
 import { AsterApiError } from '@/lib/asterApiError';
 import { asterConfig } from '@/lib/configService';
 import { circuitBreakers } from '@/lib/circuitBreaker';
+import apiKeyManager from '@/lib/apiKeyManager';
 
 export interface AsterMarket {
   symbol: string;
@@ -49,22 +50,24 @@ export interface AsterTrade {
 class AsterDexService {
   private baseUrl: string = 'https://fapi.asterdex.com'; // Real Aster DEX API URL
   private WS_BASE_URL: string = 'wss://fstream.asterdex.com/stream'; // Real WebSocket URL
-  private apiKey: string | null = null;
-  private secretKey: string | null = null;
+  private apiKey: string | null = null; // Fallback for backwards compatibility
+  private secretKey: string | null = null; // Fallback for backwards compatibility
+  // REMOVED: simulationInterval - No simulation mode, only real API data
   private provider: ethers.Provider | null = null;
   private signer: ethers.Signer | null = null;
   private ws: WebSocket | null = null;
+  private useMultiKey: boolean = false; // Enable multi-key mode
   
-  // Rate limiting strategy (ASTER DEX OPTIMIZED - realistic limits)
+  // Rate limiting strategy - NOW SUPPORTS 30 KEYS = 600 req/sec!
   private requestQueue: Array<() => Promise<any>> = [];
   private isProcessingQueue: boolean = false;
   private lastRequestTime: number = 0;
-  private readonly MIN_REQUEST_DELAY = 50; // 50ms between requests = max 20 req/sec (aggressive but safe)
-  private readonly BATCH_SIZE = 5; // Process 5 requests concurrently for faster parallel fetching
+  private readonly MIN_REQUEST_DELAY = 50; // Still applies per-key
+  private readonly BATCH_SIZE = 30; // Increased from 5 to 30 (one per key!)
   private requestCount: number = 0;
   private requestWindow: number = Date.now();
   private lastSuccessfulRequest: number = 0;
-  private readonly MAX_REQUESTS_PER_MINUTE = 600; // Increased limit for faster throughput (still safe for most exchanges)
+  private readonly MAX_REQUESTS_PER_MINUTE = 36000; // 30 keys × 1200 = 36,000 req/min!
   
   // Request deduplication to prevent concurrent identical requests
   private pendingRequests: Map<string, Promise<any>> = new Map();
@@ -103,28 +106,35 @@ class AsterDexService {
     this.baseUrl = 'https://fapi.asterdex.com/fapi/v1';
     this.WS_BASE_URL = 'wss://fstream.asterdex.com/stream';
     
-    // Load API credentials from environment variables
-    // Server-side: use ASTER_API_KEY and ASTER_SECRET_KEY
-    // Client-side: use NEXT_PUBLIC_ASTER_API_KEY (no secret on client)
+    // Check if multi-key mode is available
+    const keyStats = apiKeyManager.getStats();
+    this.useMultiKey = keyStats.totalKeys > 1;
+    
+    // Load fallback credentials for backwards compatibility or client-side
     if (typeof window !== 'undefined') {
       // Client-side (browser)
       this.apiKey = process.env.NEXT_PUBLIC_ASTER_API_KEY || null;
       this.secretKey = null; // Never expose secret key to client
+      this.useMultiKey = false; // Client always uses single key
     } else {
       // Server-side (API routes)
-      this.apiKey = process.env.ASTER_API_KEY || null;
-      this.secretKey = process.env.ASTER_SECRET_KEY || null;
+      if (!this.useMultiKey) {
+        // Fallback to single key if multi-key not configured
+        this.apiKey = process.env.ASTER_API_KEY || null;
+        this.secretKey = process.env.ASTER_SECRET_KEY || null;
+      }
     }
     
-    logger.info('🔄 Aster DEX Service initialized', {
+    logger.info('Aster DEX Service initialized', {
       context: 'AsterDex',
       data: { 
         baseUrl: this.baseUrl,
         wsUrl: this.WS_BASE_URL,
-        hasApiKey: !!this.apiKey,
-        hasSecretKey: !!this.secretKey,
+        multiKeyMode: this.useMultiKey,
+        totalKeys: this.useMultiKey ? keyStats.totalKeys : 1,
+        totalCapacity: this.useMultiKey ? `${keyStats.totalCapacityRPS} req/sec` : '20 req/sec',
         environment: typeof window !== 'undefined' ? 'client' : 'server',
-        note: 'Real Aster DEX market data'
+        note: this.useMultiKey ? '30-KEY MODE: 600 req/sec capacity!' : 'Single key mode'
       },
     });
   }
@@ -168,11 +178,16 @@ class AsterDexService {
           // Update request tracking
           this.lastRequestTime = Date.now();
 
-          // Log rate limit stats every 50 requests
-          if (this.requestCount % 50 === 0) {
+          // OPTIMIZATION: Log rate limit stats every 100 requests (was 50)
+          if (this.requestCount % 100 === 0) {
             const requestsPerSecond = this.requestCount / ((Date.now() - this.requestWindow) / 1000);
-            logger.debug(`📊 Rate limit: ${this.requestCount} requests, ${requestsPerSecond.toFixed(1)} req/s`, {
-              context: 'AsterDex'
+            logger.debug('Rate limit sample', {
+              context: 'AsterDex',
+              data: {
+                requests: this.requestCount,
+                rps: requestsPerSecond.toFixed(1),
+                note: 'Sampled log (1 in 100 requests)'
+              }
             });
           }
 
@@ -387,81 +402,25 @@ class AsterDexService {
         return;
       }
 
-      // DEVELOPMENT: Simulate WebSocket for demo purposes (with real-looking data)
-      logger.info('🔗 Using SIMULATED WebSocket (no API key or env var not set)', { context: 'AsterDex' });
-      this.startSimulationMode(onMessage);
+      // REAL MODE ONLY: Require API key for WebSocket connection
+      logger.error('❌ Cannot connect WebSocket: API key required', undefined, { 
+        context: 'AsterDex',
+        data: {
+          hasApiKey: !!this.apiKey,
+          envVar: process.env.NEXT_PUBLIC_USE_REAL_WEBSOCKET,
+          solution: 'Set ASTER_API_KEY and NEXT_PUBLIC_USE_REAL_WEBSOCKET=true to use real WebSocket'
+        }
+      });
+      throw new Error('WebSocket connection requires API key. Please configure ASTER_API_KEY and set NEXT_PUBLIC_USE_REAL_WEBSOCKET=true');
 
     } catch (error) {
       logger.error('Failed to connect WebSocket', error, { context: 'AsterDex' });
     }
   }
 
-  /**
-   * Start WebSocket simulation mode (fallback)
-   * @private
-   */
-  private startSimulationMode(onMessage: (data: WebSocketMessage) => void) {
-    logger.info('✓ WebSocket simulation started (FALLBACK MODE - REALISTIC DATA)', { context: 'AsterDex' });
-    
-    // Realistic starting prices
-    const basePrices: Record<string, number> = {
-      'BTCUSDT': 67234.50,
-      'ETHUSDT': 3456.78,
-      'SOLUSDT': 182.45,
-      'BNBUSDT': 412.33,
-      'DOGEUSDT': 0.0842,
-      'XRPUSDT': 0.5623,
-    };
-    
-    // Simulate periodic price updates for ALL symbols
-    const simulationInterval = setInterval(() => {
-      if (typeof window === 'undefined') {
-        clearInterval(simulationInterval);
-        return;
-      }
-
-      // Simulate trades for all symbols
-      Object.entries(basePrices).forEach(([symbol, basePrice]) => {
-        // Random price fluctuation (-0.5% to +0.5%)
-        const priceChange = (Math.random() - TRADING_THRESHOLDS.PRICE_CHANGE_PROBABILITY) * TRADING_THRESHOLDS.RANDOM_PRICE_CHANGE_RANGE * basePrice;
-        const currentPrice = basePrice + priceChange;
-        basePrices[symbol] = currentPrice; // Update base price
-        
-        const mockTradeData: WebSocketMessage = {
-          type: 'trade',
-          data: {
-            symbol: symbol,
-            price: currentPrice,
-            quantity: Math.random() * 0.5,
-            timestamp: Date.now(),
-          },
-        };
-        
-        onMessage(mockTradeData);
-        
-        // Also send ticker update every other cycle
-        if (Math.random() > TRADING_THRESHOLDS.PRICE_CHANGE_PROBABILITY) {
-          const mockTickerData: WebSocketMessage = {
-            type: 'ticker',
-            data: {
-              symbol: symbol,
-              price: currentPrice,
-              priceChangePercent: (priceChange / basePrice) * 100,
-              volume: Math.random() * 1000000,
-              timestamp: Date.now(),
-            },
-          };
-          
-          onMessage(mockTickerData);
-        }
-      });
-
-      logger.debug('📊 Simulated price update sent for all symbols', { context: 'AsterDex' });
-    }, 3000); // Update every 3 seconds for smooth UI
-
-    // Store interval for cleanup
-    (this as any).simulationInterval = simulationInterval;
-  }
+  // REMOVED: startSimulationMode() - System now requires real WebSocket connections only
+  // All data must come from real Aster DEX API endpoints
+  // See: https://github.com/asterdex/api-docs/blob/master/aster-finance-futures-api.md
 
   /**
    * Connect to real Aster DEX WebSocket
@@ -580,13 +539,18 @@ class AsterDexService {
             }
           }, delay);
         } else {
-          logger.error('Max WebSocket reconnection attempts reached. Falling back to simulation mode.', undefined, { 
-            context: 'AsterDex' 
+          logger.error('Max WebSocket reconnection attempts reached. Using HTTP polling fallback for real-time data.', undefined, { 
+            context: 'AsterDex',
+            data: {
+              attempts: this.reconnectAttempts,
+              maxAttempts: this.maxReconnectAttempts,
+              solution: 'Check network connectivity and Aster DEX WebSocket service status'
+            }
           });
           
-          // Fall back to simulation mode
-          logger.info('🔄 Switching to WebSocket simulation mode', { context: 'AsterDex' });
-          this.startSimulationMode(onMessage);
+          // Use HTTP polling fallback (real API calls) instead of simulation
+          logger.info('🔄 Switching to HTTP polling fallback (real API calls)', { context: 'AsterDex' });
+          this.startPollingFallback(onMessage);
         }
       };
 
@@ -717,6 +681,97 @@ class AsterDexService {
   }
 
   /**
+   * Get order book depth for a symbol (using public API - no auth required)
+   * OPTIMIZED: Uses 30-key system with caching and timeout
+   * CACHED: 2 seconds for real-time order book data
+   */
+  async getOrderBook(symbol: string, limit: number = 20): Promise<{
+    bids: [string, string][];
+    asks: [string, string][];
+    bidLiquidity: number;
+    askLiquidity: number;
+    totalLiquidity: number;
+    spread: number;
+    liquidityScore: number;
+    bidDepth: number;
+    askDepth: number;
+  } | null> {
+    const cacheKey = `orderbook:${symbol}:${limit}`;
+    
+    // Check cache first (30-second cache to prevent rate limit abuse)
+    // OPTIMIZED: Increased from 2s to 30s to reduce 429 errors
+    const cached = apiCache.get<any>(cacheKey);
+    if (cached !== null) {
+      return cached;
+    }
+    
+    return this.rateLimitedRequest(async () => {
+      try {
+        // Convert BTC/USDT to BTCUSDT format
+        const binanceSymbol = symbol.replace('/', '');
+        const url = `${this.baseUrl}/depth?symbol=${binanceSymbol}&limit=${limit}`;
+        
+        // Add timeout protection
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+        
+        try {
+          const response = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) {
+            throw new Error(`API returned ${response.status}`);
+          }
+          
+          const data = await response.json();
+          
+          // Calculate liquidity metrics
+          const bids = data.bids || [];
+          const asks = data.asks || [];
+          
+          const bidLiquidity = bids.reduce((sum: number, [price, qty]: [string, string]) => 
+            sum + (parseFloat(price) * parseFloat(qty)), 0);
+          const askLiquidity = asks.reduce((sum: number, [price, qty]: [string, string]) => 
+            sum + (parseFloat(price) * parseFloat(qty)), 0);
+          
+          const spread = asks.length > 0 && bids.length > 0 ? 
+            parseFloat(asks[0][0]) - parseFloat(bids[0][0]) : 0;
+          
+          const orderBookData = {
+            bids,
+            asks,
+            bidLiquidity,
+            askLiquidity,
+            totalLiquidity: bidLiquidity + askLiquidity,
+            spread,
+            liquidityScore: Math.min(100, (bidLiquidity + askLiquidity) / 1000000 * 100),
+            bidDepth: bids.length,
+            askDepth: asks.length
+          };
+          
+          // Cache for 30 seconds (prevents rate limit abuse)
+          // OPTIMIZED: Increased from 2s to 30s to reduce 429 errors
+          apiCache.set(cacheKey, orderBookData, 30000);
+          
+          return orderBookData;
+        } catch (fetchError) {
+          clearTimeout(timeoutId);
+          if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+            throw new Error('Order book fetch timeout after 10 seconds');
+          }
+          throw fetchError;
+        }
+      } catch (error) {
+        logger.error('Failed to get order book', error, { 
+          context: 'AsterDex', 
+          data: { symbol, limit } 
+        });
+        return null; // Fallback
+      }
+    });
+  }
+
+  /**
    * Get detailed 24h ticker data for a symbol (using public API - no auth required)
    * CACHED: 10 seconds to dramatically reduce API calls
    */
@@ -825,12 +880,112 @@ class AsterDexService {
         }));
         
         // Cache for 5-15 seconds depending on interval (ultra-fast for 1m)
-        const cacheTTL = interval === '1m' ? 5 : (['3m', '5m'].includes(interval) ? 10 : 15);
-        apiCache.set(cacheKey, klines, cacheTTL);
+        // CRITICAL FIX: Increase cache time to prevent 429 errors
+        // Klines data doesn't need to be super fresh - 60-120 seconds is fine for trading decisions
+        const cacheTTL = interval === '1m' ? 60 : (['3m', '5m'].includes(interval) ? 90 : 120);
+        apiCache.set(cacheKey, klines, cacheTTL * 1000); // Convert to milliseconds
         
         return klines;
       } catch (error) {
         logger.error(`Failed to get klines for ${symbol}`, error, { context: 'AsterDex' });
+        return null;
+      }
+    });
+  }
+
+  /**
+   * Get aggregated trades for a symbol (buy/sell volume analysis)
+   * CACHED: 10 seconds
+   */
+  async getAggregatedTrades(symbol: string, limit: number = 500): Promise<{
+    buyVolume: number;
+    sellVolume: number;
+    buySellRatio: number;
+    totalTrades: number;
+    avgPrice: number;
+  } | null> {
+    const cacheKey = `aggTrades:${symbol}:${limit}`;
+    
+    // Check cache first
+    const cached = apiCache.get<any>(cacheKey);
+    if (cached !== null) {
+      return cached;
+    }
+    
+    return this.rateLimitedRequest(async () => {
+      try {
+        // Convert BTC/USDT to BTCUSDT format
+        const binanceSymbol = symbol.replace('/', '');
+        const url = `${this.baseUrl}/fapi/v1/aggTrades?symbol=${binanceSymbol}&limit=${limit}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+          // CRITICAL FIX: Handle 404 gracefully - symbol may not exist on Aster DEX
+          // This is expected for some symbols and should not be logged as ERROR
+          if (response.status === 404) {
+            logger.debug(`Symbol ${symbol} not found on Aster DEX (404) - skipping aggregated trades`, {
+              context: 'AsterDex',
+              symbol
+            });
+            return null;
+          }
+          throw new Error(`API returned ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!Array.isArray(data) || data.length === 0) {
+          return null;
+        }
+        
+        // Calculate buy vs sell volume
+        // maker=false means market buy (taker buy), maker=true means market sell (taker sell)
+        let buyVolume = 0;
+        let sellVolume = 0;
+        let totalPrice = 0;
+        
+        data.forEach((trade: any) => {
+          const qty = parseFloat(trade.q || trade.quantity || '0');
+          const price = parseFloat(trade.p || trade.price || '0');
+          
+          totalPrice += price * qty;
+          
+          // maker=false = market buy (buyer was the taker)
+          if (trade.m === false) {
+            buyVolume += qty;
+          } else {
+            sellVolume += qty;
+          }
+        });
+        
+        const totalVolume = buyVolume + sellVolume;
+        const buySellRatio = sellVolume > 0 ? buyVolume / sellVolume : 1.0;
+        const avgPrice = totalVolume > 0 ? totalPrice / totalVolume : 0;
+        
+        const result = {
+          buyVolume,
+          sellVolume,
+          buySellRatio,
+          totalTrades: data.length,
+          avgPrice
+        };
+        
+        // Cache for 10 seconds
+        apiCache.set(cacheKey, result, 10);
+        
+        return result;
+      } catch (error) {
+        // CRITICAL FIX: Only log as error if it's not a 404 (symbol not found)
+        // 404 errors are expected for symbols that don't exist on Aster DEX
+        const is404 = error instanceof Error && error.message.includes('404');
+        if (is404) {
+          logger.debug(`Symbol ${symbol} not found on Aster DEX - skipping aggregated trades`, {
+            context: 'AsterDex',
+            symbol
+          });
+        } else {
+          logger.error(`Failed to get aggregated trades for ${symbol}`, error, { context: 'AsterDex' });
+        }
         return null;
       }
     });
@@ -896,99 +1051,127 @@ class AsterDexService {
 
   /**
    * Get all available trading pairs from Aster DEX
+   * OPTIMIZED: Added timeout, caching, and proper error handling
    */
   async getExchangeInfo(): Promise<any> {
+    // Check cache first (5 minute TTL - exchange info doesn't change often)
+    const cacheKey = 'exchangeInfo:full';
+    const cached = apiCache.get(cacheKey);
+    if (cached) {
+      logger.debug('Using cached exchange info', { context: 'AsterDex' });
+      return cached;
+    }
+
     try {
-      const url = `${this.baseUrl}/exchangeInfo`;
+      // CRITICAL FIX: Use correct Aster DEX API base URL (without /fapi/v1 for public endpoints)
+      const baseUrl = 'https://fapi.asterdex.com';
+      const url = `${baseUrl}/fapi/v1/exchangeInfo`;
       
       logger.debug('Fetching exchange info from Aster DEX', { context: 'AsterDex', data: { url } });
       
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`API returned ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      // Validate response structure
-      if (!data || !data.symbols || !Array.isArray(data.symbols)) {
-        logger.error('Invalid exchange info response structure', null, { 
-          context: 'AsterDex', 
-          data: { 
-            hasData: !!data,
-            hasSymbols: !!(data && data.symbols),
-            isArray: !!(data && data.symbols && Array.isArray(data.symbols)),
-            keys: data ? Object.keys(data) : []
-          }
-        });
-        throw new Error('Invalid exchange info response - missing symbols array');
-      }
-      
-      logger.info(`Found ${data.symbols.length} trading pairs`, { context: 'AsterDex' });
-      
-      // Get 24hr ticker data for volume information
-      const tickerUrl = `${this.baseUrl}/ticker/24hr`;
-      logger.debug('Fetching 24hr ticker data', { context: 'AsterDex', data: { url: tickerUrl } });
-      
-      const tickerResponse = await fetch(tickerUrl);
+      // Declare variables outside inner try block so they're accessible later
+      let data: any;
       let tickerData: any = {};
       
-      if (tickerResponse.ok) {
-        const tickerJson = await tickerResponse.json();
-        // Convert array to object for faster lookup
-        if (Array.isArray(tickerJson)) {
-          tickerData = tickerJson.reduce((acc: any, ticker: any) => {
-            acc[ticker.symbol] = ticker;
-            return acc;
-          }, {});
-          logger.info(`Loaded 24hr ticker data for ${Object.keys(tickerData).length} pairs`, { context: 'AsterDex' });
-        } else {
-          tickerData = tickerJson;
+      // Add 15-second timeout using AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}: ${response.statusText}`);
         }
-      } else {
-        logger.warn('Failed to fetch 24hr ticker data', { context: 'AsterDex', data: { status: tickerResponse.status } });
+        
+        data = await response.json();
+        
+        // Validate response structure
+        if (!data || !data.symbols || !Array.isArray(data.symbols)) {
+          logger.error('Invalid exchange info response structure', null, { 
+            context: 'AsterDex', 
+            data: { 
+              hasData: !!data,
+              hasSymbols: !!(data && data.symbols),
+              isArray: !!(data && data.symbols && Array.isArray(data.symbols)),
+              keys: data ? Object.keys(data) : []
+            }
+          });
+          throw new Error('Invalid exchange info response - missing symbols array');
+        }
+        
+        logger.info(`Found ${data.symbols.length} trading pairs`, { context: 'AsterDex' });
+        
+        // Get 24hr ticker data for volume information (with timeout)
+        const tickerUrl = `${baseUrl}/fapi/v1/ticker/24hr`;
+        logger.debug('Fetching 24hr ticker data', { context: 'AsterDex', data: { url: tickerUrl } });
+        
+        const tickerController = new AbortController();
+        const tickerTimeoutId = setTimeout(() => tickerController.abort(), 15000);
+        
+        try {
+          const tickerResponse = await fetch(tickerUrl, { signal: tickerController.signal });
+          clearTimeout(tickerTimeoutId);
+      
+          if (tickerResponse.ok) {
+            const tickerJson = await tickerResponse.json();
+            // Convert array to object for faster lookup
+            if (Array.isArray(tickerJson)) {
+              tickerData = tickerJson.reduce((acc: any, ticker: any) => {
+                acc[ticker.symbol] = ticker;
+                return acc;
+              }, {});
+              logger.info(`Loaded 24hr ticker data for ${Object.keys(tickerData).length} pairs`, { context: 'AsterDex' });
+            } else {
+              tickerData = tickerJson;
+            }
+          } else {
+            logger.warn('Failed to fetch 24hr ticker data', { context: 'AsterDex', data: { status: tickerResponse.status } });
+          }
+        } catch (tickerError) {
+          clearTimeout(tickerTimeoutId);
+          logger.warn('Ticker fetch failed or timed out, continuing without volume data', { 
+            context: 'AsterDex',
+            error: tickerError instanceof Error ? tickerError.message : String(tickerError)
+          });
+          // Continue without ticker data - not critical
+        }
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        throw fetchError;
       }
       
       // Combine exchange info with volume data
       const symbolsWithVolume = data.symbols.map((symbol: any) => {
-        const ticker = tickerData[symbol.symbol];
+        const ticker = tickerData[symbol.symbol] || {};
           
         return {
           ...symbol,
-          volume24h: ticker ? parseFloat(ticker.volume || 0) : 0,
-          quoteVolume24h: ticker ? parseFloat(ticker.quoteVolume || 0) : 0,
-          priceChange24h: ticker ? parseFloat(ticker.priceChange || 0) : 0,
-          priceChangePercent24h: ticker ? parseFloat(ticker.priceChangePercent || 0) : 0,
-          lastPrice: ticker ? parseFloat(ticker.lastPrice || 0) : 0
+          volume24h: ticker.volume ? parseFloat(ticker.volume) : 0,
+          quoteVolume24h: ticker.quoteVolume ? parseFloat(ticker.quoteVolume) : 0,
+          priceChange24h: ticker.priceChange ? parseFloat(ticker.priceChange) : 0,
+          priceChangePercent24h: ticker.priceChangePercent ? parseFloat(ticker.priceChangePercent) : 0,
+          lastPrice: ticker.lastPrice ? parseFloat(ticker.lastPrice) : 0
         };
       });
       
-      // Sort by volume (highest first)
-      symbolsWithVolume.sort((a: any, b: any) => b.quoteVolume24h - a.quoteVolume24h);
-      
-      // Filter for TRADING status only
-      const tradingPairs = symbolsWithVolume.filter((s: any) => s.status === 'TRADING');
-      
-      logger.info('Exchange info retrieved successfully', { 
-        context: 'AsterDex', 
-        data: { 
-          totalSymbols: tradingPairs.length,
-          totalPairs: data.symbols.length,
-          topVolumeSymbols: tradingPairs.slice(0, 10).map((s: any) => ({
-            symbol: s.symbol,
-            volume: `$${(s.quoteVolume24h / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR).toFixed(2)}M`
-          }))
-        }
+      // Sort by volume (descending)
+      const sortedByVolume = [...symbolsWithVolume].sort((a, b) => {
+        return (b.quoteVolume24h || 0) - (a.quoteVolume24h || 0);
       });
       
-      return {
-        symbols: tradingPairs,
-        allSymbols: symbolsWithVolume,
-        totalSymbols: tradingPairs.length,
-        topSymbolsByVolume: tradingPairs.slice(0, 20), // Top 20 by volume
+      const result = {
+        symbols: data.symbols,
+        topSymbolsByVolume: sortedByVolume.slice(0, 100), // Top 100 by volume
         serverTime: data.serverTime,
         timezone: data.timezone
       };
+      
+      // Cache for 5 minutes (exchange info doesn't change often)
+      apiCache.set(cacheKey, result, 300000);
+      
+      return result;
     } catch (error) {
       logger.error('Failed to fetch exchange info', error, { context: 'AsterDex' });
       throw error;
@@ -1035,7 +1218,7 @@ class AsterDexService {
 
   /**
    * Make authenticated API request with timeout and error handling
-   * OPTIMIZED: Added timeout and better error handling
+   * MULTI-KEY OPTIMIZED: Automatically uses key pool for 30x capacity!
    */
   private async authenticatedRequest<T>(
     endpoint: string,
@@ -1043,23 +1226,45 @@ class AsterDexService {
     method: 'GET' | 'POST' | 'DELETE' = 'GET',
     timeout: number = 30000 // 30 second default timeout
   ): Promise<T> {
-    return this.rateLimitedRequest(async () => {
+    // CRITICAL FIX: Bypass old queue system when using multi-key mode
+    // apiKeyManager already handles rate limiting (600 req/sec capacity)
+    // Using both creates a double bottleneck and causes timeouts
+    const executeRequest = async () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
+      
+      // Get API key from pool (or use fallback single key)
+      let apiKey: string;
+      let secretKey: string;
+      let keyId: string = 'single-key';
+
+      if (this.useMultiKey) {
+        const key = apiKeyManager.getNextKey();
+        if (!key) {
+          throw new Error('No healthy API keys available from pool');
+        }
+        apiKey = key.apiKey;
+        secretKey = key.secretKey;
+        keyId = key.id;
+      } else {
+        // Fallback to single key
+        apiKey = this.apiKey || '';
+        secretKey = this.secretKey || '';
+      }
       
       try {
         // Build signed query
         const queryString = await buildSignedQuery({
           ...params,
           timestamp: Date.now(),
-        }, this.secretKey!);
+        }, secretKey);
         
         const url = `${this.baseUrl}/${endpoint}?${queryString}`;
         
         const response = await fetch(url, {
           method,
           headers: {
-            'X-MBX-APIKEY': this.apiKey || '',
+            'X-MBX-APIKEY': apiKey,
             'Content-Type': 'application/json',
           },
           signal: controller.signal,
@@ -1078,16 +1283,33 @@ class AsterDexService {
           
           // Map AsterDex error codes to meaningful messages
           const errorCode = errorData.code || response.status;
-          throw new AsterApiError(
+          const error = new AsterApiError(
             this.mapErrorCode(errorCode, errorData.msg || errorText),
             errorCode,
             response.status
           );
+          
+          // Record error in key manager
+          if (this.useMultiKey) {
+            apiKeyManager.recordError(keyId, error);
+          }
+          
+          throw error;
+        }
+        
+        // Record success in key manager
+        if (this.useMultiKey) {
+          apiKeyManager.recordSuccess(keyId);
         }
         
         return await response.json();
       } catch (error) {
         clearTimeout(timeoutId);
+        
+        // Record error in key manager
+        if (this.useMultiKey && !(error instanceof AsterApiError)) {
+          apiKeyManager.recordError(keyId, error as Error);
+        }
         
         if (error instanceof AsterApiError) {
           throw error;
@@ -1099,7 +1321,15 @@ class AsterDexService {
         
         throw error;
       }
-    });
+    };
+    
+    // CRITICAL FIX: Only use old queue for single-key mode
+    // Multi-key mode already has rate limiting via apiKeyManager
+    if (this.useMultiKey) {
+      return executeRequest();
+    } else {
+      return this.rateLimitedRequest(executeRequest);
+    }
   }
 
   /**
@@ -1194,44 +1424,23 @@ class AsterDexService {
    */
   async setLeverage(symbol: string, leverage: number): Promise<boolean> {
     try {
-      // Call Aster API directly
-      const url = `${this.baseUrl}/leverage`;
-      const timestamp = Date.now();
-      
-      // Build query parameters
-      const params = new URLSearchParams({
-        symbol: symbol.replace('/', ''), // Remove slash for API
-        leverage: leverage.toString(),
-        timestamp: timestamp.toString()
-      });
-      
-      const queryString = params.toString();
-      
-      if (!this.secretKey) {
-        throw new Error('Secret key not configured');
-      }
-      const signature = await generateSignature(queryString, this.secretKey);
-      
-      const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
-        method: 'POST',
-        headers: {
-          'X-MBX-APIKEY': this.apiKey || '',
-          'Content-Type': 'application/json',
+      // CRITICAL OPTIMIZATION: Use authenticatedRequest for 30-key support and proper rate limiting
+      const normalizedSymbol = symbol.replace('/', '');
+      const data = await this.authenticatedRequest<{ leverage?: number; maxNotionalValue?: number }>(
+        'leverage',
+        {
+          symbol: normalizedSymbol,
+          leverage: leverage,
+          timestamp: Date.now()
         },
-      });
+        'POST',
+        15000 // 15 second timeout
+      );
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        logger.error(`Failed to set leverage for ${symbol}`, undefined, { 
-          context: 'AsterDex', 
-          data: { symbol, leverage, error: errorText } 
-        });
-        return false;
-      }
-      
-      logger.info(`✅ Leverage set: ${symbol} @ ${leverage}x`, { 
-        context: 'AsterDex',
-        data: { symbol, leverage }
+      // Success - leverage was set (data.leverage may or may not be returned by API)
+      logger.info(`✅ Leverage set to ${leverage}x for ${symbol}`, { 
+        context: 'AsterDex', 
+        data: { symbol, leverage, confirmed: data.leverage || leverage }
       });
       
       return true;
@@ -1264,45 +1473,22 @@ class AsterDexService {
         }
       }
       
-      // Call Aster API directly
-      const url = `${this.baseUrl}/order`;
-      const timestamp = Date.now();
-      
-      // Build query parameters
-      const params = new URLSearchParams({
+      // CRITICAL OPTIMIZATION: Use authenticatedRequest for 30-key support and proper rate limiting
+      const orderParams: Record<string, string | number> = {
         symbol: symbol.replace('/', ''), // Remove slash for API (e.g., BTC/USDT -> BTCUSDT)
         side,
         type: 'MARKET',
         quantity: size.toString(),
-        timestamp: timestamp.toString()
-      });
+        timestamp: Date.now()
+      };
       
       // Add reduceOnly flag for closing positions
       if (reduceOnly) {
-        params.append('reduceOnly', 'true');
+        orderParams.reduceOnly = 'true';
       }
       
-      const queryString = params.toString();
-      
-      if (!this.secretKey) {
-        throw new Error('Secret key not configured');
-      }
-      const signature = await generateSignature(queryString, this.secretKey);
-      
-      const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
-        method: 'POST',
-        headers: {
-          'X-MBX-APIKEY': this.apiKey || '',
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Order failed: ${error}`);
-      }
-      
-      const data = await response.json();
+      // Use authenticatedRequest for 30-key support and rate limiting
+      const data = await this.authenticatedRequest<AsterOrder>('order', orderParams, 'POST', 15000);
       const logType = reduceOnly ? '🔄 POSITION CLOSED' : '✅ REAL MARKET ORDER PLACED';
       logger.trade(logType, { context: 'AsterDex', data: { symbol, side, size, leverage, orderId: data.orderId, reduceOnly } });
       return data as AsterOrder;
@@ -1377,30 +1563,8 @@ class AsterDexService {
     
     const requestPromise = (async () => {
       try {
-        // Call Aster API directly
-        const url = `${this.baseUrl}/positionRisk`;
-        const timestamp = Date.now();
-        const queryString = `timestamp=${timestamp}`;
-        
-        if (!this.secretKey) {
-          throw new Error('Secret key not configured');
-        }
-        const signature = await generateSignature(queryString, this.secretKey);
-        
-        const response = await fetch(`${url}?${queryString}&signature=${signature}`, {
-          method: 'GET',
-          headers: {
-            'X-MBX-APIKEY': this.apiKey || '',
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`API returned ${response.status}: ${errorText}`);
-        }
-        
-        const data = await response.json();
+        // CRITICAL OPTIMIZATION: Use authenticatedRequest for 30-key support and proper rate limiting
+        const data = await this.authenticatedRequest<Array<any>>('positionRisk', { timestamp: Date.now() }, 'GET', 15000);
         
         // Filter only positions with non-zero size
         const activePositions = data.filter((pos: any) => parseFloat(pos.positionAmt) !== 0);
@@ -1420,8 +1584,8 @@ class AsterDexService {
           data: { count: positions.length, positions: positions.map(p => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) },
         });
         
-        // Cache for only 1 second (ultra-aggressive refresh to prevent stale position data)
-        apiCache.set(cacheKey, positions, 1);
+        // Cache for 20 seconds (matches apiCache.TTL.POSITIONS from recent optimization)
+        apiCache.set(cacheKey, positions, apiCache.getTTL('POSITIONS'));
         
         return positions;
       } catch (error) {
@@ -1497,7 +1661,10 @@ class AsterDexService {
     
     // If a request is already pending, return that promise instead of making a new request
     if (this.pendingRequests.has(requestKey)) {
-      logger.debug('⚠️ Deduplicating concurrent getBalance request', { context: 'AsterDex' });
+      logger.debug('⚠️ Deduplicating concurrent getBalance request', { 
+        context: 'AsterDex',
+        data: { requestKey, message: 'Reusing pending request to avoid duplicate API call' }
+      });
       return this.pendingRequests.get(requestKey)!;
     }
     
@@ -1518,12 +1685,10 @@ class AsterDexService {
               await new Promise(resolve => setTimeout(resolve, delay));
             }
             
-            const response = await fetch(this.getApiUrl('/api/aster/account'));
-            if (!response.ok) {
-              throw new Error(`API returned ${response.status}`);
-            }
-            
-            const data = await response.json();
+            // CRITICAL FIX: Call Aster DEX API directly, NOT the Next.js API route!
+            // The Next.js route returns transformed data, but we need raw Aster DEX format
+            // Use authenticatedRequest which uses 30-key pool automatically
+            const data = await this.authenticatedRequest('account', {}, 'GET', 30000);
             
             // HIGH PRIORITY FIX: Add type validation for API response
             if (!data || typeof data !== 'object') {
@@ -1545,19 +1710,26 @@ class AsterDexService {
             const totalUnrealizedProfit = parseFloat(data.totalUnrealizedProfit || 0);
             const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
             
-            // totalMarginBalance = totalWalletBalance + totalUnrealizedProfit
-            // This is the REAL account value including unrealized P&L
+            // Account equity calculation:
+            // If totalMarginBalance is negative/invalid, use availableBalance (actual trading balance)
+            // Otherwise use totalMarginBalance (includes unrealized P&L)
             let balance = totalMarginBalance;
             
-            // If balance is negative (losses), show it as is (don't hide losses)
-            // If you want to show absolute value instead, uncomment:
-            // balance = Math.abs(balance);
-            
-            // Final fallback: if still negative or invalid, use position margin + unrealized P&L
+            // CRITICAL FIX: If margin balance is negative or invalid, use availableBalance
             if (balance <= 0 || isNaN(balance)) {
-              balance = totalPositionInitialMargin + (totalUnrealizedProfit || 0);
-              if (balance <= 0) {
-                throw new Error('Invalid balance data from Aster API');
+              const availableBalance = parseFloat(data.availableBalance || 0);
+              if (availableBalance > 0 && !isNaN(availableBalance)) {
+                balance = availableBalance; // Use available balance as account equity
+                logger.info('Using availableBalance as account equity (totalMarginBalance was invalid)', {
+                  context: 'AsterDex',
+                  data: { availableBalance, totalMarginBalance }
+                });
+              } else {
+                // Fallback: try wallet balance + unrealized P&L
+                balance = totalWalletBalance + totalUnrealizedProfit;
+                if (isNaN(balance) || balance <= 0) {
+                  throw new Error('Invalid balance data from Aster API - all values are invalid');
+                }
               }
             }
             
@@ -1643,12 +1815,7 @@ class AsterDexService {
       logger.info('✓ WebSocket disconnected', { context: 'AsterDex' });
     }
 
-    // Clean up simulation interval (development mode)
-    if ((this as any).simulationInterval) {
-      clearInterval((this as any).simulationInterval);
-      (this as any).simulationInterval = null;
-      logger.debug('WebSocket simulation stopped', { context: 'AsterDex' });
-    }
+    // Cleanup complete - no simulation intervals (system uses real data only)
 
     this.isConnecting = false;
   }

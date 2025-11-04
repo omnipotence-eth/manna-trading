@@ -40,76 +40,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Apply rate limiting and circuit breaker protection
+    // CRITICAL OPTIMIZATION: Use asterDexService.setLeverage() for 30-key support
     return await withRateLimit(async () => {
       return await circuitBreakers.asterApi.execute(async () => {
-        // Build leverage parameters
-        const leverageParams: Record<string, string | number> = {
-          symbol: body.symbol.replace('/', ''), // Convert BTC/USDT to BTCUSDT
-          leverage: leverage,
-          timestamp: Date.now()
-        };
-
-        // Build signed query
-        const queryString = await buildSignedQuery(leverageParams, asterConfig.secretKey);
-        const url = `${asterConfig.baseUrl}/fapi/v1/leverage?${queryString}`;
-
-        logger.info('Setting leverage on Aster DEX', {
+        logger.info('Setting leverage on Aster DEX via 30-key system', {
           context: 'AsterAPI',
           data: { symbol: body.symbol, leverage },
         });
 
-        // Add timeout to prevent hanging requests
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-        try {
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'X-MBX-APIKEY': asterConfig.apiKey,
-              'Content-Type': 'application/json',
-            },
-            signal: controller.signal,
-          });
-
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            return handleAsterApiError(response, 'AsterAPI');
-          }
-
-          const data = await response.json();
-          logger.info('Successfully set leverage on Aster DEX', {
+        // Import asterDexService dynamically to avoid circular dependencies
+        const { asterDexService } = await import('@/services/asterDexService');
+        
+        // Use optimized service method (30-key pool, proper error handling)
+        const success = await asterDexService.setLeverage(body.symbol, leverage);
+        
+        if (!success) {
+          logger.error('Failed to set leverage via service', undefined, {
             context: 'AsterAPI',
-            data: { symbol: body.symbol, leverage: data.leverage || leverage },
+            data: { symbol: body.symbol, leverage }
           });
-
-          return createSuccessResponse({
-            success: true,
-            symbol: body.symbol,
-            leverage: data.leverage || leverage,
-            maxNotionalValue: data.maxNotionalValue,
-            ...data
-          });
-        } catch (error: any) {
-          clearTimeout(timeoutId);
-          if (error.name === 'AbortError') {
-            logger.error('Leverage setting timeout', error, { context: 'AsterAPI' });
-            return NextResponse.json(
-              { error: 'Request timeout - leverage setting took too long' },
-              { status: 408 }
-            );
-          }
-          throw error;
+          return NextResponse.json(
+            { error: 'Failed to set leverage on Aster DEX' },
+            { status: 500 }
+          );
         }
+
+        logger.info('Successfully set leverage on Aster DEX via optimized service', {
+          context: 'AsterAPI',
+          data: { symbol: body.symbol, leverage },
+        });
+
+        return createSuccessResponse({
+          success: true,
+          symbol: body.symbol,
+          leverage: leverage
+        });
       });
     });
-  } catch (error: any) {
-    logger.error('Failed to set leverage', error, { context: 'AsterAPI' });
+  } catch (error: unknown) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    logger.error('Failed to set leverage', errorObj, { context: 'AsterAPI' });
     return NextResponse.json(
-      { error: 'Failed to set leverage', details: error.message },
+      { error: 'Failed to set leverage', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }

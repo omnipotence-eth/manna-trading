@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import { frontendLogger } from '@/lib/frontendLogger';
@@ -45,14 +45,19 @@ interface TradeLog {
 export default function EnhancedAIChat() {
   const [agentThoughts, setAgentThoughts] = useState<AgentThought[]>([]);
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
+  
+  // Use refs to prevent infinite loops
+  const lastFetchRef = useRef<number>(0);
+  const lastScanTimestampRef = useRef<number>(0);
+  const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
   const trades = useStore((state) => state.trades);
   const modelMessages = useStore((state) => state.modelMessages);
   
-  // OPTIMIZED: Memoize toggle handler to prevent unnecessary re-renders
+  // Memoize toggle handler
   const toggleMessageDetails = useCallback((messageId: string) => {
     setExpandedMessages(prev => {
       const newSet = new Set(prev);
@@ -64,94 +69,93 @@ export default function EnhancedAIChat() {
       return newSet;
     });
   }, []);
-  
-  // OPTIMIZED: Memoize displayed messages to prevent unnecessary recalculations
-  const displayedMessages = useMemo(() => {
-    return [...modelMessages].reverse().slice(0, 50); // Show last 50 messages
-  }, [modelMessages]);
-  
-  // OPTIMIZED: Memoize trade logs transformation
-  const transformedTradeLogs = useMemo(() => {
-    return trades.slice(-20).reverse().map(trade => ({
-      id: trade.id,
-      timestamp: new Date(trade.timestamp).getTime(),
-      symbol: trade.symbol,
-      side: trade.side,
-      size: trade.size,
-      price: trade.entryPrice,
-      pnl: trade.pnl,
-      leverage: trade.leverage,
-      reasoning: trade.entryReason || 'Position opened'
-    }));
-  }, [trades]);
 
-  // Fetch real LLM agent insights and trade logs
+  // OPTIMIZED: Fetch insights only when needed, prevent infinite loops
   useEffect(() => {
     let isMounted = true;
     
     const fetchAIData = async () => {
-      // Don't show loading on refresh (only on initial mount)
-      if (agentThoughts.length === 0) {
+      const now = Date.now();
+      
+      // Prevent fetching too frequently (minimum 10 seconds between fetches)
+      if (now - lastFetchRef.current < 10000) {
+        return;
+      }
+      
+      lastFetchRef.current = now;
+      
+      // Only show loading on very first fetch
+      if (agentThoughts.length === 0 && !isLoading) {
         setIsLoading(true);
       }
       
       try {
-        setError(null);
-        
-        // Add timeout to prevent infinite loading
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        // CRITICAL FIX: Increased timeout from 10s to 45s
+        // Market Scanner takes 33s with batch processing (prevents 418 rate limits)
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
         
-        // Fetch real agent insights from comprehensive market scanner
-        const insightsResponse = await fetch('/api/agent-insights?limit=10', {
-          signal: controller.signal
+        const response = await fetch(`/api/agent-insights?limit=10`, {
+          signal: controller.signal,
+          cache: 'no-store'
         });
         
         clearTimeout(timeoutId);
         
-        if (!isMounted) return; // Component unmounted, don't update state
+        if (!isMounted) return;
         
-        if (insightsResponse.ok) {
-          const insightsData = await insightsResponse.json();
+        if (response.ok) {
+          const data = await response.json();
           
-          if (insightsData.success && insightsData.data?.insights) {
-            setAgentThoughts(insightsData.data.insights);
-            frontendLogger.debug('Real agent insights loaded from market scanner', { 
-              component: 'EnhancedAIChat',
-              data: {
-                insightsCount: insightsData.data.insights.length,
-                totalSymbolsScanned: insightsData.data.scanResult?.totalSymbols || 0,
-                bestOpportunity: insightsData.data.scanResult?.bestOpportunity?.symbol || 'none'
-              }
-            });
+          if (data.success && data.data?.insights && data.data.timestamp) {
+            const scanTimestamp = data.data.timestamp;
+            
+            // Only update if this is a genuinely NEW scan
+            if (scanTimestamp !== lastScanTimestampRef.current) {
+              lastScanTimestampRef.current = scanTimestamp;
+              const newInsights = data.data.insights;
+              
+              // Append new to existing, keep last 50
+              setAgentThoughts(prev => {
+                // Check if we already have these insights
+                const existingIds = new Set(prev.map(i => i.id));
+                const trulyNew = newInsights.filter((i: any) => !existingIds.has(i.id));
+                
+                if (trulyNew.length > 0) {
+                  const combined = [...trulyNew, ...prev];
+                  return combined.slice(0, 50);
+                }
+                return prev; // No new data, don't update
+              });
+            }
             setError(null);
+            setIsLoading(false); // FIXED: Always clear loading state on success
           } else {
-            throw new Error('Failed to fetch insights');
+            // FIXED: Handle case where response is ok but data structure is unexpected
+            if (agentThoughts.length === 0) {
+              setError(null); // Clear error, will show empty state
+            }
+            setIsLoading(false);
           }
         } else {
-          throw new Error('API request failed');
-        }
-
-      } catch (err) {
-        if (!isMounted) return; // Component unmounted
-        
-        if (err instanceof Error && err.name === 'AbortError') {
-          frontendLogger.warn('Insights request timed out', { component: 'EnhancedAIChat' });
-          // Don't set error on timeout if we already have data
+          // FIXED: Handle non-ok responses
+          if (!isMounted) return;
           if (agentThoughts.length === 0) {
-            setError('Market scan taking longer than expected...');
+            setError(`Failed to load chat: ${response.status}`);
           }
-        } else {
-          frontendLogger.error('Failed to load AI chat data', err as Error, { 
-            component: 'EnhancedAIChat' 
-          });
-          // Don't clear existing data on error
+          setIsLoading(false);
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        
+        if (err instanceof Error && err.name !== 'AbortError') {
+          frontendLogger.error('Failed to fetch insights', err);
           if (agentThoughts.length === 0) {
             setError('Connecting to market scanner...');
           }
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && isLoading) {
           setIsLoading(false);
         }
       }
@@ -160,46 +164,44 @@ export default function EnhancedAIChat() {
     // Initial fetch
     fetchAIData();
     
-    // Refresh every 2 minutes (smoother updates, no visible reload)
-    const interval = setInterval(fetchAIData, 120000); // 2 minutes
+    // Set up polling interval (20 seconds)
+    fetchIntervalRef.current = setInterval(fetchAIData, 20000);
     
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      if (fetchIntervalRef.current) {
+        clearInterval(fetchIntervalRef.current);
+        fetchIntervalRef.current = null;
+      }
     };
-  }, []); // NO DEPENDENCIES - only run on mount and interval
+  }, []); // EMPTY DEPS - only mount/unmount
   
-  // Separate effect for trade logs (updates independently)
+  // Update trade logs only when trades actually change
+  // FIXED: Filter out old trades (older than 30 days) to match API filtering
   useEffect(() => {
-    const generateTradeLogs = (): TradeLog[] => {
-      const tradeLogs: TradeLog[] = [];
-      
-      // Only process real trades with valid data
-      trades.filter(trade => trade.id && trade.timestamp && trade.symbol).forEach((trade) => {
-        tradeLogs.push({
-          id: `trade-${trade.id}`,
-          timestamp: new Date(trade.timestamp).getTime(),
-          symbol: trade.symbol,
-          side: trade.side === 'LONG' ? 'BUY' : 'SELL',
-          size: trade.size || 0,
-          price: trade.entryPrice || 0,
-          pnl: trade.pnl || 0,
-          leverage: trade.leverage || 1,
-          reasoning: `Real trade executed: ${trade.side === 'LONG' ? 'bullish' : 'bearish'} position`
-        });
-      });
-      
-      return tradeLogs.sort((a, b) => b.timestamp - a.timestamp);
-    };
-
-    const logs = generateTradeLogs();
-    setTradeLogs(logs);
+    const now = Date.now();
+    const thirtyDaysAgo = now - (30 * 24 * 60 * 60 * 1000);
     
-    frontendLogger.debug('Trade logs updated', { 
-      component: 'EnhancedAIChat',
-      data: { trades: logs.length }
+    // Filter trades to only include recent ones (last 30 days)
+    const recentTrades = trades.filter(trade => {
+      const tradeTimestamp = new Date(trade.timestamp).getTime();
+      return tradeTimestamp >= thirtyDaysAgo;
     });
-  }, [trades]); // Only update trade logs when trades change
+    
+    const newLogs: TradeLog[] = recentTrades.slice(0, 20).map(trade => ({
+      id: `trade-${trade.id}`,
+      timestamp: new Date(trade.timestamp).getTime(),
+      symbol: trade.symbol,
+      side: (trade.side === 'LONG' ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
+      size: trade.size || 0,
+      price: trade.entryPrice || 0,
+      pnl: trade.pnl || 0,
+      leverage: trade.leverage || 1,
+      reasoning: `Trade executed: ${trade.side} position`
+    }));
+    
+    setTradeLogs(newLogs);
+  }, [trades.length]); // CRITICAL: Only when length changes, not on every trade update
 
   // OPTIMIZED: Memoize helper functions to prevent unnecessary re-renders
   const formatTime = useCallback((timestamp: number) => {
@@ -228,24 +230,60 @@ export default function EnhancedAIChat() {
     }
   }, []);
 
-  if (isLoading) {
+  // Combine all messages - memoize with stable dependencies
+  // OPTIMIZED: Show only the LATEST message per agent (one per agent)
+  const allMessages = useMemo(() => {
+    const allCombined = [
+      ...agentThoughts.map(thought => ({ ...thought, type: 'thought' as const })),
+      ...tradeLogs.map(log => ({ ...log, type: 'trade' as const }))
+    ].sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Group by agent and keep only the most recent message per agent
+    const latestByAgent = new Map();
+    
+    allCombined.forEach(message => {
+      const key = message.type === 'thought' ? message.agent : 'Trade';
+      if (!latestByAgent.has(key)) {
+        latestByAgent.set(key, message);
+      }
+    });
+    
+    // Convert back to array and sort by timestamp
+    return Array.from(latestByAgent.values()).sort((a, b) => b.timestamp - a.timestamp);
+  }, [agentThoughts.length, tradeLogs.length]); // CRITICAL: Only re-calculate when counts change
+
+  // FIXED: Show content even while loading (non-blocking)
+  // Only show loading spinner if no data at all and still loading
+  if (isLoading && agentThoughts.length === 0 && tradeLogs.length === 0 && !error) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-400 mx-auto mb-2"></div>
-          <p className="text-green-400/60 text-sm">Loading AI thoughts...</p>
+          {/* Clean, modern loading animation */}
+          <div className="relative w-16 h-16 mx-auto mb-4">
+            <div className="absolute inset-0 border-4 border-green-400/20 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-transparent border-t-green-400 rounded-full animate-spin"></div>
+            <div className="absolute inset-2 border-4 border-transparent border-t-green-400/60 rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
+          </div>
+          <p className="text-green-400 text-sm font-semibold mb-1">Analyzing Markets</p>
+          <p className="text-green-400/60 text-xs">AI agents are scanning opportunities...</p>
         </div>
       </div>
     );
   }
 
-  if (error) {
+  // FIXED: Show error message but allow content to display if available
+  if (error && agentThoughts.length === 0 && tradeLogs.length === 0) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
           <p className="text-red-500 mb-2">{error}</p>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              setError(null);
+              setIsLoading(true);
+              // Trigger a fresh fetch by resetting last fetch time
+              lastFetchRef.current = 0;
+            }}
             className="px-3 py-1 text-xs border border-red-500 text-red-500 hover:bg-red-500/10 transition-all"
           >
             Retry
@@ -255,37 +293,39 @@ export default function EnhancedAIChat() {
     );
   }
 
-  // OPTIMIZED: Memoize combined and sorted messages to prevent unnecessary recalculations
-  const allMessages = useMemo(() => {
-    return [
-      ...agentThoughts.map(thought => ({ ...thought, type: 'thought' as const })),
-      ...tradeLogs.map(log => ({ ...log, type: 'trade' as const })),
-      ...displayedMessages.map(msg => ({ ...msg, type: 'message' as const }))
-    ].sort((a, b) => b.timestamp - a.timestamp);
-  }, [agentThoughts, tradeLogs, displayedMessages]);
-
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="bg-black/50 border-b border-green-400/30 px-4 py-2 flex items-center justify-between shrink-0">
-        <div className="text-xs text-green-400 uppercase tracking-wider font-bold">
-          Real LLM Agent Insights & Trade Logs
+        <div className="flex items-center gap-2">
+          <div className="text-xs text-green-400 uppercase tracking-wider font-bold">
+            Latest Agent Updates
+          </div>
+          {isLoading && allMessages.length > 0 && (
+            <div className="flex items-center gap-1">
+              <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></div>
+              <span className="text-xs text-green-400/60">Updating...</span>
+            </div>
+          )}
         </div>
         <div className="text-xs text-green-400/60">
-          {allMessages.length} messages
+          {allMessages.length} agent{allMessages.length !== 1 ? 's' : ''}
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-3 px-4 py-3">
-        <AnimatePresence>
+      {/* Messages - Scrollable with history */}
+      <div className="flex-1 overflow-y-auto space-y-3 px-4 py-3" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+        <AnimatePresence mode="popLayout">
           {allMessages.length === 0 ? (
             <div className="text-center py-12 text-green-400/60 px-4">
-              <div className="text-4xl mb-3">🤖</div>
-              <div className="text-sm font-semibold mb-2">LLM Agents Analyzing</div>
+              <div className="relative w-16 h-16 mx-auto mb-4">
+                <div className="absolute inset-0 border-4 border-green-400/20 rounded-full"></div>
+                <div className="absolute inset-0 border-4 border-transparent border-t-green-400 rounded-full animate-spin"></div>
+              </div>
+              <div className="text-sm font-semibold mb-2">Agents Scanning Markets</div>
               <div className="text-xs opacity-75 leading-relaxed">
-                Real LLM agents are analyzing Aster API data.<br/>
-                Their insights and trade decisions will appear here.
+                Market analysis in progress...<br/>
+                Updates appear every 2 minutes
               </div>
             </div>
           ) : (
@@ -358,33 +398,164 @@ export default function EnhancedAIChat() {
                         exit={{ opacity: 0, height: 0 }}
                         transition={{ duration: 0.2 }}
                       >
-                        {/* Market Data Display */}
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs bg-black/20 p-2.5 rounded mb-2">
-                          <div className="flex justify-between">
-                            <span className="text-green-500/60">Price:</span>
-                            <span className="text-green-500 font-mono font-bold">${message.marketData.price.toFixed(2)}</span>
+                        {/* Enhanced Market Data Display with Real Details */}
+                        <div className="space-y-2">
+                          {/* Basic Market Data */}
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs bg-black/20 p-2.5 rounded">
+                            {message.marketData.price > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-green-500/60">Price:</span>
+                                <span className="text-green-500 font-mono font-bold">${message.marketData.price.toFixed(2)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between">
+                              <span className="text-green-500/60">RSI:</span>
+                              <span className={`font-mono font-bold ${
+                                message.marketData.rsi > 70 ? 'text-red-400' :
+                                message.marketData.rsi < 30 ? 'text-green-400' :
+                                'text-yellow-400'
+                              }`}>{message.marketData.rsi.toFixed(1)}</span>
+                            </div>
+                            {message.marketData.volume > 0 && (
+                              <div className="flex justify-between">
+                                <span className="text-green-500/60">Volume:</span>
+                                <span className="text-green-500 font-mono font-bold">
+                                  ${(message.marketData.volume / 1000000).toFixed(1)}M
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex justify-between">
+                              <span className="text-green-500/60">Volatility:</span>
+                              <span className={`font-mono font-bold ${
+                                message.marketData.volatility > 0.1 ? 'text-red-400' :
+                                message.marketData.volatility > 0.05 ? 'text-yellow-400' :
+                                'text-green-400'
+                              }`}>{(message.marketData.volatility * 100).toFixed(1)}%</span>
+                            </div>
+                            {message.marketData.liquidityScore > 0 && (
+                              <div className="flex justify-between col-span-2">
+                                <span className="text-green-500/60">Liquidity Score:</span>
+                                <span className={`font-mono font-bold ${
+                                  message.marketData.liquidityScore > 0.7 ? 'text-green-400' :
+                                  message.marketData.liquidityScore > 0.4 ? 'text-yellow-400' :
+                                  'text-red-400'
+                                }`}>{(message.marketData.liquidityScore * 100).toFixed(0)}%</span>
+                              </div>
+                            )}
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-green-500/60">RSI:</span>
-                            <span className="text-green-500 font-mono font-bold">{message.marketData.rsi.toFixed(1)}</span>
+                          
+                          {/* ATR & Risk Levels (NEW!) */}
+                          {(message as any).atrLevels && (
+                            <div className="bg-blue-500/10 border border-blue-500/30 p-2.5 rounded">
+                              <div className="text-xs font-bold text-blue-400 mb-1.5">ATR-Based Levels (NEW!)</div>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                                <div className="flex justify-between">
+                                  <span className="text-blue-400/60">ATR:</span>
+                                  <span className="text-blue-400 font-mono">{(message as any).atrLevels.atrPercent?.toFixed(2)}%</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-blue-400/60">Volatility:</span>
+                                  <span className="text-blue-400 font-mono capitalize">{(message as any).atrLevels.volatilityLevel}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-red-400/60">Stop Loss:</span>
+                                  <span className="text-red-400 font-mono font-bold">
+                                    ${(message as any).atrLevels.recommendedStopLoss?.toFixed(2)}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-green-400/60">Take Profit:</span>
+                                  <span className="text-green-400 font-mono font-bold">
+                                    ${(message as any).atrLevels.recommendedTakeProfit?.toFixed(2)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Divergence Signals (NEW!) */}
+                          {(message as any).divergences && (message as any).divergences.length > 0 && (
+                            <div className="bg-purple-500/10 border border-purple-500/30 p-2.5 rounded">
+                              <div className="text-xs font-bold text-purple-400 mb-1.5">
+                                Divergence Signals (NEW!)
+                              </div>
+                              {(message as any).divergences.map((div: any, idx: number) => (
+                                <div key={idx} className="text-xs mb-1">
+                                  <span className={`font-bold ${
+                                    div.type === 'bullish' ? 'text-green-400' : 'text-red-400'
+                                  }`}>
+                                    {div.type.toUpperCase()} {div.indicator}
+                                  </span>
+                                  <span className="text-purple-400/60 ml-2">
+                                    Strength: {(div.strength * 100).toFixed(0)}%
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* All Opportunities Found (NEW!) */}
+                          {(message as any).opportunities && (message as any).opportunities.length > 0 && (
+                            <div className="bg-cyan-500/10 border border-cyan-500/30 p-2.5 rounded">
+                              <div className="text-xs font-bold text-cyan-400 mb-1.5">
+                                All Opportunities in This Scan ({(message as any).opportunities.length})
+                              </div>
+                              <div className="space-y-1.5">
+                                {(message as any).opportunities.map((opp: any, idx: number) => (
+                                  <div key={idx} className="text-xs bg-black/20 p-2 rounded">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="font-bold text-cyan-400">{opp.symbol}</span>
+                                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                                        opp.recommendation === 'STRONG_BUY' || opp.recommendation === 'BUY'
+                                          ? 'bg-green-500/20 text-green-500'
+                                          : opp.recommendation === 'SELL' || opp.recommendation === 'STRONG_SELL'
+                                          ? 'bg-red-500/20 text-red-500'
+                                          : 'bg-gray-500/20 text-gray-500'
+                                      }`}>
+                                        {opp.recommendation}
+                                      </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-xs">
+                                      <div>
+                                        <span className="text-cyan-400/60">Score: </span>
+                                        <span className="text-cyan-400 font-mono">{opp.score}/100</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-cyan-400/60">Confidence: </span>
+                                        <span className="text-cyan-400 font-mono">{(opp.confidence * 100).toFixed(0)}%</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-cyan-400/60">Price: </span>
+                                        <span className="text-cyan-400 font-mono">${opp.price?.toFixed(4) || 'N/A'}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-cyan-400/60">Vol: </span>
+                                        <span className="text-cyan-400 font-mono">${(opp.volume / 1000000).toFixed(1)}M</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-cyan-400/60">RSI: </span>
+                                        <span className="text-cyan-400 font-mono">{opp.rsi?.toFixed(1) || 'N/A'}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-cyan-400/60">ATR: </span>
+                                        <span className="text-cyan-400 font-mono">{opp.atrPercent?.toFixed(2)}%</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Analysis Reasoning */}
+                          <div className="text-xs text-green-500/60 italic break-words bg-black/10 p-2 rounded">
+                            {message.reasoning}
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-green-500/60">Volume:</span>
-                            <span className="text-green-500 font-mono font-bold">{(message.marketData.volume / 1000000).toFixed(1)}M</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-green-500/60">Volatility:</span>
-                            <span className="text-green-500 font-mono font-bold">{(message.marketData.volatility * 100).toFixed(1)}%</span>
-                          </div>
-                        </div>
-                        
-                        <div className="text-xs text-green-500/60 italic break-words">
-                          {message.reasoning}
                         </div>
                       </motion.div>
                     )}
                   </div>
-                ) : (
+                ) : message.type === 'trade' ? (
                   <div>
                     {/* Trade Log */}
                     <div className="flex items-center justify-between mb-2">
@@ -393,58 +564,52 @@ export default function EnhancedAIChat() {
                         <span className="text-xs font-bold text-green-400">
                           TRADE EXECUTED
                         </span>
-                        {message.type === 'trade' && (
+                        {(
                           <span className={`px-2 py-0.5 rounded text-xs font-bold ${
                             message.side === 'BUY' 
                               ? 'bg-green-500/20 text-green-500' 
                               : 'bg-red-500/20 text-red-500'
                           }`}>
-                            {message.side}
+                            {(message as any).side}
                           </span>
                         )}
                       </div>
                       <div className="text-xs text-green-500/50">
-                        {formatTime(message.timestamp)}
+                        {formatTime((message as any).timestamp || Date.now())}
                       </div>
                     </div>
                     
-                    {message.type === 'trade' ? (
-                      <>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
-                          <div>
-                            <span className="text-green-500/60">Symbol:</span>
-                            <span className="text-green-500 ml-1 font-bold">{message.symbol}</span>
-                          </div>
-                          <div>
-                            <span className="text-green-500/60">Price:</span>
-                            <span className="text-green-500 ml-1 font-bold">${message.price.toFixed(2)}</span>
-                          </div>
-                          <div>
-                            <span className="text-green-500/60">Size:</span>
-                            <span className="text-green-500 ml-1 font-bold">{message.size.toFixed(4)}</span>
-                          </div>
-                          <div>
-                            <span className="text-green-500/60">Leverage:</span>
-                            <span className="text-green-500 ml-1 font-bold">{message.leverage}x</span>
-                          </div>
+                    <>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
+                        <div>
+                          <span className="text-green-500/60">Symbol:</span>
+                          <span className="text-green-500 ml-1 font-bold">{(message as any).symbol}</span>
                         </div>
-                        
-                        <div className="flex items-center justify-between">
-                          <div className={`text-sm font-bold ${message.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            PnL: {message.pnl >= 0 ? '+' : ''}${message.pnl.toFixed(2)}
-                          </div>
-                          <div className="text-xs text-green-500/60 italic">
-                            {message.reasoning}
-                          </div>
+                        <div>
+                          <span className="text-green-500/60">Price:</span>
+                          <span className="text-green-500 ml-1 font-bold">${((message as any).price || 0).toFixed(2)}</span>
                         </div>
-                      </>
-                    ) : (
-                      <div className="text-xs text-green-400 leading-relaxed break-words">
-                        <span className="text-green-500/60">[{message.model}]:</span> {message.message}
+                        <div>
+                          <span className="text-green-500/60">Size:</span>
+                          <span className="text-green-500 ml-1 font-bold">{((message as any).size || 0).toFixed(4)}</span>
+                        </div>
+                        <div>
+                          <span className="text-green-500/60">Leverage:</span>
+                          <span className="text-green-500 ml-1 font-bold">{(message as any).leverage || 1}x</span>
+                        </div>
                       </div>
-                    )}
+                      
+                      <div className="flex items-center justify-between">
+                        <div className={`text-sm font-bold ${((message as any).pnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          PnL: {((message as any).pnl || 0) >= 0 ? '+' : ''}${((message as any).pnl || 0).toFixed(2)}
+                        </div>
+                        <div className="text-xs text-green-500/60 italic">
+                          {(message as any).reasoning || ''}
+                        </div>
+                      </div>
+                    </>
                   </div>
-                )}
+                ) : null}
               </motion.div>
             ))
           )}

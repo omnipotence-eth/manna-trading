@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildSignedQuery } from '@/lib/asterAuth';
 import { logger } from '@/lib/logger';
 import { withRateLimit } from '@/lib/rateLimiter';
+import { asterConfig } from '@/lib/configService';
 
-const ASTER_BASE_URL = process.env.ASTER_BASE_URL || 'https://fapi.asterdex.com';
-const API_KEY = process.env.ASTER_API_KEY;
-const API_SECRET = process.env.ASTER_SECRET_KEY;
+// Use centralized config service instead of direct env var access
+const ASTER_BASE_URL = asterConfig.baseUrl;
+const API_KEY = asterConfig.apiKey;
+const API_SECRET = asterConfig.secretKey;
 
 /**
  * GET /api/aster/positions
@@ -21,86 +23,37 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Apply rate limiting
+    // CRITICAL OPTIMIZATION: Use asterDexService.getPositions() for 30-key support and caching
     return await withRateLimit(async () => {
-      // Build signed query with fresh timestamp (AFTER rate limiter)
-      // Subtract 1000ms to account for server time difference
-      const queryString = await buildSignedQuery({ timestamp: Date.now() - 1000 }, API_SECRET);
-      // Use positionRisk endpoint as per Aster DEX API docs
-      const url = `${ASTER_BASE_URL}/fapi/v1/positionRisk?${queryString}`;
+      return await circuitBreakers.asterApi.execute(async () => {
+        logger.debug('Fetching Aster positions via 30-key system', { context: 'AsterAPI' });
 
-      logger.debug('Fetching Aster positions from positionRisk endpoint', { context: 'AsterAPI', data: { url: url.substring(0, 100) + '...' } });
-
-      const response = await fetch(url, {
-        headers: {
-          'X-MBX-APIKEY': API_KEY,
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
+        // Import asterDexService dynamically to avoid circular dependencies
+        const { asterDexService } = await import('@/services/asterDexService');
         
-        // Handle specific Aster DEX error codes
-        if (response.status === 429) {
-          logger.warn('Aster API rate limit exceeded', undefined, {
-            context: 'AsterAPI',
-            data: { status: response.status, error: errorText }
-          });
-          return NextResponse.json(
-            { error: 'Rate limit exceeded. Please try again later.' },
-            { status: 429 }
-          );
-        }
+        // Use optimized service method (30-key pool, caching, deduplication)
+        const positions = await asterDexService.getPositions(false);
         
-        if (response.status === 401) {
-          logger.error('Aster API authentication failed', undefined, {
-            context: 'AsterAPI',
-            data: { status: response.status, error: errorText }
-          });
-          return NextResponse.json(
-            { error: 'Authentication failed. Please check API credentials.' },
-            { status: 401 }
-          );
-        }
-        
-        // For 400 errors, return empty positions instead of failing
-        if (response.status === 400) {
-          logger.warn('Aster API returned 400, returning empty positions', undefined, {
-            context: 'AsterAPI',
-            data: { status: response.status, error: errorText }
-          });
-          return NextResponse.json([]);
-        }
-        
-        logger.error('Aster API positions fetch failed', undefined, {
+        logger.info('Successfully fetched Aster positions via optimized service', {
           context: 'AsterAPI',
-          data: { 
-            status: response.status, 
-            error: errorText,
-            url: url.substring(0, 100) + '...',
-            timestamp: Date.now()
-          },
+          data: { activePositions: positions.length },
         });
-        return NextResponse.json(
-          { error: `Aster API error: ${errorText}` },
-          { status: response.status }
-        );
-      }
 
-      const data = await response.json();
-      
-      // Filter only positions with non-zero size
-      const activePositions = data.filter((pos: any) => parseFloat(pos.positionAmt) !== 0);
-      
-      logger.info('Successfully fetched Aster positions', {
-        context: 'AsterAPI',
-        data: { totalPositions: data.length, activePositions: activePositions.length },
+        // Return in Aster DEX API format for compatibility
+        const asterFormatPositions = positions.map(pos => ({
+          symbol: pos.symbol.replace('/', ''),
+          positionAmt: pos.side === 'LONG' ? pos.size.toString() : `-${pos.size.toString()}`,
+          entryPrice: pos.entryPrice.toString(),
+          leverage: pos.leverage.toString(),
+          unRealizedProfit: pos.unrealizedPnl.toString()
+        }));
+
+        return NextResponse.json(asterFormatPositions);
       });
-
-      return NextResponse.json(activePositions);
     });
-  } catch (error: any) {
-    logger.error('Failed to fetch Aster positions', error, { context: 'AsterAPI' });
+  } catch (error: unknown) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    logger.error('Failed to fetch Aster positions', errorObj, { context: 'AsterAPI' });
     return NextResponse.json(
       { error: 'Failed to fetch positions' },
       { status: 500 }

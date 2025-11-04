@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { frontendLogger } from '@/lib/frontendLogger';
 import { frontendPerformanceMonitor } from '@/lib/frontendPerformanceMonitor';
 
@@ -15,11 +15,24 @@ interface ChartDataPoint {
 interface InteractiveChartProps {
   className?: string;
   initialBalance?: number;
+  onBalanceUpdate?: (balance: number) => void;
+}
+
+// ENTERPRISE: Connection status types
+type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
+
+// ENTERPRISE: Performance metrics tracking
+interface PerformanceMetrics {
+  avgLatency: number;
+  successRate: number;
+  totalRequests: number;
+  failedRequests: number;
 }
 
 export default function InteractiveChart({ 
   className = '', 
-  initialBalance = 42.16 
+  initialBalance = 42.16,
+  onBalanceUpdate
 }: InteractiveChartProps) {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [currentBalance, setCurrentBalance] = useState(initialBalance);
@@ -28,7 +41,26 @@ export default function InteractiveChart({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
+  
+  // ENTERPRISE: Enhanced state management
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics>({
+    avgLatency: 0,
+    successRate: 100,
+    totalRequests: 0,
+    failedRequests: 0
+  });
+  
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isFetchingRef = useRef(false);
+  const isInitialLoadRef = useRef(true);
+  const fetchStartTimeRef = useRef<number>(0);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  // NOF1.AI STYLE: Chart initialization refs
+  const chartStartTimeRef = useRef<number | null>(null);
+  const initialBalanceRef = useRef<number | null>(null);
 
   // OPTIMIZED: Memoize time ago calculation function
   const getTimeAgo = useCallback((timestamp: number): string => {
@@ -76,107 +108,301 @@ export default function InteractiveChart({
     return data;
   }, []);
 
-  // Fetch real balance data - update frequently for real-time tracking
-  useEffect(() => {
-    const fetchRealBalance = async () => {
-      try {
-        const response = await fetch('/api/real-balance?action=current-balance');
-        const result = await response.json();
-
-        if (result.success && result.data && result.data.data) {
-          const balance = result.data.data.balance;
-          const prevBalance = currentBalance;
-          setCurrentBalance(balance);
-          
-          // Log balance changes
-          if (prevBalance !== 0 && Math.abs(balance - prevBalance) >= 0.01) {
-            frontendLogger.info('Account equity changed', {
-              component: 'InteractiveChart',
-              data: {
-                previous: prevBalance.toFixed(2),
-                current: balance.toFixed(2),
-                change: (balance - prevBalance).toFixed(2),
-                changePercent: ((balance - prevBalance) / prevBalance * 100).toFixed(2) + '%'
-              }
-            });
-          }
-        }
-      } catch (err) {
-        frontendLogger.error('Failed to fetch real balance', err as Error, { 
-          component: 'InteractiveChart' 
+  // ENTERPRISE: Enhanced balance fetching with circuit breaker pattern
+  const fetchRealBalance = useCallback(async () => {
+    // Circuit breaker: Stop fetching if too many consecutive errors
+    const MAX_CONSECUTIVE_ERRORS = 5;
+    const CIRCUIT_BREAKER_RESET_TIME = 30000; // 30 seconds
+    
+    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+      if (retryTimeoutRef.current === null) {
+        frontendLogger.warn('Circuit breaker activated - too many consecutive errors', {
+          component: 'InteractiveChart',
+          data: { consecutiveErrors, nextRetry: Date.now() + CIRCUIT_BREAKER_RESET_TIME }
         });
-        setError('Failed to fetch real balance data');
-      }
-    };
-
-    fetchRealBalance();
-    // Update every 2 seconds for real-time tracking
-    const interval = setInterval(fetchRealBalance, 2000);
-
-    return () => clearInterval(interval);
-  }, [currentBalance]);
-
-  // Fetch real chart data from API
-  useEffect(() => {
-    const fetchChartData = async () => {
-      try {
-        setIsLoading(true);
         
-        const response = await fetch(`/api/real-balance?action=chart-data&timeRange=${timeRange}`);
-        const result = await response.json();
+        setConnectionStatus('error');
+        
+        // Reset after cooldown period
+        retryTimeoutRef.current = setTimeout(() => {
+          setConsecutiveErrors(0);
+          reconnectAttemptsRef.current = 0;
+          retryTimeoutRef.current = null;
+          setConnectionStatus('connecting');
+          frontendLogger.info('Circuit breaker reset - resuming data fetching', {
+            component: 'InteractiveChart'
+          });
+        }, CIRCUIT_BREAKER_RESET_TIME);
+      }
+      return;
+    }
+    
+    try {
+      fetchStartTimeRef.current = Date.now();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+      
+      const response = await fetch('/api/real-balance?action=current-balance', {
+        signal: controller.signal,
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
+      clearTimeout(timeoutId);
+      
+      const latency = Date.now() - fetchStartTimeRef.current;
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
 
-        if (result.success && result.data && result.data.data) {
-          // API returns: { success: true, data: { data: [...], metadata: {...} } }
-          const apiData = result.data.data;
+      if (result.success && result.data && result.data.data) {
+        const balance = parseFloat(result.data.data.balance);
+        
+        // ENTERPRISE: Strict validation
+        if (!Number.isFinite(balance)) {
+          throw new Error(`Invalid balance value: ${result.data.data.balance}`);
+        }
+        
+        // NOF1.AI STYLE: Initialize chart start point on first successful fetch
+        if (chartStartTimeRef.current === null || initialBalanceRef.current === null) {
+          chartStartTimeRef.current = Date.now();
+          initialBalanceRef.current = balance;
           
-          // Convert API data to chart format
-          const chartData: ChartDataPoint[] = apiData.map((item: any) => ({
-            timestamp: item.timestamp,
-            price: item.balance,
-            change: item.totalPnL || 0,
-            changePercent: item.totalPnL ? (item.totalPnL / item.balance) * 100 : 0
-          }));
+          // Initialize chart with starting point
+          setChartData([{
+            timestamp: chartStartTimeRef.current,
+            price: balance,
+            change: 0,
+            changePercent: 0
+          }]);
           
-          setChartData(chartData);
-          setError(null);
-          setLastUpdated(Date.now());
           setIsLoading(false);
+          isInitialLoadRef.current = false;
           
-          frontendLogger.debug('Real chart data loaded successfully', { 
+          frontendLogger.info('Chart initialized from current balance', {
             component: 'InteractiveChart',
             data: {
-              dataPoints: chartData.length,
-              timeRange,
-              currentBalance: chartData[chartData.length - 1]?.price,
-              metadata: result.data.metadata
+              startBalance: balance.toFixed(2),
+              startTime: new Date(chartStartTimeRef.current).toISOString()
             }
           });
-        } else {
-          throw new Error('No real chart data available');
         }
         
-      } catch (err) {
-        frontendLogger.error('Failed to fetch real chart data', err as Error, { 
-          component: 'InteractiveChart' 
+        // ENTERPRISE: Log every balance update for debugging
+        frontendLogger.debug('Balance fetched successfully', {
+          component: 'InteractiveChart',
+          data: {
+            balance: balance.toFixed(2),
+            source: result.data.data.source || 'unknown',
+            consecutiveErrors: consecutiveErrors
+          }
         });
-        setError('Failed to fetch real chart data');
-      } finally {
-        setIsLoading(false);
+        
+        const prevBalance = currentBalance || initialBalanceRef.current || balance;
+        const now = Date.now();
+        
+        // Update metrics
+        setPerformanceMetrics(prev => {
+          const newTotal = prev.totalRequests + 1;
+          const newAvgLatency = (prev.avgLatency * prev.totalRequests + latency) / newTotal;
+          const newSuccessRate = ((newTotal - prev.failedRequests) / newTotal) * 100;
+          
+          return {
+            avgLatency: newAvgLatency,
+            successRate: newSuccessRate,
+            totalRequests: newTotal,
+            failedRequests: prev.failedRequests
+          };
+        });
+        
+        // Reset error counter on success
+        if (consecutiveErrors > 0) {
+          setConsecutiveErrors(0);
+          reconnectAttemptsRef.current = 0;
+        }
+        
+        setConnectionStatus('connected');
+        setCurrentBalance(balance);
+        
+        // ENTERPRISE: Sync balance with parent component (dashboard)
+        if (onBalanceUpdate && Math.abs(balance - prevBalance) >= 0.01) {
+          onBalanceUpdate(balance);
+        }
+        
+        // NOF1.AI STYLE: Add live data point to chart (only if balance changed or time threshold)
+        setChartData(prevData => {
+          // Ensure we have a starting point
+          if (prevData.length === 0 && chartStartTimeRef.current && initialBalanceRef.current) {
+            return [{
+              timestamp: chartStartTimeRef.current,
+              price: initialBalanceRef.current,
+              change: 0,
+              changePercent: 0
+            }];
+          }
+          
+          const timeSinceLastPoint = prevData.length > 0 
+            ? now - prevData[prevData.length - 1].timestamp 
+            : Infinity;
+          
+          const balanceChanged = Math.abs(balance - prevBalance) >= 0.001;
+          const timeThresholdReached = timeSinceLastPoint >= 1000; // Add point every 1 second minimum
+          
+          // Only add point if balance changed or 1 second passed
+          if (!balanceChanged && !timeThresholdReached && prevData.length > 0) {
+            return prevData;
+          }
+          
+          const startBalance = initialBalanceRef.current || balance;
+          const change = balance - startBalance;
+          const changePercent = startBalance > 0 
+            ? (change / startBalance) * 100 
+            : 0;
+          
+          const newPoint: ChartDataPoint = {
+            timestamp: now,
+            price: balance,
+            change,
+            changePercent
+          };
+          
+          // NOF1.AI STYLE: Keep rolling window of live data (last 24 hours max)
+          const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+          const cutoffTime = now - maxAge;
+          const filteredData = prevData.filter(p => p.timestamp >= cutoffTime);
+          
+          // Keep max 2000 points for smooth rendering
+          return [...filteredData, newPoint].slice(-2000);
+        });
+        
+        setLastUpdated(now);
+        setError(null);
+        
+        // Log significant changes
+        if (prevBalance !== 0 && Math.abs(balance - prevBalance) >= 0.01) {
+          frontendLogger.info('✓ Account equity updated', {
+            component: 'InteractiveChart',
+            data: {
+              balance: balance.toFixed(2),
+              change: (balance - prevBalance).toFixed(2),
+              latency: `${latency}ms`,
+              status: 'healthy'
+            }
+          });
+        }
+      }
+    } catch (err) {
+      const latency = Date.now() - fetchStartTimeRef.current;
+      
+      // Update error metrics
+      setPerformanceMetrics(prev => {
+        const newTotal = prev.totalRequests + 1;
+        const newFailed = prev.failedRequests + 1;
+        const newSuccessRate = ((newTotal - newFailed) / newTotal) * 100;
+        
+        return {
+          ...prev,
+          totalRequests: newTotal,
+          failedRequests: newFailed,
+          successRate: newSuccessRate
+        };
+      });
+      
+      setConsecutiveErrors(prev => prev + 1);
+      reconnectAttemptsRef.current += 1;
+      
+      const isAbortError = err instanceof Error && err.name === 'AbortError';
+      const errorMessage = isAbortError 
+        ? 'Request timeout' 
+        : err instanceof Error ? err.message : 'Unknown error';
+      
+      setConnectionStatus(consecutiveErrors + 1 >= MAX_CONSECUTIVE_ERRORS ? 'error' : 'disconnected');
+      
+      frontendLogger.error('Balance fetch failed', err as Error, { 
+        component: 'InteractiveChart',
+        data: {
+          consecutiveErrors: consecutiveErrors + 1,
+          reconnectAttempts: reconnectAttemptsRef.current,
+          latency: `${latency}ms`,
+          errorType: isAbortError ? 'timeout' : 'network'
+        }
+      });
+      
+      // Only show error to user if persistent
+      if (consecutiveErrors + 1 >= 3) {
+        setError(`Connection issue: ${errorMessage}`);
+      }
+    }
+  }, [currentBalance, consecutiveErrors]);
+
+  // NOF1.AI STYLE: Initialize chart from current balance, then track live
+  useEffect(() => {
+    // If initialBalance prop is provided, use it as fallback start point
+    // Otherwise, fetchRealBalance will initialize from API
+    if (initialBalance > 0 && chartStartTimeRef.current === null && initialBalanceRef.current === null) {
+      initialBalanceRef.current = initialBalance;
+      setCurrentBalance(initialBalance);
+    }
+    
+    // Start fetching live balance updates (will initialize chart on first success)
+    fetchRealBalance();
+    
+    // OPTIMIZED: Update balance every 3 seconds (was 1s) - still very responsive
+    const interval = setInterval(() => {
+      fetchRealBalance();
+    }, 10000); // 10 second polling - optimized to match 30s cache (3x reduction from original 3s)
+
+    return () => {
+      clearInterval(interval);
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run on mount
 
-    fetchChartData();
-  }, [timeRange]);
-
-  // Draw chart on canvas
+  // Draw chart on canvas - redraw whenever chartData changes (live updates)
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || chartData.length === 0) return;
+    if (!canvas || chartData.length === 0) {
+      // ENTERPRISE FIX: Show empty state if no data
+      frontendLogger.debug('No chart data to render', {
+        component: 'InteractiveChart',
+        data: { pointCount: chartData.length }
+      });
+      return;
+    }
+    
+    // ENTERPRISE: Safety check - need at least 2 points for a line
+    if (chartData.length < 2) {
+      frontendLogger.debug('Not enough data points to draw chart', {
+        component: 'InteractiveChart',
+        data: { pointCount: chartData.length }
+      });
+      return;
+    }
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      frontendLogger.warn('Could not get canvas context', { component: 'InteractiveChart' });
+      return;
+    }
 
+    // ENTERPRISE FIX: Wait for canvas to be properly sized
     const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      frontendLogger.debug('Canvas not yet sized, skipping render', {
+        component: 'InteractiveChart',
+        data: { width: rect.width, height: rect.height }
+      });
+      return;
+    }
+
     canvas.width = rect.width * window.devicePixelRatio;
     canvas.height = rect.height * window.devicePixelRatio;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
@@ -193,8 +419,24 @@ export default function InteractiveChart({
     const chartWidth = rect.width - (padding * 2);
     const chartHeight = rect.height - (padding * 2);
 
-    // Find min/max values
-    const prices = chartData.map(d => d.price);
+    // ENTERPRISE: Validate chart dimensions
+    if (chartWidth <= 0 || chartHeight <= 0) {
+      frontendLogger.warn('Invalid chart dimensions', {
+        component: 'InteractiveChart',
+        data: { chartWidth, chartHeight }
+      });
+      return;
+    }
+
+    // Find min/max values with safety checks
+    const prices = chartData.map(d => d.price).filter(p => Number.isFinite(p));
+    if (prices.length === 0) {
+      frontendLogger.warn('No valid prices to display', {
+        component: 'InteractiveChart'
+      });
+      return;
+    }
+    
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
     const priceRange = maxPrice - minPrice;
@@ -205,6 +447,15 @@ export default function InteractiveChart({
     const displayMin = minPrice - pricePadding;
     const displayMax = maxPrice + pricePadding;
     const displayRange = displayMax - displayMin;
+    
+    // ENTERPRISE: Validate price range
+    if (!Number.isFinite(displayRange) || displayRange <= 0) {
+      frontendLogger.warn('Invalid price range', {
+        component: 'InteractiveChart',
+        data: { displayMin, displayMax, displayRange }
+      });
+      return;
+    }
 
     // Draw enhanced grid with glow effect
     ctx.strokeStyle = 'rgba(74, 222, 128, 0.12)';
@@ -233,6 +484,23 @@ export default function InteractiveChart({
     // Reset shadow
     ctx.shadowBlur = 0;
 
+    // ENTERPRISE FIX: Time-based positioning for smooth line movement
+    // Calculate time range for proper x-axis scaling
+    // CRITICAL FIX: Sort data by timestamp to ensure proper rendering
+    const sortedData = [...chartData].sort((a, b) => a.timestamp - b.timestamp);
+    const timeMin = sortedData[0].timestamp;
+    const timeMax = sortedData[sortedData.length - 1].timestamp;
+    const timeRange = Math.max(timeMax - timeMin, 1000); // At least 1 second range for stability
+    
+    // ENTERPRISE: Validate time range
+    if (!Number.isFinite(timeRange) || timeRange <= 0) {
+      frontendLogger.warn('Invalid time range', {
+        component: 'InteractiveChart',
+        data: { timeMin, timeMax, timeRange }
+      });
+      return;
+    }
+    
     // Draw area under curve with gradient
     const areaGradient = ctx.createLinearGradient(0, padding, 0, padding + chartHeight);
     areaGradient.addColorStop(0, 'rgba(74, 222, 128, 0.25)');
@@ -241,9 +509,21 @@ export default function InteractiveChart({
     ctx.fillStyle = areaGradient;
     ctx.beginPath();
     
-    chartData.forEach((point, index) => {
-      const x = padding + (chartWidth * index) / (chartData.length - 1);
+    // ENTERPRISE FIX: Use sorted data for consistent rendering
+    sortedData.forEach((point, index) => {
+      // ENTERPRISE: Skip invalid points
+      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) {
+        return;
+      }
+      
+      // TIME-BASED X positioning (not index-based)
+      const x = padding + ((point.timestamp - timeMin) / timeRange) * chartWidth;
       const y = padding + chartHeight - ((point.price - displayMin) / displayRange) * chartHeight;
+      
+      // ENTERPRISE: Validate coordinates
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
       
       if (index === 0) {
         ctx.moveTo(x, padding + chartHeight);
@@ -257,16 +537,28 @@ export default function InteractiveChart({
     ctx.closePath();
     ctx.fill();
 
-    // Draw main line with glow effect
+    // Draw main line with enhanced styling
     ctx.strokeStyle = '#4ade80';
-    ctx.lineWidth = 3;
-    ctx.shadowColor = 'rgba(74, 222, 128, 0.6)';
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = '#4ade80';
     ctx.shadowBlur = 8;
     ctx.beginPath();
 
-    chartData.forEach((point, index) => {
-      const x = padding + (chartWidth * index) / (chartData.length - 1);
+    // ENTERPRISE FIX: Use sorted data for consistent rendering
+    sortedData.forEach((point, index) => {
+      // ENTERPRISE: Skip invalid points
+      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) {
+        return;
+      }
+      
+      // TIME-BASED X positioning (not index-based)
+      const x = padding + ((point.timestamp - timeMin) / timeRange) * chartWidth;
       const y = padding + chartHeight - ((point.price - displayMin) / displayRange) * chartHeight;
+      
+      // ENTERPRISE: Validate coordinates
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
       
       if (index === 0) {
         ctx.moveTo(x, y);
@@ -277,11 +569,27 @@ export default function InteractiveChart({
 
     ctx.stroke();
 
-    // Draw data points with enhanced styling
+    // Draw data points with enhanced styling (only show some for performance)
     ctx.shadowBlur = 0;
-    chartData.forEach((point, index) => {
-      const x = padding + (chartWidth * index) / (chartData.length - 1);
+    const pointInterval = Math.max(1, Math.floor(sortedData.length / 50)); // Show ~50 points max
+    // ENTERPRISE FIX: Use sorted data for consistent rendering
+    sortedData.forEach((point, index) => {
+      // Only draw points at intervals to reduce visual clutter
+      if (index % pointInterval !== 0 && index !== sortedData.length - 1) return;
+      
+      // ENTERPRISE: Skip invalid points
+      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) {
+        return;
+      }
+      
+      // TIME-BASED X positioning (not index-based)
+      const x = padding + ((point.timestamp - timeMin) / timeRange) * chartWidth;
       const y = padding + chartHeight - ((point.price - displayMin) / displayRange) * chartHeight;
+      
+      // ENTERPRISE: Validate coordinates
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
       
       // Outer glow
       ctx.fillStyle = 'rgba(74, 222, 128, 0.25)';
@@ -298,22 +606,20 @@ export default function InteractiveChart({
 
     // Draw hovered point with enhanced styling
     if (hoveredPoint) {
-      const pointIndex = chartData.findIndex(p => p.timestamp === hoveredPoint.timestamp);
-      if (pointIndex !== -1) {
-        const x = padding + (chartWidth * pointIndex) / (chartData.length - 1);
-        const y = padding + chartHeight - ((hoveredPoint.price - displayMin) / displayRange) * chartHeight;
-        
-        // Enhanced hover effect
-        ctx.fillStyle = 'rgba(74, 222, 128, 0.4)';
-        ctx.beginPath();
-        ctx.arc(x, y, 8, 0, 2 * Math.PI);
-        ctx.fill();
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, 2 * Math.PI);
-        ctx.fill();
-      }
+      // TIME-BASED X positioning for hover point
+      const x = padding + ((hoveredPoint.timestamp - timeMin) / timeRange) * chartWidth;
+      const y = padding + chartHeight - ((hoveredPoint.price - displayMin) / displayRange) * chartHeight;
+      
+      // Enhanced hover effect
+      ctx.fillStyle = 'rgba(74, 222, 128, 0.4)';
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, 2 * Math.PI);
+      ctx.fill();
     }
 
     // Draw Y-axis labels with enhanced styling
@@ -330,38 +636,52 @@ export default function InteractiveChart({
     }
 
     // Draw X-axis labels with enhanced styling
+    // ENTERPRISE FIX: Use time-based positioning to match chart rendering
     ctx.textAlign = 'center';
     ctx.shadowBlur = 3;
     
     for (let i = 0; i <= 8; i++) {
-      const timeIndex = Math.floor((chartData.length - 1) * i / 8);
-      const time = new Date(chartData[timeIndex].timestamp);
-      const x = padding + (chartWidth * timeIndex) / (chartData.length - 1);
-      ctx.fillText(time.toLocaleTimeString(), x, rect.height - 15);
+      // Calculate time position based on time range (not index)
+      const timeValue = timeMin + (timeRange * i / 8);
+      const time = new Date(timeValue);
+      // Use time-based X positioning to match chart line rendering
+      const x = padding + ((timeValue - timeMin) / timeRange) * chartWidth;
+      
+      // Only draw if x is within chart bounds
+      if (x >= padding && x <= padding + chartWidth) {
+        ctx.fillText(time.toLocaleTimeString(), x, rect.height - 15);
+      }
     }
 
     // Reset shadow
     ctx.shadowBlur = 0;
 
-    // Draw current price line
-    if (chartData.length > 0) {
-      const currentPrice = chartData[chartData.length - 1].price;
-      const y = padding + chartHeight - ((currentPrice - displayMin) / displayRange) * chartHeight;
+    // Highlight current price point with pulsing animation
+    // ENTERPRISE FIX: Use sorted data and find most recent point
+    if (sortedData.length > 0) {
+      const currentPoint = sortedData[sortedData.length - 1];
+      // TIME-BASED X positioning for current point
+      const x = padding + ((currentPoint.timestamp - timeMin) / timeRange) * chartWidth;
+      const y = padding + chartHeight - ((currentPoint.price - displayMin) / displayRange) * chartHeight;
       
-      ctx.strokeStyle = 'rgba(74, 222, 128, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([5, 5]);
+      ctx.fillStyle = '#4ade80';
+      ctx.shadowColor = '#4ade80';
+      ctx.shadowBlur = 12;
       ctx.beginPath();
-      ctx.moveTo(padding, y);
-      ctx.lineTo(padding + chartWidth, y);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
       
       // Current price label
       ctx.fillStyle = '#4ade80';
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(`Current: $${currentPrice.toFixed(2)}`, padding + chartWidth - 120, y - 5);
+      ctx.fillText(`Current: $${currentPoint.price.toFixed(2)}`, padding + chartWidth - 120, y - 5);
     }
 
   }, [chartData, hoveredPoint]);
@@ -371,26 +691,45 @@ export default function InteractiveChart({
     if (!canvas || chartData.length === 0) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const padding = 40;
+    const mouseX = e.clientX - rect.left;
+    const padding = 60;
     const chartWidth = rect.width - (padding * 2);
     
-    const pointIndex = Math.round(((x - padding) / chartWidth) * (chartData.length - 1));
-    if (pointIndex >= 0 && pointIndex < chartData.length) {
-      setHoveredPoint(chartData[pointIndex]);
+    // TIME-BASED: Calculate which timestamp the mouse is over
+    const timeMin = chartData[0].timestamp;
+    const timeMax = chartData[chartData.length - 1].timestamp;
+    const timeRange = timeMax - timeMin || 1;
+    
+    const relativeX = mouseX - padding;
+    const hoveredTimestamp = timeMin + (relativeX / chartWidth) * timeRange;
+    
+    // Find the closest data point to this timestamp
+    let closestPoint = chartData[0];
+    let minDistance = Math.abs(chartData[0].timestamp - hoveredTimestamp);
+    
+    for (const point of chartData) {
+      const distance = Math.abs(point.timestamp - hoveredTimestamp);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestPoint = point;
+      }
     }
+    
+    setHoveredPoint(closestPoint);
   };
 
   const handleCanvasMouseLeave = () => {
     setHoveredPoint(null);
   };
 
-  // Calculate metrics
-  const startBalance = chartData[0]?.price || initialBalance;
+  // NOF1.AI STYLE: Calculate metrics from chart start point
+  const startBalance = initialBalanceRef.current || (chartData.length > 0 ? chartData[0].price : initialBalance);
   const totalChange = currentBalance - startBalance;
   const totalChangePercent = startBalance > 0 ? (totalChange / startBalance) * 100 : 0;
-  const maxBalance = Math.max(...chartData.map(d => d.price));
-  const minBalance = Math.min(...chartData.map(d => d.price));
+  
+  const validPrices = chartData.map(d => d.price).filter(p => Number.isFinite(p));
+  const maxBalance = validPrices.length > 0 ? Math.max(...validPrices) : currentBalance;
+  const minBalance = validPrices.length > 0 ? Math.min(...validPrices) : currentBalance;
 
   if (isLoading) {
     return (
@@ -421,11 +760,95 @@ export default function InteractiveChart({
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
-      {/* Live Indicator */}
-      <div className="flex items-center justify-center py-2">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-lg shadow-red-500/50"></div>
-          <h3 className="text-lg font-bold text-red-500">LIVE</h3>
+      {/* ENTERPRISE: Enhanced Live Status Indicator */}
+      <div className="flex items-center justify-between px-6 py-2 bg-black/40 border-b border-green-400/20">
+        <div className="flex items-center gap-3">
+          {/* Connection Status */}
+          <div className="flex items-center gap-2">
+            <AnimatePresence mode="wait">
+              {connectionStatus === 'connected' && (
+                <motion.div
+                  key="connected"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0 }}
+                  className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-lg shadow-green-500/50"
+                />
+              )}
+              {connectionStatus === 'connecting' && (
+                <motion.div
+                  key="connecting"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1, rotate: 360 }}
+                  exit={{ scale: 0 }}
+                  transition={{ rotate: { duration: 1, repeat: Infinity, ease: "linear" } }}
+                  className="w-2 h-2 rounded-full bg-yellow-500 shadow-lg shadow-yellow-500/50"
+                />
+              )}
+              {connectionStatus === 'disconnected' && (
+                <motion.div
+                  key="disconnected"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: [1, 1.2, 1] }}
+                  exit={{ scale: 0 }}
+                  transition={{ duration: 1, repeat: Infinity }}
+                  className="w-2 h-2 rounded-full bg-orange-500 shadow-lg shadow-orange-500/50"
+                />
+              )}
+              {connectionStatus === 'error' && (
+                <motion.div
+                  key="error"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  exit={{ scale: 0 }}
+                  className="w-2 h-2 rounded-full bg-red-500 shadow-lg shadow-red-500/50"
+                />
+              )}
+            </AnimatePresence>
+            
+            <div className="flex flex-col">
+              <h3 className={`text-xs font-bold uppercase tracking-wider ${
+                connectionStatus === 'connected' ? 'text-green-400' :
+                connectionStatus === 'connecting' ? 'text-yellow-400' :
+                connectionStatus === 'disconnected' ? 'text-orange-400' :
+                'text-red-400'
+              }`}>
+                {connectionStatus === 'connected' && 'LIVE TRACKING'}
+                {connectionStatus === 'connecting' && 'CONNECTING...'}
+                {connectionStatus === 'disconnected' && 'RECONNECTING...'}
+                {connectionStatus === 'error' && 'CONNECTION ERROR'}
+              </h3>
+              <span className="text-[10px] text-green-400/50">Updated {getTimeAgo(lastUpdated)}</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* ENTERPRISE: Performance Metrics */}
+        <div className="flex items-center gap-4 text-[10px] text-green-400/60 font-mono">
+          <div className="flex items-center gap-1">
+            <span className="text-green-400/40">LATENCY:</span>
+            <span className={`font-bold ${
+              performanceMetrics.avgLatency < 100 ? 'text-green-400' :
+              performanceMetrics.avgLatency < 300 ? 'text-yellow-400' :
+              'text-orange-400'
+            }`}>
+              {performanceMetrics.avgLatency.toFixed(0)}ms
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-green-400/40">SUCCESS:</span>
+            <span className={`font-bold ${
+              performanceMetrics.successRate >= 95 ? 'text-green-400' :
+              performanceMetrics.successRate >= 80 ? 'text-yellow-400' :
+              'text-red-400'
+            }`}>
+              {performanceMetrics.successRate.toFixed(1)}%
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-green-400/40">REQUESTS:</span>
+            <span className="font-bold text-green-400">{performanceMetrics.totalRequests}</span>
+          </div>
         </div>
       </div>
 

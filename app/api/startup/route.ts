@@ -8,6 +8,9 @@ import { startupService } from '@/services/startupService';
 import { logger } from '@/lib/logger';
 import { handleApiError, createSuccessResponse } from '@/lib/errorHandler';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
+import { realBalanceService } from '@/services/realBalanceService';
+import { asterConfig } from '@/lib/configService';
+import { agentRunnerService } from '@/services/agentRunnerService';
 
 export async function GET(request: NextRequest) {
   const timer = PerformanceMonitor.startTimer('StartupAPI');
@@ -68,10 +71,20 @@ export async function POST(request: NextRequest) {
 async function getStartupStatus() {
   const isInitialized = startupService.isInitialized();
   
+  // CRITICAL FIX: Include balance, confidence, and Agent Runner status
+  const balanceConfig = realBalanceService.getBalanceConfig();
+  const accountBalance = balanceConfig?.availableBalance || 0;
+  const confidenceThreshold = asterConfig.trading.confidenceThreshold || 0.35;
+  const agentRunnerStatus = agentRunnerService.getStatus();
+  
   return createSuccessResponse({
     message: 'Startup Status',
     status: {
       initialized: isInitialized,
+      accountBalance: accountBalance,
+      confidenceThreshold: confidenceThreshold,
+      agentRunnerRunning: agentRunnerStatus.isRunning,
+      agentRunnerActiveWorkflows: agentRunnerStatus.activeWorkflowCount,
       timestamp: new Date().toISOString()
     }
   });

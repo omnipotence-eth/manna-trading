@@ -82,6 +82,8 @@ interface AppState {
   trades: Trade[];
   positions: Position[];
   addTrade: (trade: Trade) => void;
+  clearOldTrades: (daysOld: number) => void;
+  deleteTradesBySymbol: (symbol: string) => void; // NEW: Clear trades older than X days
   updatePosition: (position: Position) => void;
   removePosition: (id: string) => void;
 
@@ -154,6 +156,54 @@ export const useStore = create<AppState>((set) => ({
       }
     }),
 
+  clearOldTrades: (daysOld: number) =>
+    set((state) => {
+      const now = Date.now();
+      const cutoffTime = now - (daysOld * 24 * 60 * 60 * 1000);
+      
+      const filteredTrades = state.trades.filter(trade => {
+        const tradeTimestamp = new Date(trade.timestamp).getTime();
+        return tradeTimestamp >= cutoffTime;
+      });
+      
+      const removedCount = state.trades.length - filteredTrades.length;
+      
+      if (removedCount > 0) {
+        frontendLogger.info(`Cleared ${removedCount} old trades from store (older than ${daysOld} days)`, {
+          component: 'Store',
+          data: { 
+            before: state.trades.length,
+            after: filteredTrades.length,
+            removed: removedCount
+          }
+        });
+      }
+      
+      return { trades: filteredTrades };
+    }),
+
+  deleteTradesBySymbol: (symbol: string) =>
+    set((state) => {
+      const symbolUpper = symbol.toUpperCase();
+      const beforeCount = state.trades.length;
+      const filteredTrades = state.trades.filter(trade => trade.symbol !== symbolUpper);
+      const removedCount = beforeCount - filteredTrades.length;
+      
+      if (removedCount > 0) {
+        frontendLogger.info(`Deleted ${removedCount} trades for symbol ${symbolUpper} from store`, {
+          component: 'Store',
+          data: { 
+            symbol: symbolUpper,
+            before: beforeCount,
+            after: filteredTrades.length,
+            removed: removedCount
+          }
+        });
+      }
+      
+      return { trades: filteredTrades };
+    }),
+
   updatePosition: (position) =>
     set((state) => {
       const timer = frontendPerformanceMonitor.startComponentTimer('Store:updatePosition');
@@ -216,9 +266,16 @@ export const useStore = create<AppState>((set) => ({
         // Message already exists, don't add duplicate
         return state;
       }
-      // Add new message and keep last 50
+      
+      // FIXED: Filter out messages older than 7 days (instead of 1 hour) to prevent old chat logs
+      // This matches the trade filtering (30 days for trades, 7 days for messages)
+      const now = Date.now();
+      const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+      const recentMessages = state.modelMessages.filter(m => m.timestamp >= sevenDaysAgo);
+      
+      // Add new message at the beginning, keep only last 50
       return {
-        modelMessages: [message, ...state.modelMessages.slice(0, 49)],
+        modelMessages: [message, ...recentMessages].slice(0, 50),
       };
     }),
 
