@@ -31,11 +31,11 @@ export const TRADING_THRESHOLDS = {
   // Trailing stop
   DEFAULT_TRAILING_STOP_PERCENT: 2.0, // 2% trailing stop
   
-  // Risk/Reward ratios
-  MIN_RR_MICRO: 4.0, // Minimum 4:1 R:R for accounts <$100
-  MIN_RR_SMALL: 3.5, // Minimum 3.5:1 R:R for accounts $100-$200
-  MIN_RR_MEDIUM: 3.0, // Minimum 3:1 R:R for accounts $200-$500
-  MIN_RR_LARGE: 2.5, // Minimum 2.5:1 R:R for accounts >$500
+  // Risk/Reward ratios (MVP: Lowered for more trades)
+  MIN_RR_MICRO: 3.0, // MVP: 3:1 R:R for accounts <$100 (was 4:1)
+  MIN_RR_SMALL: 2.5, // MVP: 2.5:1 R:R for accounts $100-$200 (was 3.5:1)
+  MIN_RR_MEDIUM: 2.0, // MVP: 2:1 R:R for accounts $200-$500 (was 3:1)
+  MIN_RR_LARGE: 2.0, // MVP: 2:1 R:R for accounts >$500 (was 2.5:1)
   
   // Account size thresholds
   MICRO_ACCOUNT_THRESHOLD: 100, // Accounts <$100
@@ -71,8 +71,8 @@ export const TRADING_THRESHOLDS = {
 } as const;
 
 export const MARKET_SCANNER_CONSTANTS = {
-  TOP_SYMBOLS_COUNT: 50, // Top 50 symbols by volume
-  ANALYZE_COUNT: 30, // Analyze top 30 symbols
+  TOP_SYMBOLS_COUNT: 100, // Top 100 symbols by volume (was 50) - scan more opportunities!
+  ANALYZE_COUNT: 100, // Analyze top 100 symbols (was 50) - better market coverage
   MAX_LIQUIDITY_USD: 5_000_000, // $5M for max liquidity score
   
   // Volume ratio thresholds
@@ -81,10 +81,10 @@ export const MARKET_SCANNER_CONSTANTS = {
   VOLUME_INCREASE: 1.7, // 1.7x average volume
   NORMAL_VOLUME: 1.2, // 1.2x average volume
   
-  // Score thresholds
-  STRONG_BUY_SCORE: 85,
-  BUY_SCORE: 70,
-  NEUTRAL_SCORE: 40,
-  SELL_SCORE: 25,
+  // Score thresholds (RELAXED for quiet markets)
+  STRONG_BUY_SCORE: 75, // Lowered from 85
+  BUY_SCORE: 55, // Lowered from 70 for quiet markets
+  NEUTRAL_SCORE: 35, // Lowered from 40
+  SELL_SCORE: 20, // Lowered from 25
 } as const;
 

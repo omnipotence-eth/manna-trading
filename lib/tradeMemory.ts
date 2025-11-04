@@ -41,7 +41,7 @@ export async function addTrade(trade: Trade): Promise<boolean> {
       trades = trades.slice(0, 100);
     }
     
-    logger.info(`✅ Trade saved to memory: ${trade.symbol} | P&L: $${trade.pnl.toFixed(2)} (${trade.pnlPercent.toFixed(2)}%)`, {
+    logger.info(`Trade saved to memory: ${trade.symbol} | P&L: $${trade.pnl.toFixed(2)} (${trade.pnlPercent.toFixed(2)}%)`, {
       context: 'TradeMemory',
       data: { symbol: trade.symbol, pnl: trade.pnl, pnlPercent: trade.pnlPercent }
     });
@@ -121,6 +121,31 @@ export async function getTradeStats() {
 
 export async function initializeDatabase(): Promise<boolean> {
   // No initialization needed for memory storage
-  logger.info('✅ Trade memory initialized', { context: 'TradeMemory' });
+  logger.info('Trade memory initialized', { context: 'TradeMemory' });
   return true;
+}
+
+/**
+ * Delete trades by symbol from memory
+ */
+export async function deleteTradesBySymbol(symbol: string): Promise<number> {
+  try {
+    const symbolUpper = symbol.toUpperCase();
+    const beforeCount = trades.length;
+    trades = trades.filter(t => t.symbol !== symbolUpper);
+    const deletedCount = beforeCount - trades.length;
+    
+    logger.info(`Deleted ${deletedCount} trades for symbol ${symbol} from memory`, {
+      context: 'TradeMemory',
+      data: { symbol, deletedCount }
+    });
+    
+    return deletedCount;
+  } catch (error) {
+    logger.error('Failed to delete trades by symbol from memory', error, { 
+      context: 'TradeMemory',
+      data: { symbol }
+    });
+    return 0;
+  }
 }

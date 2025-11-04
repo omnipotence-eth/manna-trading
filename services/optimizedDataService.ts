@@ -37,7 +37,7 @@ class OptimizedDataService {
   
   // Rate limiting - OPTIMIZED for real-time trading
   private readonly MIN_UPDATE_INTERVAL = 500; // 500ms minimum between updates (2 req/sec max)
-  private readonly CACHE_TTL = 500; // 500ms cache TTL for real-time data
+  private readonly CACHE_TTL = 1000; // 1 second cache TTL for real-time data (enterprise-grade)
   
   /**
    * Get all account data in a single optimized call
@@ -110,8 +110,11 @@ class OptimizedDataService {
         data.unrealizedPnL = data.positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
         data.totalPnL = data.unrealizedPnL;
         
+        // OPTIMIZED: Fetch prices ONCE for all positions (was N requests, now 1 request)
+        const priceData = await this.getCurrentPrices();
+        
         // Format positions for dashboard compatibility with real-time prices
-        data.positions = await Promise.all(data.positions.map(async (pos: any) => {
+        data.positions = data.positions.map((pos: any) => {
           // pos is already formatted by asterDexService.getPositions()
           const symbol = pos.symbol;
           const side = pos.side;
@@ -120,25 +123,9 @@ class OptimizedDataService {
           const pnl = pos.unrealizedPnl;
           const leverage = pos.leverage;
           
-          // Get real-time price for accurate P&L calculation
-          let currentPrice = entryPrice; // Default to entry price
-          try {
-            // Try to get current price from prices API
-            const baseUrl = process.env.VERCEL_URL 
-              ? `https://${process.env.VERCEL_URL}` 
-              : 'http://localhost:3000';
-            const priceResponse = await fetch(`${baseUrl}/api/prices`);
-            if (priceResponse.ok) {
-              const priceData = await priceResponse.json();
-              const priceKey = symbol.replace('/USDT', 'USDT');
-              if (priceData[priceKey]) {
-                currentPrice = parseFloat(priceData[priceKey].price || currentPrice);
-              }
-            }
-          } catch (error) {
-            // Fallback to entry price if price fetch fails
-            currentPrice = entryPrice;
-          }
+          // Get real-time price from pre-fetched data (no HTTP request per position)
+          const priceKey = symbol.replace('/USDT', 'USDT');
+          const currentPrice = priceData[priceKey] || entryPrice;
           
           // Calculate P&L percentage using real-time price
           const marginUsed = size * entryPrice / leverage;
@@ -156,7 +143,7 @@ class OptimizedDataService {
             leverage: isNaN(leverage) ? 1 : leverage,
             model: 'Multi-Agent AI',
           };
-        }));
+        });
       }
       
       // Cache the result
@@ -183,37 +170,12 @@ class OptimizedDataService {
   
   /**
    * Fast account value fetch with fallback
+   * OPTIMIZED: Use asterDexService directly instead of HTTP call (faster, uses 30-key system)
    */
   private async getAccountValueFast(): Promise<number> {
     try {
-      // Use direct API call to get the correct account value
-      const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
-      const response = await fetch(`${baseUrl}/api/aster/account`);
-      if (response.ok) {
-        const result = await response.json();
-        // The API returns { success: true, data: { balance: 42, ... } }
-        const accountData = result.data || result;
-        const balance = parseFloat(accountData.balance || 0);
-        
-        logger.debug('Account value from API', { 
-          context: 'OptimizedData', 
-          data: { 
-            balance: balance,
-            accountEquity: accountData.accountEquity,
-            totalMarginBalance: accountData.totalMarginBalance,
-            totalWalletBalance: accountData.totalWalletBalance,
-            totalUnrealizedProfit: accountData.totalUnrealizedProfit,
-            availableBalance: accountData.availableBalance
-          }
-        });
-        return balance;
-      }
-    } catch (error) {
-      logger.error('Failed to get account value from API', error, { context: 'OptimizedData' });
-    }
-    
-    // Fallback to service
-    try {
+      // CRITICAL OPTIMIZATION: Use asterDexService.getBalance() directly
+      // This uses the 30-key system, caching, and deduplication - much faster than HTTP
       return await asterDexService.getBalance();
     } catch (error) {
       logger.error('Failed to get account value from service', error, { context: 'OptimizedData' });
@@ -223,37 +185,29 @@ class OptimizedDataService {
   
   /**
    * Fast positions fetch with fallback
+   * OPTIMIZED: Use asterDexService directly instead of HTTP call (faster, uses 30-key system)
    */
   private async getPositionsFast(): Promise<any[]> {
     try {
-      // Use direct API call to get positions data
-      const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
-      const response = await fetch(`${baseUrl}/api/aster/positions`);
-      if (response.ok) {
-        const data = await response.json();
-        // Transform Aster API response to our format (same as asterDexService.getPositions())
-        const positions = data.map((pos: any) => ({
-          symbol: pos.symbol.replace('USDT', '/USDT'),
-          side: parseFloat(pos.positionAmt) > 0 ? 'LONG' as const : 'SHORT' as const,
-          size: Math.abs(parseFloat(pos.positionAmt) || 0),
-          entryPrice: parseFloat(pos.entryPrice) || 0,
-          leverage: parseInt(pos.leverage) || 1,
-          unrealizedPnl: parseFloat(pos.unRealizedProfit) || 0,
-        }));
-        
-        logger.debug('Positions from API', { 
-          context: 'OptimizedData', 
-          data: { count: positions.length, positions: positions.map((p: any) => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
-        });
-        return positions;
-      }
-    } catch (error) {
-      logger.error('Failed to get positions from API', error, { context: 'OptimizedData' });
-    }
-    
-    // Fallback to service
-    try {
-      return await asterDexService.getPositions();
+      // CRITICAL OPTIMIZATION: Use asterDexService.getPositions() directly
+      // This uses the 30-key system, caching (20s), and deduplication - much faster than HTTP
+      const positions = await asterDexService.getPositions();
+      
+      // Transform to format expected by this service (if needed)
+      const formatted = positions.map(pos => ({
+        symbol: pos.symbol, // Already in BTC/USDT format
+        positionAmt: pos.side === 'LONG' ? pos.size.toString() : `-${pos.size.toString()}`,
+        entryPrice: pos.entryPrice.toString(),
+        leverage: pos.leverage.toString(),
+        unRealizedProfit: pos.unrealizedPnl.toString()
+      }));
+      
+      logger.debug('Positions from optimized service', { 
+        context: 'OptimizedData', 
+        data: { count: positions.length, positions: positions.map((p: any) => ({ symbol: p.symbol, side: p.side, pnl: p.unrealizedPnl })) }
+      });
+      
+      return formatted;
     } catch (error) {
       logger.error('Failed to get positions from service', error, { context: 'OptimizedData' });
       return [];

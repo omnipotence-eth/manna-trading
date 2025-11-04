@@ -11,8 +11,14 @@ export async function GET(request: NextRequest) {
   try {
     const startTime = Date.now();
     
-    // Get all account data in one optimized call
-    const accountData = await optimizedDataService.getAllAccountData();
+    // ENTERPRISE: Check for cache-bypass header for live data
+    const cacheControl = request.headers.get('cache-control');
+    const bypassCache = cacheControl === 'no-cache' || cacheControl === 'no-store';
+    
+    // Force refresh if bypassing cache
+    const accountData = bypassCache 
+      ? await optimizedDataService.forceRefresh()
+      : await optimizedDataService.getAllAccountData();
     
     const responseTime = Date.now() - startTime;
     
@@ -20,18 +26,26 @@ export async function GET(request: NextRequest) {
       context: 'OptimizedDataAPI',
       data: {
         responseTime: `${responseTime}ms`,
-        cacheHit: accountData.cacheHit,
+        cacheHit: accountData.cacheHit && !bypassCache,
+        bypassCache,
         accountValue: accountData.accountValue,
         positions: accountData.positions.length
       }
     });
     
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: accountData,
       responseTime,
       timestamp: new Date().toISOString()
     });
+    
+    // ENTERPRISE: Add cache headers for live data (1 second max-age)
+    response.headers.set('Cache-Control', 'public, max-age=1, must-revalidate');
+    response.headers.set('X-Data-Source', bypassCache ? 'live' : 'cached');
+    response.headers.set('X-Timestamp', Date.now().toString());
+    
+    return response;
     
   } catch (error) {
     logger.error('Optimized data API failed', error, { context: 'OptimizedDataAPI' });

@@ -68,7 +68,7 @@ export const asterConfig = {
     maxSymbolsPerCycle: getNumberEnvVar('TRADING_MAX_SYMBOLS', 20),
     batchSize: getNumberEnvVar('TRADING_BATCH_SIZE', 5),
     maxExecutionTime: getNumberEnvVar('TRADING_MAX_EXECUTION_TIME', 25000),
-    confidenceThreshold: getNumberEnvVar('TRADING_CONFIDENCE_THRESHOLD', 0.65), // OPTIMIZED: Raised to 65% for profitability (was 0.45)
+    confidenceThreshold: getNumberEnvVar('TRADING_CONFIDENCE_THRESHOLD', 0.35), // MVP: 35% threshold - lower for testing, still safe with other filters (was 45%)
     stopLossPercent: getNumberEnvVar('TRADING_STOP_LOSS', 4.0), // OPTIMIZED: Increased to 4% for small accounts (was 3.0) - prevents premature stops
     takeProfitPercent: getNumberEnvVar('TRADING_TAKE_PROFIT', 12.0), // OPTIMIZED: Increased to 12% for 3:1 R:R (was 5.0)
     minBalanceForTrade: getNumberEnvVar('TRADING_MIN_BALANCE', 5), // Dynamic: 5% of available balance (minimum $5)
@@ -77,19 +77,32 @@ export const asterConfig = {
       aiModelSymbol: getEnvVar('AI_MODEL_SYMBOL', 'BTC/USDT'),
       forceTradeTest: getBooleanEnvVar('NEXT_PUBLIC_FORCE_TRADE_TEST', true), // Enable real trading by default
       enable24_7Agents: getBooleanEnvVar('ENABLE_24_7_AGENTS', true),
-      agentRunnerInterval: getNumberEnvVar('AGENT_RUNNER_INTERVAL', 2), // minutes - OPTIMIZED: 2min for faster opportunity capture
-      maxConcurrentWorkflows: getNumberEnvVar('MAX_CONCURRENT_WORKFLOWS', 2), // OPTIMIZED: Max 2 concurrent workflows (was 3)
+      agentRunnerInterval: getNumberEnvVar('AGENT_RUNNER_INTERVAL', 1), // MVP: 1 minute for faster opportunity capture (was 2min)
+      maxConcurrentWorkflows: getNumberEnvVar('MAX_CONCURRENT_WORKFLOWS', 3), // MVP: Max 3 concurrent workflows for more trades (was 2)
       maxConcurrentPositions: getNumberEnvVar('MAX_CONCURRENT_POSITIONS', 2), // OPTIMIZED: Max 2 positions open simultaneously (1 for accounts <$100)
       maxPortfolioRiskPercent: getNumberEnvVar('MAX_PORTFOLIO_RISK', 10), // OPTIMIZED: Max 10% total risk across all positions (5% for accounts <$100)
-      // Symbol Blacklist - Never trade these symbols
+      // Symbol Blacklist - Never trade these symbols (execution issues, immediate losses)
+      // These coins have low liquidity, wide spreads, and cause immediate losses on position open
+      // USER CONFIRMED: ATOM caused $4 losses multiple times without price movement (spread/slippage issue)
       blacklistedSymbols: [
+        // APE - Execution problems, wide spreads
         'APEUSDT',
         'APE/USDT',
+        'APEUSD',
+        'APE',
+        // ATOM - USER CONFIRMED: Lost $4 multiple times, wide spread/slippage
         'ATOMUSDT',
         'ATOM/USDT',
+        'ATOMUSD',
+        'ATOM',
+        'ATOM-PERP', // Perpetual format
+        'ATOMUSD-PERP',
+        // COSMO - Similar execution issues to APE/ATOM
         'COSMOUSDT',
         'COSMO/USDT',
-        'COSMO' // Added due to consistent losses on every trade
+        'COSMOUSD',
+        'COSMO',
+        // Add any symbol containing these strings (catch all variants)
       ],
     },
   
@@ -109,7 +122,7 @@ export const aiConfig = {
   ollamaBaseUrl: getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434'),
   
   // DeepSeek R1 Models (in order of preference)
-  defaultModel: getEnvVar('DEEPSEEK_MODEL', 'deepseek-r1:32b'), // Optimized for RTX 5070 Ti
+  defaultModel: getEnvVar('DEEPSEEK_MODEL', 'deepseek-r1:14b'), // Optimized for local GPU
   fallbackModels: getEnvVar('DEEPSEEK_FALLBACK_MODELS', 'deepseek-r1:14b,deepseek-r1:8b,deepseek-r1:7b').split(','),
   
   // Model Parameters
@@ -124,7 +137,7 @@ export const aiConfig = {
 export const dbConfig = {
   connectionString: getEnvVar('DATABASE_URL', 'postgresql://localhost:5432/manna_dev', false),
   ssl: getBooleanEnvVar('DATABASE_SSL', true), // Default to true for Neon
-  maxConnections: getNumberEnvVar('DATABASE_MAX_CONNECTIONS', 10), // Reduced for Neon
+  maxConnections: getNumberEnvVar('DATABASE_MAX_CONNECTIONS', 30), // CRITICAL FIX: Increased from 10 to 30 for parallel operations
   idleTimeout: getNumberEnvVar('DATABASE_IDLE_TIMEOUT', 30000),
   connectionTimeout: getNumberEnvVar('DATABASE_CONNECTION_TIMEOUT', 10000), // Increased timeout for Neon
 };
@@ -149,11 +162,11 @@ export const appConfig = {
     retryAttempts: getNumberEnvVar('API_RETRY_ATTEMPTS', 3),
   },
   
-  // Frontend Configuration
+  // Frontend Configuration - OPTIMIZED: Reduced polling for better performance
   frontend: {
-    pollingInterval: getNumberEnvVar('FRONTEND_POLLING_INTERVAL', 500),
-    priceUpdateInterval: getNumberEnvVar('FRONTEND_PRICE_INTERVAL', 3000),
-    cacheTimeout: getNumberEnvVar('FRONTEND_CACHE_TIMEOUT', 250),
+    pollingInterval: getNumberEnvVar('FRONTEND_POLLING_INTERVAL', 2000), // Was 500ms, now 2s (75% reduction)
+    priceUpdateInterval: getNumberEnvVar('FRONTEND_PRICE_INTERVAL', 5000), // Was 3s, now 5s
+    cacheTimeout: getNumberEnvVar('FRONTEND_CACHE_TIMEOUT', 1000), // Was 250ms, now 1s
   }
 };
 

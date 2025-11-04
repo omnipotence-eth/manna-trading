@@ -258,11 +258,13 @@ export class CircuitBreaker {
  */
 export const circuitBreakers = {
   // Aster DEX API circuit breaker
+  // CRITICAL FIX: Increased thresholds to handle 418 rate limit errors gracefully
+  // 418 errors are temporary rate limits, not service failures
   asterApi: new CircuitBreaker({
     name: 'AsterAPI',
-    failureThreshold: 5,
+    failureThreshold: 15, // INCREASED from 5 to 15 - allow more temporary failures
     successThreshold: 3,
-    timeout: 60000, // 1 minute
+    timeout: 30000, // REDUCED from 60s to 30s - faster recovery
     monitoringPeriod: 300000 // 5 minutes
   }),
   

@@ -24,52 +24,52 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Check cache first
+    // ENTERPRISE: Check for cache-bypass header for live data
+    const cacheControl = req.headers.get('cache-control');
+    const bypassCache = cacheControl === 'no-cache' || cacheControl === 'no-store';
+    
+    // Check cache first (unless bypassing)
     const cacheKey = cacheKeys.account();
     const cached = caches.account.get(cacheKey);
-    if (cached) {
+    if (cached && !bypassCache) {
       timer.end();
       PerformanceMonitor.recordCounter('api:aster:account:cache_hit');
-      return createSuccessResponse(cached);
+      const cachedResponse = createSuccessResponse(cached);
+      // Add cache headers even for cached responses
+      cachedResponse.headers.set('Cache-Control', 'public, max-age=1, must-revalidate');
+      return cachedResponse;
     }
 
-    // Apply rate limiting and circuit breaker protection
+    // OPTIMIZED: Use asterDexService which has 30-key support, rate limiting, and circuit breakers
+    // This replaces direct fetch() and enables full 600 req/sec capacity
     return await withRateLimit(async () => {
       return await circuitBreakers.asterApi.execute(async () => {
-        // Build signed query with fresh timestamp
-        const queryString = await buildSignedQuery({ timestamp: Date.now() - 1000 }, asterConfig.secretKey);
-        const url = `${asterConfig.baseUrl}/fapi/v1/account?${queryString}`;
+        logger.debug('Fetching Aster account info via 30-key system', { context: 'AsterAPI' });
 
-        logger.debug('Fetching Aster account info', { context: 'AsterAPI', data: { url } });
-
-        const response = await fetch(url, {
-          headers: {
-            'X-MBX-APIKEY': asterConfig.apiKey,
-          },
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          // CRITICAL FIX: Remove hardcoded fallback data - only use in development
-          const fallbackData = process.env.NODE_ENV === 'development' ? {
-            balance: 0,
-            accountEquity: 0,
-            availableBalance: 0,
-            totalPositionInitialMargin: 0,
-            totalUnrealizedProfit: 0,
-            totalWalletBalance: 0,
-            totalMarginBalance: 0,
-            totalInitialMargin: 0,
-            totalCrossWalletBalance: 0,
-            totalOpenOrderInitialMargin: 0,
-            assets: [],
-            fallback: true,
-            timestamp: new Date().toISOString()
-          } : undefined;
-          return handleAsterApiError(response, 'AsterAPI', fallbackData);
+        // Import asterDexService dynamically to avoid circular dependencies
+        const { asterDexService } = await import('@/services/asterDexService');
+        
+        // CRITICAL FIX: Don't call getBalance() - it creates infinite recursion!
+        // getBalance() internally calls this same /api/aster/account endpoint
+        // Instead, call Aster DEX API directly using authenticatedRequest
+        
+        // Make authenticated request to Aster DEX (uses 30-key system automatically)
+        // FIXED: Use 'account' not 'fapi/v1/account' since baseUrl already includes /fapi/v1
+        const data = await (asterDexService as any).authenticatedRequest('account', {}, 'GET', 30000);
+        
+        // Log raw API response for debugging (development only)
+        if (process.env.NODE_ENV === 'development') {
+          logger.debug('Aster API response received via 30-key system', {
+            context: 'AsterAPI',
+            data: {
+              keys: Object.keys(data),
+              totalWalletBalance: data.totalWalletBalance,
+              availableBalance: data.availableBalance,
+              totalMarginBalance: data.totalMarginBalance,
+              totalUnrealizedProfit: data.totalUnrealizedProfit
+            }
+          });
         }
-
-        const data = await response.json();
         
         // Parse balance fields from Aster DEX
         const availableBalance = parseFloat(data.availableBalance || 0);
@@ -78,20 +78,54 @@ export async function GET(req: NextRequest) {
         const totalPositionInitialMargin = parseFloat(data.totalPositionInitialMargin || 0);
         const totalMarginBalance = parseFloat(data.totalMarginBalance || 0);
         
-        // Calculate account value
-        // FIXED: Use totalMarginBalance which includes unrealized P&L (correct account equity)
-        const calculatedAccountValue = totalMarginBalance; // Total account equity including unrealized P&L
-        const accountEquity = totalMarginBalance; // Same as calculatedAccountValue (includes unrealized P&L)
+        // Calculate account equity
+        // CRITICAL FIX: Use the first non-zero balance field
+        // Priority: availableBalance → totalWalletBalance → totalMarginBalance
+        let accountEquity = 0;
+        let balanceSource = 'none';
         
-        logger.info('Account value calculated', {
+        if (availableBalance > 0 && !isNaN(availableBalance)) {
+          accountEquity = availableBalance;
+          balanceSource = 'availableBalance';
+        } else if (totalWalletBalance > 0 && !isNaN(totalWalletBalance)) {
+          accountEquity = totalWalletBalance;
+          balanceSource = 'totalWalletBalance';
+        } else if (totalMarginBalance > 0 && !isNaN(totalMarginBalance)) {
+          accountEquity = totalMarginBalance;
+          balanceSource = 'totalMarginBalance';
+        } else {
+          // Try max withdraw as last resort
+          const maxWithdraw = parseFloat(data.maxWithdrawAmount || 0);
+          if (maxWithdraw > 0 && !isNaN(maxWithdraw)) {
+            accountEquity = maxWithdraw;
+            balanceSource = 'maxWithdrawAmount';
+          }
+        }
+        
+        const calculatedAccountValue = accountEquity; // Account equity is the displayed balance
+        
+        // Log balance calculation for debugging
+        logger.debug('Balance calculation', {
+          context: 'AsterAPI',
+          data: {
+            source: balanceSource,
+            value: accountEquity,
+            availableBalance,
+            totalWalletBalance,
+            totalMarginBalance
+          }
+        });
+        
+        logger.info(`💰 Account Balance: $${calculatedAccountValue.toFixed(2)} (source: ${balanceSource})`, {
           context: 'AsterAPI',
           data: { 
+            balanceSource,
+            calculatedBalance: calculatedAccountValue.toFixed(2),
             availableBalance: availableBalance.toFixed(2),
-            positionMargin: totalPositionInitialMargin.toFixed(2),
-            unrealizedPnL: totalUnrealizedProfit.toFixed(2),
             totalWalletBalance: totalWalletBalance.toFixed(2),
-            accountEquity: accountEquity.toFixed(2),
-            balance: calculatedAccountValue.toFixed(2)
+            totalMarginBalance: totalMarginBalance.toFixed(2),
+            unrealizedPnL: totalUnrealizedProfit.toFixed(2),
+            positionMargin: totalPositionInitialMargin.toFixed(2)
           }
         });
         
@@ -110,13 +144,31 @@ export async function GET(req: NextRequest) {
         PerformanceMonitor.recordCounter('api:aster:account:success');
         PerformanceMonitor.recordGauge('api:aster:account:response_time', duration);
         
-        return createSuccessResponse(result);
+        // CRITICAL FIX: Add balance to top level for frontend compatibility
+        // Frontend expects: response.balance
+        // createSuccessResponse wraps in: response.data.balance
+        // Solution: Include both
+        const responseData = {
+          success: true,
+          data: result,
+          balance: calculatedAccountValue, // Top-level for frontend
+          accountEquity: accountEquity, // Top-level for convenience
+          timestamp: new Date().toISOString()
+        };
+        
+        const apiResponse = NextResponse.json(responseData);
+        // ENTERPRISE: Add cache headers for live data (1 second max-age)
+        apiResponse.headers.set('Cache-Control', 'public, max-age=1, must-revalidate');
+        apiResponse.headers.set('X-Data-Source', 'live');
+        apiResponse.headers.set('X-Timestamp', Date.now().toString());
+        
+        return apiResponse;
       });
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     timer.end();
     PerformanceMonitor.recordCounter('api:aster:account:error');
-    logger.error('Failed to fetch Aster account', error, { context: 'AsterAPI' });
+    logger.error('Failed to fetch Aster account', error instanceof Error ? error : new Error(String(error)), { context: 'AsterAPI' });
     return NextResponse.json(
       { error: 'Failed to fetch account data' },
       { status: 500 }

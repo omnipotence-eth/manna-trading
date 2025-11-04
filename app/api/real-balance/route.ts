@@ -124,13 +124,29 @@ async function getChartData(timeRange: string, request: NextRequest) {
       }
     });
 
+    // Fetch account info to get unrealized P&L
+    let unrealizedPnL = 0;
+    try {
+      // Use internal API route to get account info
+      const accountResponse = await fetch(new URL('/api/aster/account', request.url).toString());
+      if (accountResponse.ok) {
+        const accountResult = await accountResponse.json();
+        if (accountResult.success && accountResult.data) {
+          unrealizedPnL = parseFloat(accountResult.data.totalUnrealizedProfit || 0);
+        }
+      }
+    } catch (err) {
+      // If we can't get unrealized P&L, use 0
+      logger.warn('Could not fetch unrealized P&L for chart', { context: 'BalanceChartAPI' });
+    }
+
     // Add current point with unrealized P&L
     chartData.push({
       timestamp: now,
       balance: currentBalance,
-      unrealizedPnl: accountInfo.unrealizedPnL || 0,
+      unrealizedPnl: unrealizedPnL,
       realizedPnl: cumulativePnL,
-      totalPnL: (accountInfo.unrealizedPnL || 0) + cumulativePnL
+      totalPnL: unrealizedPnL + cumulativePnL
     });
 
     // If no trades, create a simple flat line for visualization
@@ -186,20 +202,43 @@ async function getChartData(timeRange: string, request: NextRequest) {
 
 async function getCurrentBalance(request: NextRequest) {
   try {
-    // Fetch account equity directly from asterDexService
-    const { asterDexService } = await import('@/services/asterDexService');
-    const balance = await asterDexService.getBalance();
+    // Fetch account equity directly from account API (bypass cache for real-time accuracy)
+    const accountUrl = new URL('/api/aster/account', request.url).toString();
+    const accountResponse = await fetch(accountUrl, {
+      cache: 'no-store', // Always fetch fresh data for real-time tracking
+      headers: {
+        'Cache-Control': 'no-cache'
+      }
+    });
     
-    if (!balance || balance === 0) {
-      logger.warn('No balance data from Aster API', {
-        context: 'BalanceChartAPI'
+    if (!accountResponse.ok) {
+      throw new Error(`Account API returned ${accountResponse.status}`);
+    }
+    
+    const accountResult = await accountResponse.json();
+    
+    if (!accountResult.success || !accountResult.data) {
+      throw new Error('Invalid account API response');
+    }
+    
+    // Use accountEquity (which uses availableBalance when totalMarginBalance is invalid)
+    const balance = parseFloat(accountResult.data.accountEquity || accountResult.data.balance || accountResult.data.availableBalance || 0);
+    
+    if (!balance || balance === 0 || isNaN(balance)) {
+      logger.warn('No valid balance data from Account API', {
+        context: 'BalanceChartAPI',
+        data: { accountData: accountResult.data }
       });
+      // Don't return 0, throw error instead
+      throw new Error('Invalid balance value from account API');
     }
       
-    logger.info('Real account equity fetched from Aster API', {
+    logger.info('Real account equity fetched from Account API', {
       context: 'BalanceChartAPI',
       data: { 
-        accountEquity: balance
+        accountEquity: balance,
+        availableBalance: accountResult.data.availableBalance,
+        totalMarginBalance: accountResult.data.totalMarginBalance
       }
     });
 
@@ -208,14 +247,18 @@ async function getCurrentBalance(request: NextRequest) {
       data: {
         balance,
         timestamp: Date.now(),
-        source: 'aster_api'
+        source: 'aster_account_api'
       }
     });
   } catch (error) {
-    logger.error('Failed to fetch current balance from Aster API', error, { context: 'BalanceChartAPI' });
+    logger.error('Failed to fetch current balance from Account API', error, { context: 'BalanceChartAPI' });
     
     return NextResponse.json(
-      { error: 'Failed to fetch real balance data' },
+      { 
+        success: false,
+        error: 'Failed to fetch real balance data',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }

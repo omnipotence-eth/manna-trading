@@ -150,21 +150,23 @@ export async function POST(req: NextRequest) {
           });
 
           return NextResponse.json(data);
-        } catch (error: any) {
+        } catch (error: unknown) {
           clearTimeout(timeoutId);
-          if (error.name === 'AbortError') {
-            logger.error('Order placement timeout', error, { context: 'AsterAPI' });
+          if (error instanceof Error && error.name === 'AbortError') {
+            const errorObj = error instanceof Error ? error : new Error(String(error));
+            logger.error('Order placement timeout', errorObj, { context: 'AsterAPI' });
             return NextResponse.json(
               { error: 'Request timeout - order placement took too long' },
               { status: 408 }
             );
           }
-          throw error;
+          throw error instanceof Error ? error : new Error(String(error));
         }
       });
     });
-  } catch (error: any) {
-    logger.error('Failed to place Aster order', error, { context: 'AsterAPI' });
+  } catch (error: unknown) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    logger.error('Failed to place Aster order', errorObj, { context: 'AsterAPI' });
     return NextResponse.json(
       { error: 'Failed to place order' },
       { status: 500 }
@@ -239,8 +241,9 @@ export async function DELETE(req: NextRequest) {
     });
 
     return NextResponse.json(data);
-  } catch (error: any) {
-    logger.error('Failed to cancel Aster order', error, { context: 'AsterAPI' });
+  } catch (error: unknown) {
+    const errorObj = error instanceof Error ? error : new Error(String(error));
+    logger.error('Failed to cancel Aster order', errorObj, { context: 'AsterAPI' });
     return NextResponse.json(
       { error: 'Failed to cancel order' },
       { status: 500 }

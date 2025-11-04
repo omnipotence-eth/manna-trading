@@ -228,15 +228,26 @@ async function getPerformanceMetrics() {
 }
 
 async function testDeepSeekConnection() {
-  const isConnected = await circuitBreakers.externalApi.execute(async () => {
-    return await deepseekService.testConnection();
-  });
+  try {
+    const isConnected = await circuitBreakers.externalApi.execute(async () => {
+      return await deepseekService.testConnection();
+    });
 
-  return createSuccessResponse({
-    message: 'DeepSeek R1 Connection Test',
-    connected: isConnected,
-    timestamp: new Date().toISOString()
-  });
+    return createSuccessResponse({
+      message: 'DeepSeek R1 Connection Test',
+      connected: isConnected,
+      error: isConnected ? undefined : 'DeepSeek R1 is not available. Check if Ollama is running and model is loaded. First request may take 60-120 seconds to load model (18.9GB model).',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Failed to test DeepSeek connection', error as Error, { context: 'MultiAgentAPI' });
+    return createSuccessResponse({
+      message: 'DeepSeek R1 Connection Test',
+      connected: false,
+      error: error instanceof Error ? error.message : 'Unknown error during connection test',
+      timestamp: new Date().toISOString()
+    });
+  }
 }
 
 async function getAvailableModels() {
@@ -253,7 +264,7 @@ async function getAvailableModels() {
 
 async function testAnalysis(request: NextRequest) {
   const body = await request.json();
-  const { prompt, model = 'deepseek-r1:32b' } = body;
+  const { prompt, model = 'deepseek-r1:14b' } = body;
 
   if (!prompt) {
     return NextResponse.json(

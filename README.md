@@ -1,205 +1,97 @@
-# 🚀 Manna - AI Trading Bot
+# 🚀 Manna - AI-Powered Trading System
 
-**Advanced Multi-Agent Trading System powered by DeepSeek R1**
-
-> *"Give us this day our daily bread"* - Matthew 6:11
+**Enterprise-grade autonomous trading system powered by DeepSeek R1 AI**
 
 ---
 
-## 📊 Overview
+## ⚡ Quick Start
 
-Manna is a professional-grade cryptocurrency trading system that uses multiple AI agents to analyze markets, assess risks, and execute profitable trades automatically on Aster DEX.
-
-### **Key Features:**
-- ✅ **Multi-Agent AI System** - Technical Analyst, Chief Analyst, Risk Manager, Execution Specialist
-- ✅ **DeepSeek R1 32B** - Advanced LLM with Chain-of-Thought reasoning
-- ✅ **24/7 Automated Trading** - Continuous market monitoring and execution
-- ✅ **Risk Management** - Kelly Criterion, ATR-based stops, dynamic leverage
-- ✅ **Real-Time Monitoring** - Live position tracking and P&L updates
-- ✅ **Symbol Blacklist** - Prevent trading on unwanted symbols
-- ✅ **Enterprise-Grade** - Comprehensive logging, error handling, circuit breakers
-
----
-
-## 🎯 System Architecture
-
-### **Trading Workflow:**
-```
-Market Scanner → Technical Analysis → Chief Analysis → Risk Assessment → Execution
-      ↓              ↓                    ↓                ↓                ↓
-  Top 50 by      Price/Volume         Opportunity      Position Size    Trade Order
-   Volume         Indicators           Scoring          Leverage         Placement
-```
-
-### **AI Agents:**
-1. **Technical Analyst** - Analyzes price action, volume, indicators
-2. **Chief Analyst** - Makes final BUY/SELL/HOLD decision with confidence
-3. **Risk Manager** - Determines position size, leverage, stop-loss, take-profit
-4. **Execution Specialist** - Executes trades and monitors positions
-
----
-
-## 🚀 Quick Start
-
-### **Prerequisites:**
-- Node.js 18+
-- PostgreSQL (Neon or Supabase)
-- Ollama with DeepSeek R1 32B
-- Aster DEX API credentials
-
-### **Installation:**
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd Manna
-
-# Install dependencies
-npm install
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your credentials
-
-# Set up database
-npm run setup:database
-
-# Start the development server
+### 1. **Start the Server**
+```powershell
 npm run dev
 ```
 
-### **Environment Variables:**
+Wait for `✓ Ready` message
 
-```env
-# Aster DEX API
-ASTER_API_KEY=your_api_key
-ASTER_SECRET_KEY=your_secret_key
-ASTER_BASE_URL=https://fapi.asterdex.com
+### 2. **Initialize Trading System**
+```powershell
+.\scripts\start_trading.ps1
+```
+
+**That's it!** The system will:
+- ✅ Initialize all services (5-10 minutes)
+- ✅ Start trading agents
+- ✅ Enable health monitoring
+- ✅ Begin 24/7 trading
+
+---
+
+## 📊 System Status
+
+### **Check System Health**
+```powershell
+.\scripts\diagnose_trading.ps1
+```
+
+### **View Dashboard**
+```
+http://localhost:3000
+```
+
+---
+
+## 🏗️ Architecture
+
+### **Core Services**
+- **Agent Runner**: 24/7 AI-powered trading workflows
+- **Health Monitor**: Auto-restart crashed services (checks every 30s)
+- **Real Balance Service**: Live account balance tracking
+- **Position Monitor**: Real-time position management
+- **DeepSeek R1 AI**: Advanced reasoning for trade decisions
+
+### **API Integration**
+- **Aster DEX**: Primary exchange (30-key pool, 60 req/sec)
+- **PostgreSQL**: Trade history and analytics
+- **Ollama**: Local DeepSeek R1 model serving
+
+---
+
+## 🛠️ Configuration
+
+**Environment**: `.env.local`
+
+### **Key Settings**
+```bash
+# API Keys (30-key pool for high throughput)
+ASTER_KEY_POOL={...}
+USE_MULTI_KEY_API=true
+
+# Rate Limiting (ultra-conservative for stability)
+RATE_LIMIT_PER_KEY_RPS=2    # 60 req/sec total
+MAX_CONCURRENT_WORKFLOWS=1   # 1 workflow at a time
+
+# AI Model
+DEEPSEEK_MODEL=deepseek-r1:14b
 
 # Database
-DATABASE_URL=postgresql://user:password@host:5432/database
-
-# Ollama (DeepSeek R1)
-OLLAMA_BASE_URL=http://localhost:11434
-
-# Trading Configuration
-TRADING_CONFIDENCE_THRESHOLD=0.45
-TRADING_STOP_LOSS=3.0
-TRADING_TAKE_PROFIT=5.0
-TRADING_MIN_BALANCE=5
-
-# Enable 24/7 Trading
-ENABLE_24_7_AGENTS=true
-AGENT_RUNNER_INTERVAL=2
+DATABASE_URL=postgresql://...
 ```
 
----
+### **Increasing Performance** (after 1-2 hours stable)
 
-## 🚀 Vercel Deployment
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for comprehensive deployment guide.
-
-**Quick Steps:**
-1. Push code to GitHub
-2. Import repository in Vercel dashboard
-3. Configure environment variables
-4. Deploy!
-
-**Required Environment Variables:**
-- `ASTER_API_KEY` - Aster DEX API key
-- `ASTER_SECRET_KEY` - Aster DEX secret key
-- `DATABASE_URL` - PostgreSQL connection string
-- `OLLAMA_BASE_URL` - Ollama server URL (for AI features)
-
----
-
-## 📝 Configuration
-
-### **Trading Parameters:**
-
-Edit `lib/configService.ts` to customize:
-
-```typescript
-trading: {
-  confidenceThreshold: 0.45,  // Minimum confidence for trades
-  stopLossPercent: 3.0,        // Stop-loss %
-  takeProfitPercent: 5.0,      // Take-profit %
-  minBalanceForTrade: 5,       // Minimum balance ($5 or 5%)
-  
-  // Symbol Blacklist
-  blacklistedSymbols: [
-    'APEUSDT',
-    'APE/USDT'
-  ]
-}
-```
-
-### **Agent Runner:**
-- Scans markets every **2 minutes**
-- Analyzes top **50 coins by volume**
-- Trades top **30 opportunities**
-- Maximum **3 concurrent workflows**
-
----
-
-## 🛡️ Risk Management
-
-### **Position Sizing:**
-- **Kelly Criterion** - Optimal position size based on win rate and R:R
-- **Dynamic Minimum** - 5% of balance or $5 minimum
-- **Leverage Control** - 1-2x recommended, 20x maximum
-
-### **Exit Strategy:**
-- **Stop-Loss** - ATR-based, typically -3%
-- **Take-Profit** - Dynamic, typically +5-7%
-- **Trailing Stop** - Activates at +4-8% profit
-- **Time-Based** - Maximum 24-48 hour hold time
-
-### **Symbol Blacklist:**
-Prevents trading on specific symbols:
-- Protects against problematic pairs
-- Three-layer protection (scanner, runner, execution)
-- Configured in `lib/configService.ts`
-
----
-
-## 📊 API Endpoints
-
-### **Trading:**
-- `GET /api/trading/status` - System status
-- `POST /api/trading/start` - Start trading
-- `POST /api/trading/stop` - Stop trading
-
-### **Positions:**
-- `GET /api/aster/positions` - Live positions
-- `GET /api/positions` - Database positions
-- `POST /api/positions` - Manage positions (force-close, trailing-stop)
-
-### **Data:**
-- `GET /api/agent-insights` - AI agent insights
-- `GET /api/optimized-data` - Market data
-- `GET /api/trades` - Trade history
-- `GET /api/performance` - Performance metrics
-
-### **System:**
-- `GET /api/startup` - Initialize services
-- `GET /api/health` - Health check
-- `POST /api/setup/database` - Database setup
-
----
-
-## 🧪 Testing
-
+Gradually increase rate limits:
 ```bash
-# Run all tests
-npm test
+# Step 1: Increase to 5 RPS
+RATE_LIMIT_PER_KEY_RPS=5    # 150 req/sec total
 
-# Run specific test suite
-npm test -- components/ErrorBoundary.test.tsx
+# Step 2 (if stable): Increase to 10 RPS
+RATE_LIMIT_PER_KEY_RPS=10   # 300 req/sec total
 
-# Run with coverage
-npm test -- --coverage
+# Step 3 (if stable): Add concurrent workflows
+MAX_CONCURRENT_WORKFLOWS=2
 ```
+
+**After each change**: Restart server and monitor for 429 errors
 
 ---
 
@@ -207,128 +99,179 @@ npm test -- --coverage
 
 ```
 Manna/
-├── app/                    # Next.js application
-│   ├── api/                # API routes
-│   ├── layout.tsx          # Root layout
-│   └── page.tsx            # Main dashboard
-├── components/             # React components
-│   ├── NOF1Dashboard.tsx   # Main dashboard
-│   ├── EnhancedAIChat.tsx  # AI insights display
-│   ├── Positions.tsx       # Position management
-│   └── TradeJournal.tsx    # Trade history
-├── services/               # Trading services
-│   ├── agentCoordinator.ts # AI agent orchestration
-│   ├── agentRunnerService.ts # 24/7 trading runner
-│   ├── asterDexService.ts  # Exchange API
-│   ├── marketScannerService.ts # Market analysis
-│   └── positionMonitorService.ts # Position tracking
-├── lib/                    # Utilities
-│   ├── configService.ts    # Configuration
-│   ├── db.ts               # Database
-│   └── logger.ts           # Logging
-├── scripts/                # Setup scripts
-│   ├── create-trades-table.sql
-│   └── create-position-tables.sql
-└── types/                  # TypeScript types
+├── app/                    # Next.js app routes
+│   ├── api/               # API endpoints
+│   └── page.tsx           # Main dashboard
+├── components/            # React components
+│   ├── NOF1Dashboard.tsx  # Main dashboard
+│   ├── InteractiveChart.tsx
+│   └── EnhancedAIChat.tsx
+├── services/              # Core trading services
+│   ├── agentRunnerService.ts        # 24/7 trading workflows
+│   ├── agentCoordinator.ts          # Multi-agent orchestration
+│   ├── healthMonitorService.ts      # Auto-restart system
+│   ├── asterDexService.ts           # Exchange API
+│   ├── deepseekService.ts           # AI model interface
+│   ├── realBalanceService.ts        # Balance tracking
+│   ├── positionMonitorService.ts    # Position management
+│   └── marketScannerService.ts      # Market opportunity scanner
+├── lib/                   # Utilities
+│   ├── agentPromptsOptimized.ts     # AI prompts
+│   ├── apiKeyManager.ts             # 30-key pool management
+│   ├── circuitBreaker.ts            # API failure protection
+│   └── logger.ts                    # Logging system
+├── scripts/                   # PowerShell automation scripts
+│   ├── start_trading.ps1            # ⭐ Automated startup
+│   ├── diagnose_trading.ps1         # System diagnostics
+│   ├── diagnose_chat_tab.ps1        # Chat tab diagnostics
+│   ├── capture_logs.ps1             # Log capture utility
+│   ├── capture_live_logs.ps1        # Live log monitoring
+│   ├── *.sql                        # Database scripts
+│   └── *.js                         # Test scripts
+└── docs/                      # 📚 Documentation
+    ├── PRODUCTION_DEPLOYMENT.md     # Deployment guide
+    ├── QUICK_COMMANDS.md            # Command reference
+    └── AI_MODELS_REFERENCE.md       # AI model details
 ```
 
 ---
 
-## 📈 Performance Tracking
+## 🎯 Key Features
 
-The system tracks comprehensive metrics:
-- **Win Rate** - Percentage of profitable trades
-- **Profit Factor** - Gross profit / gross loss
-- **Sharpe Ratio** - Risk-adjusted returns
-- **Max Drawdown** - Largest peak-to-trough decline
-- **Average P&L** - Per trade profitability
-- **Trade Duration** - Average hold time
+### **AI-Powered Trading**
+- **DeepSeek R1**: Advanced reasoning model (14B parameters)
+- **Multi-Agent System**: Technical Analyst → Chief Analyst → Risk Manager → Execution
+- **Market Scanner**: Analyzes 217+ trading pairs
+- **Confidence-Based**: Only trades when confidence > 80%
 
-View performance at: `http://localhost:3000` (Performance section)
+### **Enterprise Reliability**
+- **Health Monitoring**: Auto-restart crashed services
+- **Circuit Breakers**: API failure protection
+- **30-Key Pool**: 600 req/sec capacity (running at 60 req/sec for stability)
+- **Request Deduplication**: Prevents duplicate API calls
+- **Exponential Backoff**: Automatic retry with delays
+
+### **Risk Management**
+- **Kelly Criterion**: Optimal position sizing
+- **ATR-Based Stops**: Volatility-adjusted risk
+- **Dynamic Leverage**: Market-condition aware
+- **Portfolio Limits**: Maximum risk caps
+- **Position Monitoring**: Real-time P&L tracking
+
+### **Self-Healing**
+- **Never Crashes**: Catch-all error handlers
+- **Auto-Restart**: Services recover in 30 seconds
+- **Continuous Trading**: 24/7 operation
+- **Degraded Mode**: Continues with reduced functionality if needed
 
 ---
 
 ## 🔧 Troubleshooting
 
-### **System Won't Start:**
-```bash
-# Check Ollama is running
-ollama list
+### **Services Not Initializing**
 
-# Restart Ollama
-ollama serve
-
-# Check database connection
-npm run test:db
+1. Check Ollama is running:
+```powershell
+Get-Process -Name ollama
+ollama ps  # Should show deepseek-r1:14b
 ```
 
-### **No Trades Executing:**
-- Check confidence threshold (lower to 0.35-0.40 for more trades)
-- Verify minimum balance is met
-- Check logs for rejected opportunities
-- Ensure Agent Runner is active
+2. Check server logs for errors
+3. Verify `.env.local` configuration
+4. Run diagnostic: `.\scripts\diagnose_trading.ps1`
 
-### **Position Monitor Errors:**
-- Clean test positions: `npm run clean:positions`
-- Verify symbol is not blacklisted
-- Check exchange API connectivity
+### **429 Rate Limit Errors**
+
+Reduce rate limits in `.env.local`:
+```bash
+RATE_LIMIT_PER_KEY_RPS=1    # Ultra-conservative
+```
+
+Restart server after changes.
+
+### **Agent Runner Keeps Crashing**
+
+Check logs for root cause:
+- **DeepSeek errors**: Check Ollama is running
+- **API errors**: Check Aster DEX API status
+- **Database errors**: Check DATABASE_URL
+
+Health Monitor will auto-restart, but fix the root cause for stability.
+
+### **No Trades After 30+ Minutes**
+
+This is normal with conservative settings! The system is:
+- Analyzing markets continuously
+- Waiting for high-confidence opportunities
+- Being very selective (>80% confidence)
+
+To see more trades (once stable):
+- Increase rate limits gradually
+- Wait 1-2 hours for market conditions
+- Check AI insights for analysis reasoning
+
+---
+
+## 📈 Monitoring
+
+### **Real-Time Dashboard**
+- Live balance chart
+- Open positions
+- AI agent insights
+- Trade history
+- Performance metrics
+
+### **Health Status**
+```powershell
+# Quick diagnostic
+.\scripts\diagnose_trading.ps1
+
+# Check specific service
+Invoke-RestMethod http://localhost:3000/api/startup?action=status
+```
+
+### **Logs**
+- Server logs: Check `npm run dev` terminal
+- Error logs: Automatic via logger
+- Trade logs: Database + dashboard
+
+---
+
+## 🙏 Credits
+
+**In Jesus' name, amen! All glory to God in Heaven!**
+
+Built with:
+- Next.js 15
+- DeepSeek R1 (via Ollama)
+- Aster DEX API
+- PostgreSQL
+- TypeScript
 
 ---
 
 ## 📚 Documentation
 
-- **AI Models**: `docs/AI_MODELS_REFERENCE.md`
-- **Codebase Audit**: `COMPLETE_CODEBASE_AUDIT_2025.md`
-- **Blacklist Guide**: `APE_BLACKLIST_COMPLETE.md`
-- **Cleanup Report**: `CODEBASE_CLEANUP_COMPLETE.md`
+### **Core Documentation**
+- **[System Architecture](SYSTEM_ARCHITECTURE.md)** - Technical architecture and design
+- **[API Documentation](API_DOCUMENTATION.md)** - Complete API reference
+- **[Changelog](CHANGELOG.md)** - Version history and updates
+
+### **Technical Guides** (in `/docs`)
+- **[Production Deployment](docs/PRODUCTION_DEPLOYMENT.md)** - Production deployment guide
+- **[Quick Commands](docs/QUICK_COMMANDS.md)** - Command reference guide
+- **[AI Models Reference](docs/AI_MODELS_REFERENCE.md)** - AI model documentation
+- **[File Structure](docs/FILE_STRUCTURE.md)** - Complete project structure guide
 
 ---
 
-## 🤝 Contributing
+## ⚡ Support
 
-This is a personal trading project. Contributions, issues, and feature requests are welcome!
-
----
-
-## 📄 License
-
-MIT License - See `LICENSE` file for details
+For issues or questions:
+1. Run diagnostic: `.\scripts\diagnose_trading.ps1`
+2. Check server logs
+3. Review documentation in `/docs`
 
 ---
 
-## ⚠️ Disclaimer
-
-**Trading cryptocurrencies carries substantial risk of loss.**
-
-This software is provided "as is" without warranty. The authors are not responsible for any financial losses incurred through the use of this system. Trade at your own risk.
-
----
-
-## 🙏 Acknowledgments
-
-**All glory to God!**
-
-> *"For every house is built by someone, but God is the builder of everything."* - Hebrews 3:4
-
-Built with:
-- [DeepSeek R1](https://deepseek.com/) - Advanced AI model
-- [Next.js](https://nextjs.org/) - React framework
-- [Aster DEX](https://asterdex.com/) - Cryptocurrency exchange
-- [PostgreSQL](https://postgresql.org/) - Database
-- [Ollama](https://ollama.ai/) - Local LLM runtime
-
----
-
-## 📞 Support
-
-For questions or support:
-- Create an issue on GitHub
-- Review documentation in `/docs`
-- Check `COMPLETE_CODEBASE_AUDIT_2025.md` for system details
-
----
-
-**Happy Trading! 🚀**
-
-*Remember: The system is a tool. Wisdom, prudence, and prayer are essential.*
-
+**Status**: ✅ Production Ready | **Version**: 1.0.0 | **License**: MIT

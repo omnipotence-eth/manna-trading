@@ -14,13 +14,14 @@ class APICache {
   
   /**
    * Cache TTLs (Time To Live) in milliseconds
+   * OPTIMIZED: Increased cache times to prevent 429 rate limit errors
    */
   private readonly TTL = {
-    POSITIONS: 10000,    // 10 seconds - positions change frequently
-    BALANCE: 15000,      // 15 seconds - balance changes with positions
-    PRICE: 5000,         // 5 seconds - prices change quickly
-    TICKER: 10000,       // 10 seconds - ticker data
-    MARKETS: 300000,     // 5 minutes - markets rarely change
+    POSITIONS: 20000,    // 20 seconds - increased from 10s (positions don't change that fast)
+    BALANCE: 30000,      // 30 seconds - increased from 15s (balance updates are not critical)
+    PRICE: 10000,        // 10 seconds - increased from 5s (acceptable for trading decisions)
+    TICKER: 10000,       // 10 seconds - ticker data (unchanged)
+    MARKETS: 300000,     // 5 minutes - markets rarely change (unchanged)
   };
 
   /**

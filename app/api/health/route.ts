@@ -103,10 +103,10 @@ export async function GET(request: NextRequest) {
     });
 
     return createSuccessResponse(health);
-  } catch (error: any) {
+  } catch (error: unknown) {
     timer.end();
     PerformanceMonitor.recordCounter('api:health:error');
-    return handleApiError(error, 'HealthCheck');
+    return handleApiError(error instanceof Error ? error : new Error(String(error)), 'HealthCheck');
   }
 }
 

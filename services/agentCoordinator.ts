@@ -1,6 +1,7 @@
 /**
  * Agent Coordination Framework
  * Manages communication, state, and workflow between AI agents
+ * CRITICAL FIX: Added mutex protection for concurrent workflow safety
  */
 
 import { logger } from '@/lib/logger';
@@ -9,6 +10,7 @@ import { AGENT_PROMPTS, MarketData, SentimentData, OnChainData, AnalystReports, 
 import { DEEPSEEK_OPTIMIZED_PROMPTS } from '@/lib/agentPromptsOptimized';
 import { realBalanceService } from '@/services/realBalanceService';
 import { TRADING_THRESHOLDS } from '@/constants/tradingConstants';
+import { Mutex } from 'async-mutex';
 
 export interface AgentMessage {
   from: string;
@@ -49,6 +51,15 @@ export interface WorkflowStep {
   completedAt?: number;
 }
 
+export interface WorkflowContext {
+  marketData?: any;
+  technicalAnalysis?: any;
+  chiefDecision?: any;
+  riskAssessment?: any;
+  executionPlan?: any;
+  [key: string]: any;
+}
+
 export interface TradingWorkflow {
   id: string;
   symbol: string;
@@ -58,20 +69,7 @@ export interface TradingWorkflow {
   startedAt: number;
   completedAt?: number;
   result?: any;
-  context: {
-    marketData?: MarketData;
-    sentimentData?: SentimentData;
-    onchainData?: OnChainData;
-    analystReports?: AnalystReports;
-    finalDecision?: FinalDecision;
-    portfolio?: Portfolio;
-    riskAssessment?: any;
-    executionPlan?: any;
-    tradeResult?: any;
-    technicalAnalysis?: any;
-    sentimentAnalysis?: any;
-    onchainAnalysis?: any;
-  };
+  context: WorkflowContext;
 }
 
 export class AgentCoordinator {
@@ -80,11 +78,13 @@ export class AgentCoordinator {
   private workflows: Map<string, TradingWorkflow> = new Map();
   private isRunning = false;
   private messageHandlers: Map<string, (message: AgentMessage) => Promise<void>> = new Map();
+  // CRITICAL FIX: Add mutex for workflow synchronization
+  private workflowMutex = new Mutex();
 
   constructor() {
     this.initializeAgents();
     this.setupMessageHandlers();
-    logger.info('🤖 Agent Coordinator initialized', {
+    logger.info('Agent Coordinator initialized', {
       context: 'AgentCoordinator',
       data: { agents: Array.from(this.agents.keys()) }
     });
@@ -95,10 +95,10 @@ export class AgentCoordinator {
    */
   private initializeAgents(): void {
     const agentConfigs = [
-      { id: 'technical', name: 'Technical Analyst', model: 'deepseek-r1:32b' },
-      { id: 'chief', name: 'Chief Analyst', model: 'deepseek-r1:32b' },
-      { id: 'risk', name: 'Risk Manager', model: 'deepseek-r1:32b' },
-      { id: 'execution', name: 'Execution Specialist', model: 'deepseek-r1:32b' }
+      { id: 'technical', name: 'Technical Analyst', model: 'deepseek-r1:14b' },
+      { id: 'chief', name: 'Chief Analyst', model: 'deepseek-r1:14b' },
+      { id: 'risk', name: 'Risk Manager', model: 'deepseek-r1:14b' },
+      { id: 'execution', name: 'Execution Specialist', model: 'deepseek-r1:14b' }
     ];
 
     agentConfigs.forEach(config => {
@@ -130,24 +130,39 @@ export class AgentCoordinator {
 
   /**
    * Start a new trading workflow
+   * CRITICAL FIX: Protected with mutex to prevent duplicate workflows
    */
   async startTradingWorkflow(symbol: string): Promise<string> {
-    const workflowId = `workflow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    const steps = this.createWorkflowSteps();
-    
-    const workflow: TradingWorkflow = {
-      id: workflowId,
-      symbol,
-      status: 'running',
-      startedAt: Date.now(),
-      steps: steps,
-      context: {}
-    };
+    return await this.workflowMutex.runExclusive(async () => {
+      // Check if workflow already exists for this symbol
+      const existingWorkflow = Array.from(this.workflows.values()).find(
+        wf => wf.symbol === symbol && wf.status === 'running'
+      );
+      
+      if (existingWorkflow) {
+        logger.warn('Workflow already running for symbol, returning existing', {
+          context: 'AgentCoordinator',
+          data: { symbol, existingId: existingWorkflow.id }
+        });
+        return existingWorkflow.id;
+      }
+      
+      const workflowId = `workflow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const steps = this.createWorkflowSteps();
+      
+      const workflow: TradingWorkflow = {
+        id: workflowId,
+        symbol,
+        status: 'running',
+        startedAt: Date.now(),
+        steps: steps,
+        context: {}
+      };
 
-    this.workflows.set(workflowId, workflow);
+      this.workflows.set(workflowId, workflow);
     
-    logger.info('🚀 Started trading workflow', {
+    logger.info('Started trading workflow', {
       context: 'AgentCoordinator',
       data: {
         workflowId,
@@ -158,19 +173,41 @@ export class AgentCoordinator {
       }
     });
 
-    // Start the workflow execution immediately (don't use catch - let it throw)
-    setImmediate(async () => {
-      try {
-        await this.executeWorkflow(workflowId);
-      } catch (error) {
-        logger.error('❌ Workflow execution failed', error, {
-          context: 'AgentCoordinator',
-          data: { workflowId, symbol }
-        });
+    // CRITICAL FIX: Start workflow execution properly without fire-and-forget
+    // Execute in background but track errors correctly
+    // IMPORTANT: Don't await - workflow execution is async and may take time
+    // But verify it's queued properly
+    this.executeWorkflow(workflowId).catch(error => {
+      logger.error('Workflow execution failed', error, {
+        context: 'AgentCoordinator',
+        data: { workflowId, symbol }
+      });
+      
+      // Update workflow status on error
+      const wf = this.workflows.get(workflowId);
+      if (wf) {
+        wf.status = 'failed';
+        wf.completedAt = Date.now();
       }
     });
+    
+    // CRITICAL FIX: Verify workflow is in the map and has correct status
+    const verifyWorkflow = this.workflows.get(workflowId);
+    if (!verifyWorkflow) {
+      throw new Error(`Workflow ${workflowId} not found in workflows map after creation`);
+    }
+    
+    if (verifyWorkflow.status !== 'running') {
+      throw new Error(`Workflow ${workflowId} status is ${verifyWorkflow.status}, expected 'running'`);
+    }
+    
+    // Verify workflow has steps
+    if (!verifyWorkflow.steps || verifyWorkflow.steps.length === 0) {
+      throw new Error(`Workflow ${workflowId} has no steps`);
+    }
 
-    return workflowId;
+      return workflowId;
+    }); // End of mutex.runExclusive
   }
 
   /**
@@ -250,11 +287,15 @@ export class AgentCoordinator {
       throw new Error(`Workflow ${workflowId} not found`);
     }
 
-    logger.debug('🔄 Executing workflow steps', {
+    logger.debug('Executing workflow steps', {
       context: 'AgentCoordinator',
       workflowId,
       totalSteps: workflow.steps.length
     });
+
+    // CRITICAL FIX: Add workflow-level timeout (5 minutes)
+    const WORKFLOW_TIMEOUT = 300000; // 5 minutes
+    const workflowStartTime = Date.now();
 
     try {
       // Execute steps sequentially, waiting for each to complete
@@ -265,11 +306,17 @@ export class AgentCoordinator {
       while (executedSteps < workflow.steps.length && iterations < maxIterations) {
         iterations++;
         
+        // Check if workflow has exceeded timeout
+        const elapsed = Date.now() - workflowStartTime;
+        if (elapsed > WORKFLOW_TIMEOUT) {
+          throw new Error(`Workflow timeout: exceeded ${WORKFLOW_TIMEOUT / 1000}s limit (elapsed: ${(elapsed / 1000).toFixed(1)}s)`);
+        }
+        
         // Find next executable step
         let stepExecuted = false;
         for (const step of workflow.steps) {
           if (step.status === 'pending' && this.canExecuteStep(step, workflow)) {
-            logger.debug(`📌 Executing step: ${step.name}`, {
+            logger.debug(`Executing step: ${step.name}`, {
               context: 'AgentCoordinator',
               workflowId,
               step: step.id
@@ -286,7 +333,7 @@ export class AgentCoordinator {
         if (!stepExecuted) {
           const pendingSteps = workflow.steps.filter(s => s.status === 'pending');
           if (pendingSteps.length > 0) {
-            logger.error('⚠️ Workflow stuck - pending steps with unmet dependencies', null, {
+            logger.error('Workflow stuck - pending steps with unmet dependencies', null, {
               context: 'AgentCoordinator',
               workflowId,
               pendingSteps: pendingSteps.map(s => s.id)
@@ -304,7 +351,7 @@ export class AgentCoordinator {
         workflow.status = 'completed';
         workflow.completedAt = Date.now();
         
-        logger.info('✅ Workflow completed successfully', {
+        logger.info('Workflow completed successfully', {
           context: 'AgentCoordinator',
           workflowId,
           duration: `${((workflow.completedAt - workflow.startedAt) / 1000).toFixed(1)}s`,
@@ -315,7 +362,7 @@ export class AgentCoordinator {
         workflow.status = 'failed';
         workflow.completedAt = Date.now();
         
-        logger.error('❌ Workflow failed with errors', null, {
+        logger.error('Workflow failed with errors', null, {
           context: 'AgentCoordinator',
           workflowId,
           failedSteps,
@@ -325,7 +372,7 @@ export class AgentCoordinator {
         workflow.status = 'failed';
         workflow.completedAt = Date.now();
         
-        logger.warn('⚠️ Workflow partially completed', {
+        logger.warn('Workflow partially completed', {
           context: 'AgentCoordinator',
           workflowId,
           completedSteps,
@@ -336,7 +383,7 @@ export class AgentCoordinator {
       workflow.status = 'failed';
       workflow.completedAt = Date.now();
       
-      logger.error('❌ Workflow execution error', error, {
+      logger.error('Workflow execution error', error, {
         context: 'AgentCoordinator',
         workflowId
       });
@@ -363,7 +410,7 @@ export class AgentCoordinator {
     step.status = 'running';
     step.startedAt = Date.now();
 
-    logger.debug('🔄 Executing step', {
+    logger.debug('Executing step', {
       context: 'AgentCoordinator',
       workflowId,
       stepId: step.id,
@@ -373,28 +420,34 @@ export class AgentCoordinator {
     try {
       let result: any;
 
-      switch (step.id) {
-        case 'data_gathering':
-          result = await this.executeDataGathering(workflow);
-          break;
-        case 'technical_analysis':
-          result = await this.executeTechnicalAnalysis(workflow);
-          break;
-        case 'chief_decision':
-          result = await this.executeChiefDecision(workflow);
-          break;
-        case 'risk_assessment':
-          result = await this.executeRiskAssessment(workflow);
-          break;
-        case 'execution_planning':
-          result = await this.executeExecutionPlanning(workflow);
-          break;
-        case 'trade_execution':
-          result = await this.executeTradeExecution(workflow);
-          break;
-        default:
-          throw new Error(`Unknown step: ${step.id}`);
-      }
+      // CRITICAL FIX: Add timeout protection (2 minutes per step)
+      const STEP_TIMEOUT = 120000; // 2 minutes
+      const stepPromise = (async () => {
+        switch (step.id) {
+          case 'data_gathering':
+            return await this.executeDataGathering(workflow);
+          case 'technical_analysis':
+            return await this.executeTechnicalAnalysis(workflow);
+          case 'chief_decision':
+            return await this.executeChiefDecision(workflow);
+          case 'risk_assessment':
+            return await this.executeRiskAssessment(workflow);
+          case 'execution_planning':
+            return await this.executeExecutionPlanning(workflow);
+          case 'trade_execution':
+            return await this.executeTradeExecution(workflow);
+          default:
+            throw new Error(`Unknown step: ${step.id}`);
+        }
+      })();
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Step timeout: ${step.id} exceeded ${STEP_TIMEOUT / 1000}s limit`));
+        }, STEP_TIMEOUT);
+      });
+
+      result = await Promise.race([stepPromise, timeoutPromise]);
 
       step.status = 'completed';
       step.completedAt = Date.now();
@@ -403,22 +456,22 @@ export class AgentCoordinator {
       // Update workflow context
       this.updateWorkflowContext(workflow, step.id, result);
 
-      logger.debug('✅ Step completed', {
+      logger.debug('Step completed', {
         context: 'AgentCoordinator',
         workflowId,
         stepId: step.id,
         duration: step.completedAt - step.startedAt!
       });
 
-      // Continue workflow execution
-      await this.executeWorkflow(workflowId);
+      // CRITICAL FIX: Don't recursively call executeWorkflow!
+      // The main loop in executeWorkflow will handle the next step
 
     } catch (error) {
       step.status = 'failed';
       step.error = error instanceof Error ? error.message : String(error);
       step.completedAt = Date.now();
 
-      logger.error('❌ Step failed', error, {
+      logger.error('Step failed', error, {
         context: 'AgentCoordinator',
         workflowId,
         stepId: step.id
@@ -432,15 +485,16 @@ export class AgentCoordinator {
         step.completedAt = undefined;
         step.error = undefined;
         
-        logger.info('🔄 Retrying step', {
+        logger.info('Retrying step', {
           context: 'AgentCoordinator',
           workflowId,
           stepId: step.id,
           retryCount: step.retryCount
         });
 
-        // Wait before retry
-        setTimeout(() => this.executeStep(workflowId, step), 5000);
+        // CRITICAL FIX: Use proper async delay instead of setTimeout
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Retry will be handled by main workflow loop
       }
     }
   }
@@ -449,7 +503,7 @@ export class AgentCoordinator {
    * Execute data gathering step
    */
   private async executeDataGathering(workflow: TradingWorkflow): Promise<any> {
-    logger.debug('📊 Gathering market data', {
+    logger.debug('Gathering market data', {
       context: 'AgentCoordinator',
       data: { workflowId: workflow.id, symbol: workflow.symbol }
     });
@@ -481,14 +535,41 @@ export class AgentCoordinator {
       const marketData = workflow.context.marketData;
       if (!marketData) throw new Error('Market data not available');
 
-      // Use OPTIMIZED prompts for DeepSeek R1's advanced reasoning
+      // DEEPSEEK R1 REQUIRED - No fallback!
       const systemPrompt = DEEPSEEK_OPTIMIZED_PROMPTS.TECHNICAL_ANALYST.systemPrompt;
       const prompt = DEEPSEEK_OPTIMIZED_PROMPTS.TECHNICAL_ANALYST.analysisTemplate(marketData);
+      
+      // CRITICAL DEBUG: Log prompt details to diagnose hangs
+      logger.info('🔍 Calling DeepSeek R1 for Technical Analysis', {
+        context: 'AgentCoordinator',
+        symbol: workflow.symbol,
+        model: 'deepseek-r1:14b',
+        promptLength: prompt.length,
+        systemPromptLength: systemPrompt.length,
+        totalChars: prompt.length + systemPrompt.length,
+        promptPreview: prompt.substring(0, 200) + '...',
+        options: {
+          format: 'json',
+          temperature: 0.6,
+          thinking: true,
+          max_tokens: 3000
+        }
+      });
+      
+      const startTime = Date.now();
       const result = await deepseekService.chatWithSystem(systemPrompt, prompt, undefined, {
         format: 'json',
         temperature: 0.6,
         thinking: true, // Enable Chain-of-Thought reasoning
         max_tokens: 3000 // More tokens for detailed analysis
+      });
+      const elapsed = Date.now() - startTime;
+      
+      logger.info('✅ DeepSeek Technical Analysis response received', {
+        context: 'AgentCoordinator',
+        symbol: workflow.symbol,
+        elapsed: `${elapsed}ms`,
+        resultType: typeof result
       });
 
       agent.status = 'idle';
@@ -508,7 +589,7 @@ export class AgentCoordinator {
 
 
   /**
-   * Execute chief analyst decision step
+   * Execute chief analyst decision step - USING DEEPSEEK R1 LLM
    */
   private async executeChiefDecision(workflow: TradingWorkflow): Promise<any> {
     const agent = this.agents.get('chief');
@@ -519,39 +600,88 @@ export class AgentCoordinator {
     agent.lastActivity = Date.now();
 
     try {
-      // HIGH PRIORITY FIX: Validate technical analysis data structure
+      // Validate technical analysis data
       const technicalAnalysis = workflow.context.technicalAnalysis;
       if (!technicalAnalysis || typeof technicalAnalysis !== 'object') {
         throw new Error('Missing or invalid technical analysis data for Chief Analyst decision');
       }
 
-      // HIGH PRIORITY FIX: Validate required fields with type guards
-      if (typeof technicalAnalysis.action !== 'string' || !['BUY', 'SELL', 'HOLD'].includes(technicalAnalysis.action)) {
-        throw new Error(`Invalid technical analysis action: ${technicalAnalysis.action}`);
-      }
-      if (typeof technicalAnalysis.confidence !== 'number' || technicalAnalysis.confidence < 0 || technicalAnalysis.confidence > 1) {
-        throw new Error(`Invalid technical analysis confidence: ${technicalAnalysis.confidence}`);
-      }
-
-      // Create simplified decision based on technical analysis only
-      const decision = {
-        symbol: workflow.symbol,
-        action: technicalAnalysis.action || 'HOLD',
-        confidence: technicalAnalysis.confidence || TRADING_THRESHOLDS.DEFAULT_CONFIDENCE,
-        reasoning: `Based on technical analysis: ${technicalAnalysis.reasoning || 'No reasoning provided'}`,
-        conviction: technicalAnalysis.confidence > TRADING_THRESHOLDS.HIGH_CONFIDENCE_THRESHOLD ? 'high' : technicalAnalysis.confidence > TRADING_THRESHOLDS.MEDIUM_CONFIDENCE_THRESHOLD ? 'medium' : 'low',
-        recommendedHolding: technicalAnalysis.timeframe || 'hours',
-        currentPrice: workflow.context.marketData?.price || 0,
-        bid: workflow.context.marketData?.price ? workflow.context.marketData.price * TRADING_THRESHOLDS.DEFAULT_PRICE_MULTIPLIER_BID : 0,
-        ask: workflow.context.marketData?.price ? workflow.context.marketData.price * TRADING_THRESHOLDS.DEFAULT_PRICE_MULTIPLIER_ASK : 0,
-        spread: TRADING_THRESHOLDS.DEFAULT_SPREAD,
-        liquidity: workflow.context.marketData?.volume || 0,
-        correlation: workflow.context.marketData?.volatility || 15
-      };
-
-      logger.info('Chief Analyst Decision (Technical Analysis Only)', {
+      // DEEPSEEK R1 REQUIRED - Chief Analyst makes final decision with AI
+      logger.info('Calling DeepSeek R1 for Chief Analyst Decision', {
         context: 'AgentCoordinator',
-        data: { decision }
+        symbol: workflow.symbol,
+        technicalAction: technicalAnalysis.action
+      });
+
+      // Use Technical Analyst prompt for now (Chief Analyst prompt template)
+      const systemPrompt = `You are the Chief Analyst AI agent in a multi-agent trading system. Your role is to make the FINAL BUY/SELL/HOLD decision based on technical analysis provided by the Technical Analyst. You must be decisive and provide clear reasoning.`;
+      
+      const prompt = `Analyze this trading opportunity and make a FINAL decision:
+
+Symbol: ${workflow.symbol}
+Current Price: $${workflow.context.marketData?.price || 0}
+
+Technical Analyst Says:
+- Action: ${technicalAnalysis.action}
+- Confidence: ${(technicalAnalysis.confidence * 100).toFixed(0)}%
+- Reasoning: ${technicalAnalysis.reasoning}
+
+Market Data:
+- RSI: ${(workflow.context.marketData as any)?.rsi || 'N/A'}
+- Momentum: ${(workflow.context.marketData as any)?.change1h || 0}%
+- Volume: ${(workflow.context.marketData as any)?.volume || 0}
+- Volatility: ${(workflow.context.marketData as any)?.volatility || 0}%
+
+Make your FINAL decision (BUY/SELL/HOLD) with confidence level and reasoning.
+
+Respond in JSON format:
+{
+  "action": "BUY" | "SELL" | "HOLD",
+  "confidence": 0.0-1.0,
+  "reasoning": "your detailed reasoning",
+  "conviction": "low" | "medium" | "high"
+}`;
+
+      const result = await deepseekService.chatWithSystem(systemPrompt, prompt, undefined, {
+        format: 'json',
+        temperature: 0.5, // Balanced for decision making
+        thinking: true, // Chain-of-Thought reasoning
+        max_tokens: 2000
+      });
+
+      let decision: any;
+      try {
+        // CRITICAL FIX: DeepSeek might return already-parsed object or JSON string
+        // Check if it's already an object before parsing
+        if (typeof result === 'string') {
+          decision = JSON.parse(result);
+        } else if (typeof result === 'object' && result !== null) {
+          decision = result; // Already parsed
+        } else {
+          throw new Error(`Unexpected result type: ${typeof result}`);
+        }
+      } catch (parseError) {
+        logger.error('Failed to parse Chief Analyst response', parseError as Error, {
+          context: 'AgentCoordinator',
+          response: result,
+          resultType: typeof result
+        });
+        throw new Error('Invalid Chief Analyst response format');
+      }
+
+      // Validate decision structure
+      if (!decision.action || !decision.confidence) {
+        throw new Error('Chief Analyst response missing required fields');
+      }
+
+      logger.info('Chief Analyst Decision (DeepSeek R1)', {
+        context: 'AgentCoordinator',
+        data: {
+          symbol: workflow.symbol,
+          action: decision.action,
+          confidence: decision.confidence,
+          reasoning: decision.reasoning?.substring(0, 100)
+        }
       });
 
       agent.status = 'idle';
@@ -607,16 +737,128 @@ export class AgentCoordinator {
 
       const currentPrice = workflow.context.marketData?.price || 0;
       
+      // REINFORCEMENT LEARNING PHASE 1: Get lessons learned from trade history
+      let lessonsLearned: any = null;
+      try {
+        const { tradePatternAnalyzer } = await import('@/services/tradePatternAnalyzer');
+        lessonsLearned = await tradePatternAnalyzer.getLessonsLearned(30); // Last 30 days
+        
+        logger.info('Loaded lessons learned from trade history', {
+          context: 'AgentCoordinator',
+          data: {
+            successfulPatterns: lessonsLearned.successfulPatterns?.length || 0,
+            failurePatterns: lessonsLearned.failurePatterns?.length || 0,
+            insights: lessonsLearned.insights?.length || 0,
+            winRate: lessonsLearned.averageWinRate?.toFixed(1) + '%' || 'N/A'
+          }
+        });
+      } catch (error) {
+        logger.warn('Failed to load lessons learned (continuing without RL)', {
+          context: 'AgentCoordinator',
+          error: error instanceof Error ? error.message : String(error)
+        });
+        // Continue without lessons learned if there's an error (no trades yet, etc.)
+      }
+      
+      // REINFORCEMENT LEARNING PHASE 2: Get RL-optimized parameters
+      let dynamicConfig: any = null;
+      
+      // TEMPORARY FOR DEMO: Check if RL optimizer should be disabled
+      const disableRLOptimizer = process.env.DISABLE_RL_OPTIMIZER === 'true';
+      
+      if (!disableRLOptimizer) {
+        try {
+          const { dynamicConfigService } = await import('@/services/dynamicConfigService');
+          dynamicConfig = await dynamicConfigService.getOptimizedConfig();
+          
+          logger.info('Loaded RL-optimized parameters', {
+            context: 'AgentCoordinator',
+            data: {
+              confidenceThreshold: dynamicConfig.confidenceThreshold,
+              rrRatio: dynamicConfig.minRRRatio,
+              positionSize: dynamicConfig.maxPositionRiskPercent + '%',
+              stopLoss: dynamicConfig.stopLossPercent + '%',
+              reasoning: dynamicConfig.reasoning
+            }
+          });
+        } catch (error) {
+        logger.warn('Failed to load dynamic config (using defaults)', {
+          context: 'AgentCoordinator',
+          error: error instanceof Error ? error.message : String(error)
+        });
+        // Continue with default config
+        }
+      } else {
+        const { asterConfig } = await import('@/lib/configService');
+        logger.info('RL optimizer DISABLED for demo - using env var confidence threshold', {
+          context: 'AgentCoordinator',
+          data: {
+            confidenceThreshold: asterConfig.trading.confidenceThreshold,
+            reason: 'DISABLE_RL_OPTIMIZER=true in .env.local'
+          }
+        });
+      }
+      
       // CALL DEEPSEEK R1 LLM FOR RISK ASSESSMENT
-      logger.info('🤖 Calling DeepSeek R1 for Risk Assessment', {
+      logger.info('Calling DeepSeek R1 for Risk Assessment', {
         context: 'AgentCoordinator',
         data: { 
           symbol: workflow.symbol,
           balance,
           chiefDecision: finalDecision.action,
-          confidence: finalDecision.confidence
+          confidence: finalDecision.confidence,
+          hasLessonsLearned: !!lessonsLearned
         }
       });
+
+      // ENHANCED: Get ATR-based stop loss recommendations
+      // CRITICAL FIX: Use correct side (LONG or SHORT) for ATR calculation
+      let atrBasedLevels = null;
+      try {
+        const { calculateSimpleATRWithSide } = await import('@/lib/atr');
+        const marketData = workflow.context.marketData as any;
+        
+        // Determine side based on Chief Analyst decision
+        // BUY = LONG, SELL = SHORT
+        const side = finalDecision.action === 'BUY' ? 'LONG' : finalDecision.action === 'SELL' ? 'SHORT' : 'LONG'; // Default to LONG for HOLD
+        
+        if (marketData?.high && marketData?.low && marketData?.open) {
+          const atrResult = calculateSimpleATRWithSide(
+            marketData.price || currentPrice,
+            marketData.high,
+            marketData.low,
+            marketData.open,
+            side
+          );
+          
+          atrBasedLevels = {
+            atr: atrResult.atr,
+            atrPercent: atrResult.atrPercent,
+            recommendedStopLoss: atrResult.stopLoss,
+            recommendedTakeProfit: atrResult.takeProfit,
+            volatilityLevel: atrResult.volatilityLevel,
+            trailingStop: atrResult.trailingStop
+          };
+          
+          logger.info('ATR-based levels calculated', {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              side: side, // Log the side being used
+              action: finalDecision.action,
+              atrPercent: atrResult.atrPercent.toFixed(2) + '%',
+              volatility: atrResult.volatilityLevel,
+              stopLoss: atrResult.stopLoss.toFixed(2),
+              takeProfit: atrResult.takeProfit.toFixed(2)
+            }
+          });
+        }
+      } catch (atrError) {
+        logger.warn('Failed to calculate ATR levels (using defaults)', {
+          context: 'AgentCoordinator',
+          error: atrError instanceof Error ? atrError.message : String(atrError)
+        });
+      }
 
       const systemPrompt = DEEPSEEK_OPTIMIZED_PROMPTS.RISK_MANAGER.systemPrompt;
       const prompt = DEEPSEEK_OPTIMIZED_PROMPTS.RISK_MANAGER.assessmentTemplate({
@@ -625,7 +867,10 @@ export class AgentCoordinator {
         currentPrice: currentPrice,
         marketData: workflow.context.marketData,
         technicalAnalysis: workflow.context.technicalAnalysis,
-        chiefDecision: finalDecision
+        chiefDecision: finalDecision,
+        lessonsLearned: lessonsLearned, // Phase 1: Lessons learned from patterns
+        dynamicConfig: dynamicConfig // Phase 2: RL-optimized parameters
+        // Note: ATR levels available via marketData if needed
       });
 
       const result = await deepseekService.chatWithSystem(systemPrompt, prompt, undefined, {
@@ -635,36 +880,126 @@ export class AgentCoordinator {
         max_tokens: 2000
       });
 
+      // CRITICAL FIX: Log immediately after DeepSeek responds
+      logger.info('✅ DeepSeek Risk Assessment response received', {
+        context: 'AgentCoordinator',
+        data: {
+          symbol: workflow.symbol,
+          resultType: typeof result,
+          resultIsNull: result === null,
+          resultIsUndefined: result === undefined,
+          resultLength: typeof result === 'string' ? result.length : 'N/A',
+          firstChars: typeof result === 'string' ? result.substring(0, 100) : JSON.stringify(result).substring(0, 100)
+        }
+      });
+
       let riskAssessment: any;
       try {
-        riskAssessment = JSON.parse(result);
+        // CRITICAL FIX: DeepSeek might return already-parsed object or JSON string
+        if (typeof result === 'string') {
+          logger.debug('Parsing DeepSeek response as JSON string', {
+            context: 'AgentCoordinator'
+          });
+          riskAssessment = JSON.parse(result);
+        } else if (typeof result === 'object' && result !== null) {
+          logger.debug('DeepSeek response already parsed as object', {
+            context: 'AgentCoordinator'
+          });
+          riskAssessment = result; // Already parsed
+        } else {
+          throw new Error(`Unexpected result type: ${typeof result}`);
+        }
       } catch (parseError) {
         logger.error('Failed to parse Risk Manager response', parseError as Error, {
           context: 'AgentCoordinator',
-          response: result
+          response: result,
+          resultType: typeof result
         });
         throw new Error('Invalid Risk Manager response format');
       }
 
-      // Validate required fields
-      if (typeof riskAssessment.approved !== 'boolean' ||
-          !riskAssessment.action ||
-          typeof riskAssessment.positionSize !== 'number') {
-        throw new Error('Risk Manager response missing required fields');
+      // CRITICAL FIX: Log actual response structure for debugging
+      logger.debug('Risk Manager response structure', {
+        context: 'AgentCoordinator',
+        data: {
+          hasApproved: riskAssessment.approved !== undefined,
+          approvedType: typeof riskAssessment.approved,
+          approvedValue: riskAssessment.approved,
+          hasAction: !!riskAssessment.action,
+          actionValue: riskAssessment.action,
+          hasPositionSize: riskAssessment.positionSize !== undefined,
+          positionSizeType: typeof riskAssessment.positionSize,
+          positionSizeValue: riskAssessment.positionSize,
+          allKeys: Object.keys(riskAssessment),
+          fullResponse: JSON.stringify(riskAssessment).substring(0, 500)
+        }
+      });
+
+      // Validate required fields with better error messages
+      const missingFields: string[] = [];
+      
+      if (typeof riskAssessment.approved !== 'boolean') {
+        missingFields.push(`approved (got ${typeof riskAssessment.approved}: ${riskAssessment.approved})`);
+      }
+      if (!riskAssessment.action) {
+        missingFields.push(`action (got ${typeof riskAssessment.action}: ${riskAssessment.action})`);
+      }
+      if (typeof riskAssessment.positionSize !== 'number') {
+        missingFields.push(`positionSize (got ${typeof riskAssessment.positionSize}: ${riskAssessment.positionSize})`);
+      }
+      
+      if (missingFields.length > 0) {
+        logger.error('Risk Manager response validation failed', null, {
+          context: 'AgentCoordinator',
+          data: {
+            missingFields,
+            receivedFields: Object.keys(riskAssessment),
+            response: riskAssessment
+          }
+        });
+        throw new Error(`Risk Manager response missing required fields: ${missingFields.join(', ')}`);
       }
 
-      // ENFORCE CONCURRENT POSITION LIMITS (CRITICAL FOR SMALL ACCOUNTS)
+      // CRITICAL FIX: Check Chief Analyst confidence vs threshold FIRST
+      // This ensures we use AI agents' confidence, NOT Market Scanner confidence
       if (riskAssessment.approved) {
         const { asterConfig } = await import('@/lib/configService');
+        const chiefConfidence = finalDecision.confidence;
+        const threshold = asterConfig.trading.confidenceThreshold;
+        
+        if (chiefConfidence < threshold) {
+          logger.warn(`Trade REJECTED: Chief Analyst confidence below threshold`, {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              chiefConfidence: (chiefConfidence * 100).toFixed(0) + '%',
+              threshold: (threshold * 100).toFixed(0) + '%',
+              balance
+            }
+          });
+          riskAssessment.approved = false;
+          riskAssessment.reasoning = `Trade rejected: Chief Analyst confidence ${(chiefConfidence*100).toFixed(0)}% below required ${(threshold*100).toFixed(0)}% threshold`;
+          return riskAssessment;
+        }
+        
+        logger.info(`✅ Confidence check PASSED: Chief Analyst ${(chiefConfidence*100).toFixed(0)}% >= Threshold ${(threshold*100).toFixed(0)}%`, {
+          context: 'AgentCoordinator',
+          data: { symbol: workflow.symbol, chiefConfidence, threshold }
+        });
+      }
+      
+      // ENFORCE CONCURRENT POSITION LIMITS (CRITICAL FOR SMALL ACCOUNTS)
+      if (riskAssessment.approved) {
         const { positionMonitorService } = await import('@/services/positionMonitorService');
         const openPositions = positionMonitorService.getOpenPositions();
+        const { asterConfig } = await import('@/lib/configService');
         const maxConcurrentPositions = asterConfig.trading.maxConcurrentPositions || 2;
         const maxPortfolioRiskPercent = asterConfig.trading.maxPortfolioRiskPercent || 10;
 
         // ENFORCE MAX CONCURRENT POSITIONS FOR MICRO ACCOUNTS
         const maxPositionsForAccount = balance < TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD ? 1 : maxConcurrentPositions;
         if (openPositions.length >= maxPositionsForAccount) {
-          logger.warn(`⛔ Trade REJECTED: Max concurrent positions (${maxPositionsForAccount}) reached`, {
+          logger.warn(`Trade REJECTED: Max concurrent positions (${maxPositionsForAccount}) reached`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -735,7 +1070,7 @@ export class AgentCoordinator {
         }
         
         if (totalRiskAfter > maxRiskForAccount) {
-          logger.warn(`⛔ Trade REJECTED: Portfolio risk would exceed ${maxRiskForAccount}%`, {
+          logger.warn(`Trade REJECTED: Portfolio risk would exceed ${maxRiskForAccount}%`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -750,24 +1085,70 @@ export class AgentCoordinator {
           riskAssessment.reasoning = `Trade rejected: Portfolio risk would exceed ${maxRiskForAccount}% limit (currently ${totalRisk.toFixed(2)}% + ${newPositionRisk.toFixed(2)}% = ${totalRiskAfter.toFixed(2)}%)`;
         }
 
-        // ENFORCE LEVERAGE LIMIT FOR SMALL ACCOUNTS
-        if (balance < TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD && riskAssessment.leverage > 1) {
-          logger.warn(`⛔ Trade REJECTED: Account <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD} cannot use leverage`, {
+        // OPTIMIZE LEVERAGE: Maximize per coin based on confidence and symbol limits
+        // Small accounts NEED leverage to grow - calculate optimal leverage
+        try {
+          const { asterDexService } = await import('./asterDexService');
+          const maxLeverageForSymbol = await asterDexService.getMaxLeverage(workflow.symbol);
+          const chiefConfidence = finalDecision.confidence;
+          
+          // Calculate optimal leverage based on confidence
+          // Higher confidence = use more of available leverage
+          let optimalLeverage: number;
+          
+          if (chiefConfidence >= 0.80) {
+            // Very high confidence (80-100%): Use 90-100% of max leverage
+            optimalLeverage = Math.floor(maxLeverageForSymbol * 0.95);
+          } else if (chiefConfidence >= 0.70) {
+            // High confidence (70-79%): Use 75-85% of max leverage
+            optimalLeverage = Math.floor(maxLeverageForSymbol * 0.80);
+          } else if (chiefConfidence >= 0.60) {
+            // Medium-high confidence (60-69%): Use 60-70% of max leverage
+            optimalLeverage = Math.floor(maxLeverageForSymbol * 0.65);
+          } else if (chiefConfidence >= 0.55) {
+            // Medium confidence (55-59%): Use 50-60% of max leverage
+            optimalLeverage = Math.floor(maxLeverageForSymbol * 0.55);
+          } else {
+            // Lower confidence (50-54%): Use 40-50% of max leverage
+            optimalLeverage = Math.floor(maxLeverageForSymbol * 0.45);
+          }
+          
+          // Ensure leverage is within bounds
+          const minLeverage = parseInt(process.env.TRADING_MIN_LEVERAGE || '10');
+          const maxLeverage = parseInt(process.env.TRADING_MAX_LEVERAGE || '20');
+          
+          optimalLeverage = Math.max(minLeverage, Math.min(optimalLeverage, maxLeverage, maxLeverageForSymbol));
+          
+          // Update risk assessment with optimized leverage
+          const originalLeverage = riskAssessment.leverage || 1;
+          riskAssessment.leverage = optimalLeverage;
+          
+          logger.info(`🚀 Leverage optimized for ${workflow.symbol}`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
-              balance,
-              requestedLeverage: riskAssessment.leverage
+              maxLeverageForSymbol,
+              chiefConfidence: (chiefConfidence * 100).toFixed(1) + '%',
+              originalLeverage,
+              optimalLeverage,
+              leverageUtilization: ((optimalLeverage / maxLeverageForSymbol) * 100).toFixed(1) + '%',
+              reasoning: `Confidence-based leverage optimization: ${(chiefConfidence * 100).toFixed(1)}% confidence → ${optimalLeverage}x leverage (${maxLeverageForSymbol}x max available)`
             }
           });
-          riskAssessment.approved = false;
-          riskAssessment.reasoning = `Trade rejected: Accounts <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD} cannot use leverage (requested ${riskAssessment.leverage}x, must be 1x)`;
+        } catch (leverageError) {
+          logger.warn('Failed to optimize leverage (using AI-suggested value)', {
+            context: 'AgentCoordinator',
+            error: leverageError instanceof Error ? leverageError.message : String(leverageError),
+            symbol: workflow.symbol,
+            aiSuggestedLeverage: riskAssessment.leverage
+          });
+          // Continue with AI-suggested leverage if optimization fails
         }
 
         // ENFORCE POSITION SIZE LIMIT FOR MICRO ACCOUNTS (ULTRA STRICT)
         const positionRiskPercent = riskAssessment.riskPercentage || 0;
         if (balance < TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD && positionRiskPercent > TRADING_THRESHOLDS.MAX_POSITION_RISK_MICRO) {
-          logger.warn(`⛔ Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_MICRO}% limit for accounts <$${TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD}`, {
+          logger.warn(`Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_MICRO}% limit for accounts <$${TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD}`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -778,7 +1159,7 @@ export class AgentCoordinator {
           riskAssessment.approved = false;
           riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_MICRO}% maximum for accounts <$${TRADING_THRESHOLDS.MICRO_ACCOUNT_THRESHOLD}`;
         } else if (balance < TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD && positionRiskPercent > TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL) {
-          logger.warn(`⛔ Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% limit for accounts <$${TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD}`, {
+          logger.warn(`Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% limit for accounts <$${TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD}`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -789,7 +1170,7 @@ export class AgentCoordinator {
           riskAssessment.approved = false;
           riskAssessment.reasoning = `Trade rejected: Position risk (${positionRiskPercent.toFixed(2)}%) exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% maximum for accounts <$${TRADING_THRESHOLDS.SMALL_ACCOUNT_THRESHOLD}`;
         } else if (balance < TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD && positionRiskPercent > TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL) {
-          logger.warn(`⛔ Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% limit for accounts <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD}`, {
+          logger.warn(`Trade REJECTED: Position risk exceeds ${TRADING_THRESHOLDS.MAX_POSITION_RISK_SMALL}% limit for accounts <$${TRADING_THRESHOLDS.MEDIUM_ACCOUNT_THRESHOLD}`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -812,14 +1193,14 @@ export class AgentCoordinator {
         const actualRR = riskAssessment.riskRewardRatio || 0;
         // HIGH PRIORITY FIX: Validate R:R is positive and reasonable
         if (actualRR < 0 || actualRR > 100) {
-          logger.warn(`⛔ Trade REJECTED: Invalid Risk/Reward ratio ${actualRR.toFixed(2)}:1`, {
+          logger.warn(`Trade REJECTED: Invalid Risk/Reward ratio ${actualRR.toFixed(2)}:1`, {
             context: 'AgentCoordinator',
             data: { symbol: workflow.symbol, actualRR }
           });
           riskAssessment.approved = false;
           riskAssessment.reasoning = `Trade rejected: Invalid Risk/Reward ratio ${actualRR.toFixed(2)}:1 (must be between 0 and 100)`;
         } else if (actualRR < minRRForAccount) {
-          logger.warn(`⛔ Trade REJECTED: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum for account size`, {
+          logger.warn(`Trade REJECTED: Risk/Reward ratio ${actualRR.toFixed(2)}:1 below ${minRRForAccount}:1 minimum for account size`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -836,7 +1217,7 @@ export class AgentCoordinator {
         const { problematicCoinDetector } = await import('@/services/problematicCoinDetector');
         if (problematicCoinDetector.isProblematic(workflow.symbol)) {
           const problematicCoin = problematicCoinDetector.getProblematicCoin(workflow.symbol);
-          logger.warn(`⛔ Trade REJECTED: Coin is problematic (execution issues like COSMO/APE)`, {
+          logger.warn(`Trade REJECTED: Coin is problematic (execution issues like COSMO/APE)`, {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -849,7 +1230,7 @@ export class AgentCoordinator {
         }
       }
 
-      logger.info(`🛡️ Risk Manager Decision: ${riskAssessment.approved ? 'APPROVED' : 'REJECTED'}`, {
+      logger.info(`Risk Manager Decision: ${riskAssessment.approved ? 'APPROVED' : 'REJECTED'}`, {
         context: 'AgentCoordinator',
         data: {
           symbol: workflow.symbol,
@@ -905,7 +1286,7 @@ export class AgentCoordinator {
       const isBlacklisted = blacklist.some(b => symbolVariants.includes(b));
 
       if (isBlacklisted) {
-        logger.warn('⛔ Symbol is blacklisted - trade blocked', {
+        logger.warn('Symbol is blacklisted - trade blocked', {
           context: 'AgentCoordinator',
           data: { 
             symbol: workflow.symbol,
@@ -946,23 +1327,83 @@ export class AgentCoordinator {
         };
       }
 
-      // SIMPLIFIED EXECUTION PLAN - Just execute if approved
-      const executionPlan = {
-        readyToExecute: true,
-        action: riskAssessment.action,
-        symbol: workflow.symbol,
-        positionSize: riskAssessment.positionSize,
-        leverage: riskAssessment.leverage,
-        stopLoss: riskAssessment.stopLoss,
-        takeProfit: riskAssessment.takeProfit,
-        orderType: 'MARKET',
-        timing: 'IMMEDIATE',
-        reasoning: `Executing ${riskAssessment.action} on ${workflow.symbol}. ${riskAssessment.reasoning}`
-      };
-
-      logger.info('Execution Plan Ready', {
+      // DEEPSEEK R1 REQUIRED - Execution Specialist reviews final execution plan
+      logger.info('Calling DeepSeek R1 for Execution Planning', {
         context: 'AgentCoordinator',
-        data: executionPlan
+        symbol: workflow.symbol,
+        riskApproved: true
+      });
+
+      const systemPrompt = `You are the Execution Specialist powered by DeepSeek R1. Your role is to create the OPTIMAL execution plan for approved trades. You determine timing, order type, and execution strategy.`;
+      
+      const currentPrice = workflow.context.marketData?.price || 0;
+      const prompt = `Create execution plan for this APPROVED trade:
+
+Symbol: ${workflow.symbol}
+Current Price: $${currentPrice}
+Action: ${riskAssessment.action}
+Position Size: ${riskAssessment.positionSize}
+Leverage: ${riskAssessment.leverage}x
+Stop Loss: $${riskAssessment.stopLoss}
+Take Profit: $${riskAssessment.takeProfit}
+
+Market Conditions:
+- Volatility: ${(workflow.context.marketData as any)?.volatility || 0}%
+- Volume: ${(workflow.context.marketData as any)?.volume || 0}
+- Spread: ${(workflow.context.marketData as any)?.bidAskSpread || 0}%
+
+Create optimal execution plan with order type and timing.
+
+Respond in JSON:
+{
+  "readyToExecute": true,
+  "orderType": "MARKET" | "LIMIT",
+  "timing": "IMMEDIATE" | "WAIT_FOR_DIP",
+  "reasoning": "your execution strategy"
+}`;
+
+      const result = await deepseekService.chatWithSystem(systemPrompt, prompt, undefined, {
+        format: 'json',
+        temperature: 0.3, // Very conservative for execution
+        thinking: true,
+        max_tokens: 1000
+      });
+
+      let executionPlan: any;
+      try {
+        // CRITICAL FIX: DeepSeek might return already-parsed object or JSON string
+        if (typeof result === 'string') {
+          executionPlan = JSON.parse(result);
+        } else if (typeof result === 'object' && result !== null) {
+          executionPlan = result; // Already parsed
+        } else {
+          throw new Error(`Unexpected result type: ${typeof result}`);
+        }
+      } catch (parseError) {
+        logger.error('Failed to parse Execution Specialist response', parseError as Error, {
+          context: 'AgentCoordinator',
+          response: result,
+          resultType: typeof result
+        });
+        throw new Error('Invalid Execution Specialist response format');
+      }
+
+      // Add risk assessment details to execution plan
+      executionPlan.action = riskAssessment.action;
+      executionPlan.symbol = workflow.symbol;
+      executionPlan.positionSize = riskAssessment.positionSize;
+      executionPlan.leverage = riskAssessment.leverage;
+      executionPlan.stopLoss = riskAssessment.stopLoss;
+      executionPlan.takeProfit = riskAssessment.takeProfit;
+
+      logger.info('Execution Plan Ready (DeepSeek R1)', {
+        context: 'AgentCoordinator',
+        data: {
+          symbol: workflow.symbol,
+          orderType: executionPlan.orderType,
+          timing: executionPlan.timing,
+          reasoning: executionPlan.reasoning?.substring(0, 100)
+        }
       });
 
       agent.status = 'idle';
@@ -1063,7 +1504,7 @@ export class AgentCoordinator {
       
       // If all retries failed, return error (NO MOCK FALLBACK)
       if (!tradeResult) {
-        logger.error('❌ Trade execution failed after all retries', lastError!, {
+        logger.error('Trade execution failed after all retries', lastError!, {
           context: 'AgentCoordinator',
           data: { symbol: workflow.symbol, maxRetries }
         });
@@ -1080,7 +1521,7 @@ export class AgentCoordinator {
       }
 
       // Trade executed successfully
-      logger.info('✅ Trade executed successfully', {
+      logger.info('Trade executed successfully', {
           context: 'AgentCoordinator',
           symbol: workflow.symbol,
           action: riskAssessment.action,
@@ -1121,7 +1562,7 @@ export class AgentCoordinator {
           };
           
           await addTrade(tradeEntry);
-          logger.info('📝 Trade saved to database for journal', {
+          logger.info('Trade saved to database for journal', {
             context: 'AgentCoordinator',
             data: { tradeId: tradeEntry.id, symbol: workflow.symbol }
           });
@@ -1134,7 +1575,7 @@ export class AgentCoordinator {
 
         // Add position to monitor
         try {
-          logger.info('📍 Adding position to monitor', {
+          logger.info('Adding position to monitor', {
             context: 'AgentCoordinator',
             data: {
               symbol: workflow.symbol,
@@ -1160,7 +1601,7 @@ export class AgentCoordinator {
             orderId: tradeResult.orderId || ''
           });
 
-          logger.info('✅ Position added to monitor successfully!', {
+          logger.info('Position added to monitor successfully!', {
             context: 'AgentCoordinator',
             data: { 
               positionId, 
@@ -1186,7 +1627,7 @@ export class AgentCoordinator {
             timestamp: new Date().toISOString()
           };
         } catch (monitorError) {
-          logger.error('❌ CRITICAL: Failed to add position to monitor', monitorError, {
+          logger.error('CRITICAL: Failed to add position to monitor', monitorError, {
             context: 'AgentCoordinator',
             data: { 
               symbol: workflow.symbol,
@@ -1250,7 +1691,7 @@ export class AgentCoordinator {
    * Handle analysis messages
    */
   private async handleAnalysisMessage(message: AgentMessage): Promise<void> {
-    logger.debug('📊 Handling analysis message', {
+    logger.debug('Handling analysis message', {
       context: 'AgentCoordinator',
       from: message.from,
       to: message.to,
@@ -1263,7 +1704,7 @@ export class AgentCoordinator {
    * Handle decision messages
    */
   private async handleDecisionMessage(message: AgentMessage): Promise<void> {
-    logger.debug('🎯 Handling decision message', {
+    logger.debug('Handling decision message', {
       context: 'AgentCoordinator',
       from: message.from,
       to: message.to,
@@ -1276,7 +1717,7 @@ export class AgentCoordinator {
    * Handle query messages
    */
   private async handleQueryMessage(message: AgentMessage): Promise<void> {
-    logger.debug('❓ Handling query message', {
+    logger.debug('Handling query message', {
       context: 'AgentCoordinator',
       from: message.from,
       to: message.to,
@@ -1289,7 +1730,7 @@ export class AgentCoordinator {
    * Handle response messages
    */
   private async handleResponseMessage(message: AgentMessage): Promise<void> {
-    logger.debug('💬 Handling response message', {
+    logger.debug('Handling response message', {
       context: 'AgentCoordinator',
       from: message.from,
       to: message.to,
@@ -1302,7 +1743,7 @@ export class AgentCoordinator {
    * Handle alert messages
    */
   private async handleAlertMessage(message: AgentMessage): Promise<void> {
-    logger.debug('🚨 Handling alert message', {
+    logger.debug('Handling alert message', {
       context: 'AgentCoordinator',
       from: message.from,
       to: message.to,
@@ -1349,7 +1790,7 @@ export class AgentCoordinator {
     workflow.status = 'cancelled';
     workflow.completedAt = Date.now();
 
-    logger.info('🛑 Workflow cancelled', {
+    logger.info('Workflow cancelled', {
       context: 'AgentCoordinator',
       workflowId
     });
