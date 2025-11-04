@@ -1,6 +1,6 @@
 {
   "name": "manna-ai-arena",
-  "version": "3.0.0",
+  "version": "3.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15,6 +15,7 @@
     "@tremor/react": "^3.18.7",
     "@types/pg": "^8.15.5",
     "@vercel/postgres": "^0.10.0",
+    "async-mutex": "^0.5.0",
     "ethers": "^6.13.2",
     "framer-motion": "^11.18.2",
     "lightweight-charts": "^5.0.9",
