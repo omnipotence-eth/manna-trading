@@ -34,26 +34,123 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '10');
+    const forceRefresh = searchParams.get('force') === 'true';
     
-    logger.info('🔍 Starting comprehensive Aster DEX market scan for agent insights', {
-      context: 'AgentInsightsAPI',
-      data: { limit, requestedAt: new Date().toISOString() }
-    });
-
-    // Perform comprehensive market scan across ALL Aster DEX symbols
-    // This fetches real data from Aster Finance Futures API
-    const scanResult = await marketScannerService.scanMarkets();
+    // CRITICAL FIX: Check for cached scan result first to avoid 60+ second wait
+    // Market scanner caches results for 60 seconds (scanInterval)
+    let scanResult = marketScannerService.getLastScan();
+    const isCacheStale = scanResult ? marketScannerService.isScanStale() : true;
     
-    logger.info('✅ Real market scan completed - analyzed all Aster DEX pairs', {
-      context: 'AgentInsightsAPI',
-      data: {
-        totalSymbolsAnalyzed: scanResult.totalSymbols,
-        opportunitiesFound: scanResult.opportunities.length,
-        volumeSpikesDetected: scanResult.volumeSpikes.length,
-        topOpportunity: scanResult.bestOpportunity?.symbol || 'none',
-        topOpportunityScore: scanResult.bestOpportunity?.score || 0
+    if (scanResult && !isCacheStale && !forceRefresh) {
+      // Return cached result immediately (fast response, no timeout)
+      logger.info('📦 Returning cached market scan result (fast response)', {
+        context: 'AgentInsightsAPI',
+        data: {
+          limit,
+          cacheAge: `${Math.round((Date.now() - scanResult.timestamp) / 1000)}s`,
+          opportunities: scanResult.opportunities.length,
+          cached: true
+        }
+      });
+    } else {
+      // CRITICAL FIX: If no cache exists, return empty response immediately and trigger background scan
+      // This prevents chat tab from timing out while waiting 60+ seconds for first scan
+      if (!scanResult) {
+        logger.info('📦 No cache available - returning empty response, triggering background scan', {
+          context: 'AgentInsightsAPI',
+          data: { limit, firstRequest: true }
+        });
+        
+        // CRITICAL FIX: Trigger scan in background with timeout protection
+        // The timeout fixes ensure it won't hang for 15+ minutes
+        marketScannerService.scanMarkets()
+          .then(scanResult => {
+            logger.info('✅ Background market scan completed successfully', {
+              context: 'AgentInsightsAPI',
+              data: {
+                opportunities: scanResult.opportunitiesCount,
+                duration: `${((Date.now() - scanResult.timestamp) / 1000).toFixed(0)}s`
+              }
+            });
+          })
+          .catch(error => {
+            logger.error('❌ Background market scan failed', error, { 
+              context: 'AgentInsightsAPI',
+              data: { 
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+              }
+            });
+          });
+        
+        // CRITICAL FIX: Fetch actual balance instead of hardcoding 0
+        let accountBalance = 0;
+        try {
+          const { asterDexService } = await import('@/services/asterDexService');
+          accountBalance = await asterDexService.getBalance();
+          logger.debug('Fetched real balance for initializing response', {
+            context: 'AgentInsightsAPI',
+            data: { balance: accountBalance }
+          });
+        } catch (error) {
+          logger.warn('Failed to fetch balance for initializing response', {
+            context: 'AgentInsightsAPI',
+            data: { error: error instanceof Error ? error.message : String(error) }
+          });
+          // Keep balance as 0 if fetch fails
+        }
+        
+        // Return empty response immediately so chat tab doesn't timeout
+        return NextResponse.json({
+          success: true,
+          data: {
+            insights: [],
+            scanResult: {
+              timestamp: Date.now(),
+              totalSymbols: 0,
+              bestOpportunity: null,
+              topVolumeSpikes: [],
+              opportunitiesCount: 0,
+              dataSource: 'Market scanner initializing...',
+              cached: false,
+              cacheAgeSeconds: 0,
+              initializing: true
+            },
+            accountBalance: accountBalance,
+            confidenceThreshold: asterConfig.trading.confidenceThreshold || 0.35,
+            timestamp: Date.now()
+          }
+        });
       }
-    });
+      
+      // Cache is stale - perform fresh scan
+      if (scanResult && isCacheStale) {
+        logger.info('🔄 Cache is stale, performing fresh market scan', {
+          context: 'AgentInsightsAPI',
+          data: {
+            limit,
+            cacheAge: `${Math.round((Date.now() - scanResult.timestamp) / 1000)}s`,
+            stale: true
+          }
+        });
+      }
+      
+      // Perform comprehensive market scan across ALL Aster DEX symbols
+      // This fetches real data from Aster Finance Futures API
+      scanResult = await marketScannerService.scanMarkets();
+      
+      // Log fresh scan completion
+      logger.info('✅ Real market scan completed - analyzed all Aster DEX pairs', {
+        context: 'AgentInsightsAPI',
+        data: {
+          totalSymbolsAnalyzed: scanResult.totalSymbols,
+          opportunitiesFound: scanResult.opportunities.length,
+          volumeSpikesDetected: scanResult.volumeSpikes.length,
+          topOpportunity: scanResult.bestOpportunity?.symbol || 'none',
+          topOpportunityScore: scanResult.bestOpportunity?.score || 0
+        }
+      });
+    }
 
     // Generate comprehensive agent insights from REAL scan results
     // Each insight is based on actual market data from Aster DEX
@@ -72,10 +169,25 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // CRITICAL FIX: Include balance and confidence threshold for status checks
-    const balanceConfig = realBalanceService.getBalanceConfig();
-    const accountBalance = balanceConfig?.availableBalance || 0;
+    // CRITICAL FIX: Fetch real balance directly from Aster DEX API instead of stale cache
+    let accountBalance = 0;
+    try {
+      const { asterDexService } = await import('@/services/asterDexService');
+      accountBalance = await asterDexService.getBalance();
+    } catch (error) {
+      logger.warn('Failed to fetch balance for agent insights response', {
+        context: 'AgentInsightsAPI',
+        data: { error: error instanceof Error ? error.message : String(error) }
+      });
+      // Fallback to realBalanceService if direct fetch fails
+      const balanceConfig = realBalanceService.getBalanceConfig();
+      accountBalance = balanceConfig?.availableBalance || 0;
+    }
     const confidenceThreshold = asterConfig.trading.confidenceThreshold || 0.35;
+    
+    // Determine if this is cached data
+    const isCached = scanResult && !isCacheStale && !forceRefresh;
+    const cacheAge = scanResult ? Math.round((Date.now() - scanResult.timestamp) / 1000) : 0;
 
     const response = NextResponse.json({
       success: true,
@@ -87,7 +199,11 @@ export async function GET(request: NextRequest) {
           bestOpportunity: scanResult.bestOpportunity,
           topVolumeSpikes: scanResult.volumeSpikes.slice(0, 5),
           opportunitiesCount: scanResult.opportunities.length,
-          dataSource: 'Aster Finance Futures API (Real-time)'
+          dataSource: isCached 
+            ? `Aster Finance Futures API (Cached, ${cacheAge}s old)` 
+            : 'Aster Finance Futures API (Real-time)',
+          cached: isCached,
+          cacheAgeSeconds: cacheAge
         },
         // CRITICAL FIX: Add balance and confidence for status checks
         accountBalance: accountBalance,
@@ -227,7 +343,8 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
     
     const topPair = topOpportunities[0];
     const dailyVol = (topPair.marketData.volume24h * topPair.marketData.price / 1000000).toFixed(1);
-    const momentum = topPair.marketData.momentum;
+    // CRITICAL FIX: Handle Infinity/NaN momentum gracefully
+    const momentum = isFinite(topPair.marketData.momentum) ? topPair.marketData.momentum : 0;
     const momStr = momentum > 0 ? `+${momentum.toFixed(1)}%` : `${momentum.toFixed(1)}%`;
     
     const chiefInsight: any = {

@@ -66,17 +66,20 @@ async function getChartData(timeRange: string, request: NextRequest) {
     const timeRangeMs = getTimeRangeMs(timeRange);
     const startTime = now - timeRangeMs;
 
-    // Fetch all trades from database to calculate equity progression
+    // CRITICAL FIX: Fetch ALL trades for full history (not just 1000)
     const { getTrades } = await import('@/lib/db');
-    const allTrades = await getTrades({ limit: 1000 });
+    const allTrades = await getTrades({ limit: 10000 }); // Increased limit for full history
     
-    // Filter trades within time range
-    const tradesInRange = allTrades.filter(trade => {
-      const tradeTime = new Date(trade.timestamp).getTime();
-      return tradeTime >= startTime && tradeTime <= now;
-    });
+    // For "ALL" time range, include all trades regardless of time
+    // For other ranges, filter by time
+    const tradesInRange = timeRange === 'ALL'
+      ? allTrades
+      : allTrades.filter(trade => {
+          const tradeTime = new Date(trade.timestamp).getTime();
+          return tradeTime >= startTime && tradeTime <= now;
+        });
 
-    // Sort trades by timestamp
+    // Sort trades by timestamp (oldest first)
     tradesInRange.sort((a, b) => 
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
@@ -88,15 +91,16 @@ async function getChartData(timeRange: string, request: NextRequest) {
     const { asterConfig } = await import('@/lib/configService');
     const INITIAL_DEPOSIT = asterConfig.trading.initialCapital || 100; // Use config value, fallback to 100
     
-    // Calculate total P&L from ALL trades (to show full progression)
-    const totalHistoricalPnL = allTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    // For "ALL" time range, use earliest trade time as start
+    // For other ranges, use the specified start time
+    const earliestTradeTime = tradesInRange.length > 0 
+      ? Math.min(...tradesInRange.map(t => new Date(t.timestamp).getTime()))
+      : (timeRange === 'ALL' ? Date.now() - (365 * 24 * 60 * 60 * 1000) : startTime); // Default to 1 year ago if no trades
+    const chartStartTime = timeRange === 'ALL' 
+      ? earliestTradeTime 
+      : Math.min(earliestTradeTime, startTime);
     
-    // Add starting point at the earliest trade time OR 24h ago (whichever is earlier)
-    const earliestTradeTime = allTrades.length > 0 
-      ? Math.min(...allTrades.map(t => new Date(t.timestamp).getTime()))
-      : startTime;
-    const chartStartTime = Math.min(earliestTradeTime, startTime);
-    
+    // Add starting point at account beginning
     chartData.push({
       timestamp: chartStartTime,
       balance: INITIAL_DEPOSIT,
@@ -105,12 +109,13 @@ async function getChartData(timeRange: string, request: NextRequest) {
       totalPnL: 0
     });
 
-    // Add point for each trade chronologically
+    // Add point for each trade chronologically (tick-by-tick progression)
     let cumulativePnL = 0;
-    allTrades.forEach((trade) => {
+    tradesInRange.forEach((trade) => {
       const tradeTime = new Date(trade.timestamp).getTime();
-      // Only include trades after our start point
-      if (tradeTime >= chartStartTime) {
+      // For "ALL" time range, include all trades
+      // For other ranges, only include trades after start point
+      if (timeRange === 'ALL' || tradeTime >= chartStartTime) {
         cumulativePnL += trade.pnl || 0;
         const balanceAtTrade = INITIAL_DEPOSIT + cumulativePnL;
         
@@ -124,20 +129,19 @@ async function getChartData(timeRange: string, request: NextRequest) {
       }
     });
 
-    // Fetch account info to get unrealized P&L
+    // CRITICAL OPTIMIZATION: Get unrealized P&L directly from service instead of internal fetch
     let unrealizedPnL = 0;
     try {
-      // Use internal API route to get account info
-      const accountResponse = await fetch(new URL('/api/aster/account', request.url).toString());
-      if (accountResponse.ok) {
-        const accountResult = await accountResponse.json();
-        if (accountResult.success && accountResult.data) {
-          unrealizedPnL = parseFloat(accountResult.data.totalUnrealizedProfit || 0);
-        }
-      }
+      const { asterDexService } = await import('@/services/asterDexService');
+      // Get positions to calculate unrealized P&L
+      const positions = await asterDexService.getPositions();
+      unrealizedPnL = positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
     } catch (err) {
       // If we can't get unrealized P&L, use 0
-      logger.warn('Could not fetch unrealized P&L for chart', { context: 'BalanceChartAPI' });
+      logger.warn('Could not fetch unrealized P&L for chart', { 
+        context: 'BalanceChartAPI',
+        error: err instanceof Error ? err.message : String(err)
+      });
     }
 
     // Add current point with unrealized P&L
@@ -202,43 +206,28 @@ async function getChartData(timeRange: string, request: NextRequest) {
 
 async function getCurrentBalance(request: NextRequest) {
   try {
-    // Fetch account equity directly from account API (bypass cache for real-time accuracy)
-    const accountUrl = new URL('/api/aster/account', request.url).toString();
-    const accountResponse = await fetch(accountUrl, {
-      cache: 'no-store', // Always fetch fresh data for real-time tracking
-      headers: {
-        'Cache-Control': 'no-cache'
-      }
-    });
+    // CRITICAL OPTIMIZATION: Call asterDexService directly instead of internal fetch
+    // This avoids HTTP overhead, rate limiting on internal requests, and circular dependencies
+    const { asterDexService } = await import('@/services/asterDexService');
     
-    if (!accountResponse.ok) {
-      throw new Error(`Account API returned ${accountResponse.status}`);
-    }
+    // Get balance directly from service (uses 30-key system, caching, etc.)
+    const balance = await asterDexService.getBalance();
     
-    const accountResult = await accountResponse.json();
-    
-    if (!accountResult.success || !accountResult.data) {
-      throw new Error('Invalid account API response');
-    }
-    
-    // Use accountEquity (which uses availableBalance when totalMarginBalance is invalid)
-    const balance = parseFloat(accountResult.data.accountEquity || accountResult.data.balance || accountResult.data.availableBalance || 0);
-    
-    if (!balance || balance === 0 || isNaN(balance)) {
-      logger.warn('No valid balance data from Account API', {
+    // CRITICAL FIX: Allow balance of 0 (some accounts legitimately have 0 balance)
+    // Don't reject 0 balance - it's a valid state
+    if (isNaN(balance) || !isFinite(balance)) {
+      logger.warn('Invalid balance value from Aster DEX service', {
         context: 'BalanceChartAPI',
-        data: { accountData: accountResult.data }
+        data: { balance }
       });
-      // Don't return 0, throw error instead
-      throw new Error('Invalid balance value from account API');
+      throw new Error('Invalid balance value from Aster DEX service');
     }
       
-    logger.info('Real account equity fetched from Account API', {
+    logger.info('Real account equity fetched from Aster DEX service', {
       context: 'BalanceChartAPI',
       data: { 
-        accountEquity: balance,
-        availableBalance: accountResult.data.availableBalance,
-        totalMarginBalance: accountResult.data.totalMarginBalance
+        balance: balance.toFixed(2),
+        source: 'asterDexService'
       }
     });
 
@@ -247,7 +236,7 @@ async function getCurrentBalance(request: NextRequest) {
       data: {
         balance,
         timestamp: Date.now(),
-        source: 'aster_account_api'
+        source: 'asterDexService'
       }
     });
   } catch (error) {

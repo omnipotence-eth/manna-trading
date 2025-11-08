@@ -92,13 +92,21 @@ PRICE & VOLUME DATA
 Current Price: $${data.price}
 24h Range: $${data.low24h} - $${data.high24h}
 24h Change: ${data.priceChange24h.toFixed(2)}%
-Price Position: ${((data.price - data.low24h) / (data.high24h - data.low24h) * 100).toFixed(1)}% of daily range
+Price Position: ${(data.high24h - data.low24h) > 0 ? ((data.price - data.low24h) / (data.high24h - data.low24h) * 100).toFixed(1) : '50.0'}% of daily range
 
 VOLUME ANALYSIS (CRITICAL):
-Current Volume: ${data.volume.toLocaleString()}
-Average Volume: ${data.avgVolume.toLocaleString()}
-Volume Ratio: ${(data.volume / data.avgVolume).toFixed(2)}x ${data.volume > data.avgVolume * 1.5 ? 'SURGE' : data.volume < data.avgVolume * 0.5 ? 'DRY' : 'NORMAL'}
-Volume Strength: ${data.volume > data.avgVolume * 2 ? 'EXTREME (institutional activity likely)' : data.volume > data.avgVolume * 1.5 ? 'HIGH (strong interest)' : data.volume > data.avgVolume ? 'ABOVE AVERAGE' : 'BELOW AVERAGE (weak hands)'}
+Current Volume: ${(data.volume || 0).toLocaleString()}
+Average Volume: ${(data.avgVolume || data.volume || 0).toLocaleString()}
+Volume Ratio: ${data.avgVolume > 0 ? (data.volume / data.avgVolume).toFixed(2) : '1.00'}x ${data.volume > (data.avgVolume || data.volume) * 1.5 ? 'SURGE' : data.volume < (data.avgVolume || data.volume) * 0.5 ? 'DRY' : 'NORMAL'}
+Volume Strength: ${data.volume > (data.avgVolume || data.volume) * 2 ? 'EXTREME (institutional activity likely)' : data.volume > (data.avgVolume || data.volume) * 1.5 ? 'HIGH (strong interest)' : data.volume > (data.avgVolume || data.volume) ? 'ABOVE AVERAGE' : 'BELOW AVERAGE (weak hands)'}
+
+BUY/SELL VOLUME ANALYSIS (CRITICAL FOR DIRECTION):
+${(data as any).buyVolume !== undefined && (data as any).sellVolume !== undefined ? `
+Buy Volume: ${((data as any).buyVolume || 0).toLocaleString()} (${((data as any).buyVolume / ((data as any).buyVolume + (data as any).sellVolume || 1) * 100).toFixed(1)}% of total)
+Sell Volume: ${((data as any).sellVolume || 0).toLocaleString()} (${((data as any).sellVolume / ((data as any).buyVolume + (data as any).sellVolume || 1) * 100).toFixed(1)}% of total)
+Buy/Sell Ratio: ${((data as any).buySellRatio || 1.0).toFixed(2)}x ${((data as any).buySellRatio || 1.0) > 1.5 ? 'STRONG BUYING PRESSURE (LONG bias)' : ((data as any).buySellRatio || 1.0) < 0.7 ? 'STRONG SELLING PRESSURE (SHORT bias)' : 'NEUTRAL'}
+${((data as any).buySellRatio || 1.0) > 1.5 ? '⚠️ More buyers than sellers = BULLISH momentum' : ((data as any).buySellRatio || 1.0) < 0.7 ? '⚠️ More sellers than buyers = BEARISH momentum (SHORT opportunity)' : 'Balanced order flow'}
+` : 'Buy/sell volume data unavailable - using total volume only'}
 
 ══════════════════════════════════════════════════
 LIQUIDITY & EXECUTION QUALITY

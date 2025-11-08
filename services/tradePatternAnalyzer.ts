@@ -1,23 +1,21 @@
 /**
  * Trade Pattern Analyzer
- * Analyzes trade history to extract successful and failed patterns
- * Feeds patterns back to LLM as "lessons learned" for improved decision-making
+ * Analyzes trade history to identify successful and failure patterns
+ * WORLD-CLASS: Reinforcement learning insights for improving trading decisions
  */
 
 import { logger } from '@/lib/logger';
-import { db } from '@/lib/db';
+import { getTrades } from '@/lib/db';
 
 export interface TradePattern {
   signals: string[];
   marketRegime: string;
   confidence: number;
   score: number;
-  pnl: number;
   pnlPercent: number;
-  symbol: string;
-  entryReason: string;
-  exitReason: string;
-  count: number; // How many times this pattern occurred
+  count: number;
+  entryReason?: string;
+  exitReason?: string;
 }
 
 export interface LessonsLearned {
@@ -25,349 +23,304 @@ export interface LessonsLearned {
   failurePatterns: TradePattern[];
   insights: string[];
   averageWinRate: number;
-  averageLoss: number;
-  averageWin: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  averageWinPnL: number;
+  averageLossPnL: number;
+  riskRewardRatio: number;
 }
 
-export class TradePatternAnalyzer {
-  private cache: Map<string, LessonsLearned> = new Map();
-  private cacheTimeout = 5 * 60 * 1000; // 5 minutes cache
+class TradePatternAnalyzer {
+  private cache: Map<number, LessonsLearned> = new Map();
+  private cacheTimestamp: Map<number, number> = new Map();
+  private readonly CACHE_TTL = 60000; // 1 minute cache
 
   /**
-   * Analyze successful trades and extract patterns
+   * Get lessons learned from trade history
+   * WORLD-CLASS: Analyzes patterns to identify what works and what doesn't
    */
-  async getSuccessfulPatterns(days: number = 30): Promise<TradePattern[]> {
-    try {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - days);
-
-      const result = await db.execute(`
-        SELECT 
-          entry_signals,
-          entry_market_regime,
-          entry_confidence,
-          entry_score,
-          pnl,
-          pnl_percent,
-          symbol,
-          entry_reason,
-          exit_reason,
-          COUNT(*) as pattern_count
-        FROM trades
-        WHERE exit_timestamp IS NOT NULL
-          AND pnl > 0
-          AND timestamp >= $1
-        GROUP BY 
-          entry_signals,
-          entry_market_regime,
-          entry_confidence,
-          entry_score,
-          pnl,
-          pnl_percent,
-          symbol,
-          entry_reason,
-          exit_reason
-        ORDER BY AVG(pnl_percent) DESC, pattern_count DESC
-        LIMIT 10
-      `, [cutoffDate.toISOString()]);
-
-      const patterns: TradePattern[] = result.rows.map((row: any) => ({
-        signals: row.entry_signals ? JSON.parse(row.entry_signals) : [],
-        marketRegime: row.entry_market_regime || 'unknown',
-        confidence: row.entry_confidence ? Math.round(row.entry_confidence * 100) : 0,
-        score: row.entry_score || 0,
-        pnl: parseFloat(row.pnl) || 0,
-        pnlPercent: parseFloat(row.pnl_percent) || 0,
-        symbol: row.symbol || 'unknown',
-        entryReason: row.entry_reason || 'no reason',
-        exitReason: row.exit_reason || 'no reason',
-        count: parseInt(row.pattern_count) || 1
-      }));
-
-      logger.info(`✅ Analyzed ${patterns.length} successful trade patterns`, {
+  async getLessonsLearned(days: number = 30): Promise<LessonsLearned> {
+    const cacheKey = days;
+    
+    // Check cache
+    const cached = this.cache.get(cacheKey);
+    const cacheTime = this.cacheTimestamp.get(cacheKey);
+    if (cached && cacheTime && Date.now() - cacheTime < this.CACHE_TTL) {
+      logger.debug('Returning cached lessons learned', {
         context: 'TradePatternAnalyzer',
-        data: {
-          days,
-          patternsFound: patterns.length,
-          topPatternPnL: patterns[0]?.pnlPercent || 0
-        }
+        data: { days, cacheAge: Date.now() - cacheTime }
       });
-
-      return patterns;
-    } catch (error) {
-      logger.error('Failed to analyze successful patterns', error as Error, {
-        context: 'TradePatternAnalyzer'
-      });
-      return [];
+      return cached;
     }
-  }
 
-  /**
-   * Analyze failed trades and extract failure patterns
-   */
-  async getFailurePatterns(days: number = 30): Promise<TradePattern[]> {
     try {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - days);
-
-      const result = await db.execute(`
-        SELECT 
-          entry_signals,
-          entry_market_regime,
-          entry_confidence,
-          entry_score,
-          pnl,
-          pnl_percent,
-          symbol,
-          entry_reason,
-          exit_reason,
-          COUNT(*) as pattern_count
-        FROM trades
-        WHERE exit_timestamp IS NOT NULL
-          AND pnl < 0
-          AND timestamp >= $1
-        GROUP BY 
-          entry_signals,
-          entry_market_regime,
-          entry_confidence,
-          entry_score,
-          pnl,
-          pnl_percent,
-          symbol,
-          entry_reason,
-          exit_reason
-        ORDER BY AVG(pnl_percent) ASC, pattern_count DESC
-        LIMIT 10
-      `, [cutoffDate.toISOString()]);
-
-      const patterns: TradePattern[] = result.rows.map((row: any) => ({
-        signals: row.entry_signals ? JSON.parse(row.entry_signals) : [],
-        marketRegime: row.entry_market_regime || 'unknown',
-        confidence: row.entry_confidence ? Math.round(row.entry_confidence * 100) : 0,
-        score: row.entry_score || 0,
-        pnl: parseFloat(row.pnl) || 0,
-        pnlPercent: parseFloat(row.pnl_percent) || 0,
-        symbol: row.symbol || 'unknown',
-        entryReason: row.entry_reason || 'no reason',
-        exitReason: row.exit_reason || 'no reason',
-        count: parseInt(row.pattern_count) || 1
-      }));
-
-      logger.info(`⚠️ Analyzed ${patterns.length} failure trade patterns`, {
+      logger.info('Analyzing trade patterns', {
         context: 'TradePatternAnalyzer',
-        data: {
-          days,
-          patternsFound: patterns.length,
-          worstPatternPnL: patterns[0]?.pnlPercent || 0
-        }
+        data: { days }
       });
 
-      return patterns;
-    } catch (error) {
-      logger.error('Failed to analyze failure patterns', error as Error, {
-        context: 'TradePatternAnalyzer'
-      });
-      return [];
-    }
-  }
-
-  /**
-   * Get performance metrics
-   */
-  async getPerformanceMetrics(days: number = 30): Promise<{
-    averageWinRate: number;
-    averageLoss: number;
-    averageWin: number;
-    totalTrades: number;
-    winningTrades: number;
-    losingTrades: number;
-  }> {
-    try {
+      // Get trades from database
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
+      
+      const allTrades = await getTrades({ limit: 10000 });
+      const recentTrades = allTrades.filter(trade => {
+        const tradeDate = new Date(trade.timestamp);
+        return tradeDate >= cutoffDate;
+      });
 
-      const result = await db.execute(`
-        SELECT 
-          COUNT(*) as total_trades,
-          COUNT(CASE WHEN pnl > 0 THEN 1 END) as winning_trades,
-          COUNT(CASE WHEN pnl < 0 THEN 1 END) as losing_trades,
-          AVG(CASE WHEN pnl > 0 THEN pnl_percent END) as avg_win,
-          AVG(CASE WHEN pnl < 0 THEN pnl_percent END) as avg_loss
-        FROM trades
-        WHERE exit_timestamp IS NOT NULL
-          AND timestamp >= $1
-      `, [cutoffDate.toISOString()]);
+      if (recentTrades.length === 0) {
+        logger.info('No trades found for pattern analysis', {
+          context: 'TradePatternAnalyzer',
+          data: { days }
+        });
+        
+        const emptyResult: LessonsLearned = {
+          successfulPatterns: [],
+          failurePatterns: [],
+          insights: ['No historical trades yet - system will learn from first trades'],
+          averageWinRate: 0,
+          totalTrades: 0,
+          winningTrades: 0,
+          losingTrades: 0,
+          averageWinPnL: 0,
+          averageLossPnL: 0,
+          riskRewardRatio: 0
+        };
+        
+        this.cache.set(cacheKey, emptyResult);
+        this.cacheTimestamp.set(cacheKey, Date.now());
+        return emptyResult;
+      }
 
-      const row = result.rows[0];
-      const totalTrades = parseInt(row.total_trades) || 0;
-      const winningTrades = parseInt(row.winning_trades) || 0;
-      const losingTrades = parseInt(row.losing_trades) || 0;
-      const averageWinRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
-      const averageWin = parseFloat(row.avg_win) || 0;
-      const averageLoss = parseFloat(row.avg_loss) || 0;
+      // Separate winning and losing trades
+      const winningTrades = recentTrades.filter(t => t.pnl > 0);
+      const losingTrades = recentTrades.filter(t => t.pnl < 0);
+      
+      // Calculate statistics
+      const totalTrades = recentTrades.length;
+      const wins = winningTrades.length;
+      const losses = losingTrades.length;
+      const averageWinRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+      
+      const averageWinPnL = wins > 0
+        ? winningTrades.reduce((sum, t) => sum + t.pnlPercent, 0) / wins
+        : 0;
+      
+      const averageLossPnL = losses > 0
+        ? losingTrades.reduce((sum, t) => sum + t.pnlPercent, 0) / losses
+        : 0;
+      
+      const riskRewardRatio = averageLossPnL !== 0
+        ? Math.abs(averageWinPnL / averageLossPnL)
+        : 0;
 
-      return {
+      // Analyze successful patterns
+      const successfulPatterns = this.analyzePatterns(winningTrades, true);
+      
+      // Analyze failure patterns
+      const failurePatterns = this.analyzePatterns(losingTrades, false);
+      
+      // Generate insights
+      const insights = this.generateInsights({
         averageWinRate,
-        averageLoss,
-        averageWin,
+        averageWinPnL,
+        averageLossPnL,
+        riskRewardRatio,
         totalTrades,
-        winningTrades,
-        losingTrades
+        winningTrades: successfulPatterns,
+        losingTrades: failurePatterns
+      });
+
+      const result: LessonsLearned = {
+        successfulPatterns: successfulPatterns.slice(0, 10), // Top 10 patterns
+        failurePatterns: failurePatterns.slice(0, 10), // Top 10 patterns
+        insights,
+        averageWinRate,
+        totalTrades,
+        winningTrades: wins,
+        losingTrades: losses,
+        averageWinPnL,
+        averageLossPnL,
+        riskRewardRatio
       };
+
+      // Cache result
+      this.cache.set(cacheKey, result);
+      this.cacheTimestamp.set(cacheKey, Date.now());
+
+      logger.info('Trade pattern analysis complete', {
+        context: 'TradePatternAnalyzer',
+        data: {
+          days,
+          totalTrades,
+          winRate: `${averageWinRate.toFixed(1)}%`,
+          successfulPatterns: successfulPatterns.length,
+          failurePatterns: failurePatterns.length,
+          insights: insights.length
+        }
+      });
+
+      return result;
     } catch (error) {
-      logger.error('Failed to get performance metrics', error as Error, {
+      logger.error('Failed to analyze trade patterns', error, {
         context: 'TradePatternAnalyzer'
       });
-      return {
+      
+      // Return empty result on error
+      const emptyResult: LessonsLearned = {
+        successfulPatterns: [],
+        failurePatterns: [],
+        insights: ['Failed to analyze trade history - continuing without RL insights'],
         averageWinRate: 0,
-        averageLoss: 0,
-        averageWin: 0,
         totalTrades: 0,
         winningTrades: 0,
-        losingTrades: 0
+        losingTrades: 0,
+        averageWinPnL: 0,
+        averageLossPnL: 0,
+        riskRewardRatio: 0
       };
+      
+      return emptyResult;
     }
   }
 
   /**
-   * Generate insights from patterns
+   * Analyze patterns from trades
    */
-  private generateInsights(
-    successfulPatterns: TradePattern[],
-    failurePatterns: TradePattern[],
-    metrics: { averageWinRate: number; averageLoss: number; averageWin: number }
-  ): string[] {
+  private analyzePatterns(trades: any[], isSuccessful: boolean): TradePattern[] {
+    const patternMap = new Map<string, TradePattern>();
+
+    trades.forEach(trade => {
+      // Extract signals (if available)
+      const signals = trade.entrySignals 
+        ? (Array.isArray(trade.entrySignals) ? trade.entrySignals : JSON.parse(trade.entrySignals || '[]'))
+        : [];
+      
+      // Create pattern key from signals and market regime
+      const marketRegime = trade.entryMarketRegime || 'unknown';
+      const confidence = trade.entryConfidence || 0;
+      const score = trade.entryScore || 0;
+      
+      // Group similar patterns
+      const patternKey = `${marketRegime}_${Math.floor(confidence / 10)}_${Math.floor(score / 10)}`;
+      
+      if (!patternMap.has(patternKey)) {
+        patternMap.set(patternKey, {
+          signals,
+          marketRegime,
+          confidence,
+          score,
+          pnlPercent: 0,
+          count: 0,
+          entryReason: trade.entryReason,
+          exitReason: trade.exitReason
+        });
+      }
+      
+      const pattern = patternMap.get(patternKey)!;
+      pattern.pnlPercent += trade.pnlPercent;
+      pattern.count += 1;
+    });
+
+    // Calculate average P&L per pattern and sort
+    const patterns = Array.from(patternMap.values()).map(pattern => ({
+      ...pattern,
+      pnlPercent: pattern.pnlPercent / pattern.count
+    }));
+
+    // Sort by P&L (descending for successful, ascending for failures)
+    patterns.sort((a, b) => {
+      if (isSuccessful) {
+        return b.pnlPercent - a.pnlPercent; // Best wins first
+      } else {
+        return a.pnlPercent - b.pnlPercent; // Worst losses first
+      }
+    });
+
+    return patterns;
+  }
+
+  /**
+   * Generate insights from analysis
+   */
+  private generateInsights(data: {
+    averageWinRate: number;
+    averageWinPnL: number;
+    averageLossPnL: number;
+    riskRewardRatio: number;
+    totalTrades: number;
+    winningTrades: TradePattern[];
+    losingTrades: TradePattern[];
+  }): string[] {
     const insights: string[] = [];
 
-    // Successful pattern insights
-    if (successfulPatterns.length > 0) {
-      const topPattern = successfulPatterns[0];
-      insights.push(
-        `✅ Best performing pattern: ${topPattern.signals.slice(0, 3).join(', ')} in ${topPattern.marketRegime} market (${topPattern.confidence}% confidence) → +${topPattern.pnlPercent.toFixed(2)}% average`
-      );
+    if (data.totalTrades === 0) {
+      insights.push('No trades yet - system will learn from first trades');
+      return insights;
     }
 
-    // Failure pattern insights
-    if (failurePatterns.length > 0) {
-      const worstPattern = failurePatterns[0];
-      insights.push(
-        `❌ Worst performing pattern: ${worstPattern.signals.slice(0, 3).join(', ')} in ${worstPattern.marketRegime} market (${worstPattern.confidence}% confidence) → ${worstPattern.pnlPercent.toFixed(2)}% average loss`
-      );
+    // Win rate insights
+    if (data.averageWinRate >= 60) {
+      insights.push(`Strong win rate of ${data.averageWinRate.toFixed(1)}% - continue current strategy`);
+    } else if (data.averageWinRate >= 45) {
+      insights.push(`Moderate win rate of ${data.averageWinRate.toFixed(1)}% - consider refining entry signals`);
+    } else if (data.averageWinRate > 0) {
+      insights.push(`Low win rate of ${data.averageWinRate.toFixed(1)}% - need to improve entry criteria`);
+    }
+
+    // Risk-reward insights
+    if (data.riskRewardRatio >= 2.5) {
+      insights.push(`Excellent risk-reward ratio of ${data.riskRewardRatio.toFixed(2)}:1 - winners are large`);
+    } else if (data.riskRewardRatio >= 1.5) {
+      insights.push(`Good risk-reward ratio of ${data.riskRewardRatio.toFixed(2)}:1 - maintain discipline`);
+    } else if (data.riskRewardRatio > 0) {
+      insights.push(`Poor risk-reward ratio of ${data.riskRewardRatio.toFixed(2)}:1 - need larger winners or smaller losers`);
     }
 
     // Market regime insights
-    const regimeSuccess = new Map<string, number>();
-    successfulPatterns.forEach(p => {
-      regimeSuccess.set(p.marketRegime, (regimeSuccess.get(p.marketRegime) || 0) + p.pnlPercent);
-    });
-    const bestRegime = Array.from(regimeSuccess.entries())
-      .sort((a, b) => b[1] - a[1])[0];
-    if (bestRegime) {
-      insights.push(`📈 Most profitable market regime: ${bestRegime[0]} (${bestRegime[1].toFixed(2)}% total)`);
+    if (data.winningTrades.length > 0) {
+      const topRegime = data.winningTrades[0]?.marketRegime;
+      if (topRegime) {
+        insights.push(`Best performance in ${topRegime} market conditions`);
+      }
+    }
+
+    if (data.losingTrades.length > 0) {
+      const worstRegime = data.losingTrades[0]?.marketRegime;
+      if (worstRegime) {
+        insights.push(`Avoid trading in ${worstRegime} conditions - historically poor performance`);
+      }
     }
 
     // Confidence insights
-    const avgConfidenceWin = successfulPatterns.reduce((sum, p) => sum + p.confidence, 0) / (successfulPatterns.length || 1);
-    const avgConfidenceLoss = failurePatterns.reduce((sum, p) => sum + p.confidence, 0) / (failurePatterns.length || 1);
-    if (avgConfidenceWin > avgConfidenceLoss) {
-      insights.push(`🎯 Higher confidence (${avgConfidenceWin.toFixed(0)}% vs ${avgConfidenceLoss.toFixed(0)}%) correlates with better outcomes`);
+    if (data.winningTrades.length > 0) {
+      const avgConfidence = data.winningTrades.reduce((sum, p) => sum + p.confidence, 0) / data.winningTrades.length;
+      insights.push(`Average confidence for winners: ${avgConfidence.toFixed(1)}%`);
     }
 
-    // R:R insights
-    if (metrics.averageWin > 0 && metrics.averageLoss < 0) {
-      const rr = Math.abs(metrics.averageWin / metrics.averageLoss);
-      insights.push(`💰 Risk/Reward ratio: ${rr.toFixed(2)}:1 (Win: ${metrics.averageWin.toFixed(2)}%, Loss: ${Math.abs(metrics.averageLoss).toFixed(2)}%)`);
+    // Pattern frequency insights
+    if (data.winningTrades.length > 0) {
+      const mostCommonPattern = data.winningTrades.reduce((max, p) => p.count > max.count ? p : max, data.winningTrades[0]);
+      insights.push(`Most successful pattern occurred ${mostCommonPattern.count} times with ${mostCommonPattern.pnlPercent.toFixed(2)}% avg profit`);
     }
 
     return insights;
   }
 
   /**
-   * Get comprehensive lessons learned from recent trades
-   */
-  async getLessonsLearned(days: number = 30): Promise<LessonsLearned> {
-    const cacheKey = `lessons_${days}`;
-    const cached = this.cache.get(cacheKey);
-    
-    if (cached) {
-      const cacheAge = Date.now() - (cached as any).cachedAt;
-      if (cacheAge < this.cacheTimeout) {
-        return cached;
-      }
-    }
-
-    try {
-      logger.info('🔍 Analyzing trade patterns for lessons learned', {
-        context: 'TradePatternAnalyzer',
-        data: { days }
-      });
-
-      const [successfulPatterns, failurePatterns, metrics] = await Promise.all([
-        this.getSuccessfulPatterns(days),
-        this.getFailurePatterns(days),
-        this.getPerformanceMetrics(days)
-      ]);
-
-      const insights = this.generateInsights(successfulPatterns, failurePatterns, metrics);
-
-      const lessonsLearned: LessonsLearned = {
-        successfulPatterns: successfulPatterns.slice(0, 5), // Top 5 patterns
-        failurePatterns: failurePatterns.slice(0, 5), // Top 5 failures
-        insights,
-        averageWinRate: metrics.averageWinRate,
-        averageLoss: metrics.averageLoss,
-        averageWin: metrics.averageWin
-      };
-
-      // Cache result
-      (lessonsLearned as any).cachedAt = Date.now();
-      this.cache.set(cacheKey, lessonsLearned);
-
-      logger.info('✅ Generated lessons learned from trade history', {
-        context: 'TradePatternAnalyzer',
-        data: {
-          successfulPatterns: successfulPatterns.length,
-          failurePatterns: failurePatterns.length,
-          insights: insights.length,
-          winRate: metrics.averageWinRate.toFixed(1) + '%'
-        }
-      });
-
-      return lessonsLearned;
-    } catch (error) {
-      logger.error('Failed to get lessons learned', error as Error, {
-        context: 'TradePatternAnalyzer'
-      });
-      
-      // Return empty lessons learned on error
-      return {
-        successfulPatterns: [],
-        failurePatterns: [],
-        insights: [],
-        averageWinRate: 0,
-        averageLoss: 0,
-        averageWin: 0
-      };
-    }
-  }
-
-  /**
-   * Clear cache (useful after trades complete)
+   * Clear cache
    */
   clearCache(): void {
     this.cache.clear();
-    logger.info('Cache cleared', { context: 'TradePatternAnalyzer' });
+    this.cacheTimestamp.clear();
+    logger.debug('Trade pattern analyzer cache cleared', {
+      context: 'TradePatternAnalyzer'
+    });
   }
 }
 
 // Export singleton instance
-const globalForTradePatternAnalyzer = globalThis as unknown as {
-  tradePatternAnalyzer: TradePatternAnalyzer | undefined;
-};
-
-export const tradePatternAnalyzer = globalForTradePatternAnalyzer.tradePatternAnalyzer || new TradePatternAnalyzer();
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForTradePatternAnalyzer.tradePatternAnalyzer = tradePatternAnalyzer;
-}
+export const tradePatternAnalyzer = new TradePatternAnalyzer();
 

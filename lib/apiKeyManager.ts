@@ -361,14 +361,18 @@ export class APIKeyManager {
     key.rateLimit.currentRPS++;
     key.rateLimit.currentRPM++;
 
-    // Warn if approaching rate limit
-    if (key.rateLimit.currentRPS >= key.rateLimit.requestsPerSecond * 0.9) {
+    // Warn if approaching rate limit (only if actually close, not just at threshold)
+    // CRITICAL FIX: Increase threshold to 95% to reduce false positives
+    // A single request shouldn't trigger warning if maxRPS is 1
+    if (key.rateLimit.currentRPS >= key.rateLimit.requestsPerSecond * 0.95 && 
+        key.rateLimit.requestsPerSecond > 1) {
       logger.warn('API key approaching rate limit', {
         context: 'APIKeyManager',
         data: {
           keyId: key.id,
           currentRPS: key.rateLimit.currentRPS,
-          maxRPS: key.rateLimit.requestsPerSecond
+          maxRPS: key.rateLimit.requestsPerSecond,
+          utilization: `${Math.round((key.rateLimit.currentRPS / key.rateLimit.requestsPerSecond) * 100)}%`
         }
       });
     }

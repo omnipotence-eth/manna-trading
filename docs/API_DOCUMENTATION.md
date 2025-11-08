@@ -334,9 +334,6 @@ Get current prices for trading symbols.
 ### `POST /api/setup/database`
 Initialize database schema.
 
-### `GET /api/test-keys`
-Test API key configuration (does not expose keys).
-
 ---
 
 ## 🎯 Performance Metrics

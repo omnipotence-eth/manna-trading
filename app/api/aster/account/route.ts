@@ -168,10 +168,68 @@ export async function GET(req: NextRequest) {
   } catch (error: unknown) {
     timer.end();
     PerformanceMonitor.recordCounter('api:aster:account:error');
-    logger.error('Failed to fetch Aster account', error instanceof Error ? error : new Error(String(error)), { context: 'AsterAPI' });
+    
+    // Enhanced error logging with detailed information
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    // Check for specific error types
+    let statusCode = 500;
+    let errorDetail = 'Failed to fetch account data';
+    
+    if (errorMessage.includes('No healthy API keys available')) {
+      statusCode = 503;
+      errorDetail = 'No healthy API keys available - all keys may be rate limited or invalid';
+      logger.error('CRITICAL: No healthy API keys in pool', error instanceof Error ? error : new Error(String(error)), {
+        context: 'AsterAPI',
+        data: {
+          error: errorMessage,
+          solution: 'Check API key pool configuration and rate limiting status'
+        }
+      });
+    } else if (errorMessage.includes('timeout') || errorMessage.includes('AbortError')) {
+      statusCode = 504;
+      errorDetail = 'Request timeout - Aster DEX API did not respond in time';
+      logger.error('Request timeout fetching account', error instanceof Error ? error : new Error(String(error)), {
+        context: 'AsterAPI',
+        data: { error: errorMessage, timeout: '30 seconds' }
+      });
+    } else if (errorMessage.includes('401') || errorMessage.includes('Unauthorized') || errorMessage.includes('Invalid API-key')) {
+      statusCode = 401;
+      errorDetail = 'Authentication failed - check API credentials';
+      logger.error('CRITICAL: Authentication failed', error instanceof Error ? error : new Error(String(error)), {
+        context: 'AsterAPI',
+        data: {
+          error: errorMessage,
+          solution: 'Verify ASTER_API_KEY and ASTER_SECRET_KEY in .env.local'
+        }
+      });
+    } else if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
+      statusCode = 429;
+      errorDetail = 'Rate limit exceeded - too many requests';
+      logger.error('Rate limit exceeded', error instanceof Error ? error : new Error(String(error)), {
+        context: 'AsterAPI',
+        data: { error: errorMessage, solution: 'Wait before retrying' }
+      });
+    } else {
+      // Generic error - log full details
+      logger.error('Failed to fetch Aster account', error instanceof Error ? error : new Error(String(error)), {
+        context: 'AsterAPI',
+        data: {
+          error: errorMessage,
+          stack: errorStack,
+          type: error instanceof Error ? error.constructor.name : typeof error
+        }
+      });
+    }
+    
     return NextResponse.json(
-      { error: 'Failed to fetch account data' },
-      { status: 500 }
+      { 
+        error: errorDetail,
+        message: errorMessage,
+        status: statusCode
+      },
+      { status: statusCode }
     );
   }
 }

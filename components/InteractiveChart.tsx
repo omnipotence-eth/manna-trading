@@ -29,12 +29,15 @@ interface PerformanceMetrics {
   failedRequests: number;
 }
 
-export default function InteractiveChart({ 
+// WORLD-CLASS: Memoize expensive chart component to prevent unnecessary re-renders
+// Only re-renders when balance data or time range actually changes
+const InteractiveChart = React.memo(function InteractiveChart({ 
   className = '', 
   initialBalance = 42.16,
   onBalanceUpdate
 }: InteractiveChartProps) {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [allHistoricalData, setAllHistoricalData] = useState<ChartDataPoint[]>([]); // Store full history
   const [currentBalance, setCurrentBalance] = useState(initialBalance);
   const [timeRange, setTimeRange] = useState<'24H' | '7D' | '30D'>('24H');
   const [hoveredPoint, setHoveredPoint] = useState<ChartDataPoint | null>(null);
@@ -114,36 +117,65 @@ export default function InteractiveChart({
     const MAX_CONSECUTIVE_ERRORS = 5;
     const CIRCUIT_BREAKER_RESET_TIME = 30000; // 30 seconds
     
-    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-      if (retryTimeoutRef.current === null) {
-        frontendLogger.warn('Circuit breaker activated - too many consecutive errors', {
-          component: 'InteractiveChart',
-          data: { consecutiveErrors, nextRetry: Date.now() + CIRCUIT_BREAKER_RESET_TIME }
-        });
-        
-        setConnectionStatus('error');
-        
-        // Reset after cooldown period
-        retryTimeoutRef.current = setTimeout(() => {
-          setConsecutiveErrors(0);
-          reconnectAttemptsRef.current = 0;
-          retryTimeoutRef.current = null;
-          setConnectionStatus('connecting');
-          frontendLogger.info('Circuit breaker reset - resuming data fetching', {
-            component: 'InteractiveChart'
+    // CRITICAL FIX: Check circuit breaker state using functional update
+    let shouldProceed = true;
+    setConsecutiveErrors(current => {
+      if (current >= MAX_CONSECUTIVE_ERRORS) {
+        shouldProceed = false;
+        if (retryTimeoutRef.current === null) {
+          frontendLogger.warn('Circuit breaker activated - too many consecutive errors', {
+            component: 'InteractiveChart',
+            data: { consecutiveErrors: current, nextRetry: Date.now() + CIRCUIT_BREAKER_RESET_TIME }
           });
-        }, CIRCUIT_BREAKER_RESET_TIME);
+          
+          setConnectionStatus('error');
+          
+          // Reset after cooldown period
+          retryTimeoutRef.current = setTimeout(() => {
+            setConsecutiveErrors(0);
+            reconnectAttemptsRef.current = 0;
+            retryTimeoutRef.current = null;
+            setConnectionStatus('connecting');
+            frontendLogger.info('Circuit breaker reset - resuming data fetching', {
+              component: 'InteractiveChart'
+            });
+          }, CIRCUIT_BREAKER_RESET_TIME);
+        }
       }
+      return current; // Always return the current value
+    });
+    
+    // Early return if circuit breaker is active
+    if (!shouldProceed || retryTimeoutRef.current !== null) {
       return;
     }
     
+    // CRITICAL FIX: Prevent concurrent fetches
+    if (isFetchingRef.current) {
+      frontendLogger.debug('Balance fetch already in progress, skipping', {
+        component: 'InteractiveChart'
+      });
+      return;
+    }
+    
+    isFetchingRef.current = true;
+    
+    // CRITICAL FIX: Store AbortController for cleanup
+    let abortController: AbortController | null = null;
+    
     try {
       fetchStartTimeRef.current = Date.now();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+      abortController = new AbortController();
+      // CRITICAL FIX: Increased timeout to 15s to handle slow API responses
+      // The account API might take longer due to rate limiting or retries
+      const timeoutId = setTimeout(() => {
+        if (abortController) {
+          abortController.abort();
+        }
+      }, 15000); // 15s timeout
       
       const response = await fetch('/api/real-balance?action=current-balance', {
-        signal: controller.signal,
+        signal: abortController.signal,
         headers: {
           'Cache-Control': 'no-cache',
           'Pragma': 'no-cache'
@@ -160,12 +192,36 @@ export default function InteractiveChart({
       
       const result = await response.json();
 
-      if (result.success && result.data && result.data.data) {
-        const balance = parseFloat(result.data.data.balance);
+      // CRITICAL FIX: Handle nested response structure
+      // Response: { success: true, data: { message: "...", data: { balance, timestamp, source } } }
+      let balance: number | null = null;
+      
+      if (result.success && result.data) {
+        // Handle nested structure: result.data.data.balance
+        if (result.data.data && result.data.data.balance !== undefined) {
+          balance = parseFloat(result.data.data.balance);
+        } 
+        // Handle direct structure: result.data.balance
+        else if (result.data.balance !== undefined) {
+          balance = parseFloat(result.data.balance);
+        } 
+        // Fallback to accountEquity
+        else if (result.data.accountEquity !== undefined) {
+          balance = parseFloat(result.data.accountEquity);
+        }
+        // Try top-level balance
+        else if (result.balance !== undefined) {
+          balance = parseFloat(result.balance);
+        }
+      }
+      
+      // CRITICAL FIX: Allow balance of 0 or very small values (don't reject)
+      // Some accounts might legitimately have 0 balance
+      if (balance !== null && !isNaN(balance)) {
         
         // ENTERPRISE: Strict validation
         if (!Number.isFinite(balance)) {
-          throw new Error(`Invalid balance value: ${result.data.data.balance}`);
+          throw new Error(`Invalid balance value: ${balance}`);
         }
         
         // NOF1.AI STYLE: Initialize chart start point on first successful fetch
@@ -194,14 +250,14 @@ export default function InteractiveChart({
         }
         
         // ENTERPRISE: Log every balance update for debugging
-        frontendLogger.debug('Balance fetched successfully', {
-          component: 'InteractiveChart',
-          data: {
-            balance: balance.toFixed(2),
-            source: result.data.data.source || 'unknown',
-            consecutiveErrors: consecutiveErrors
-          }
-        });
+            frontendLogger.debug('Balance fetched successfully', {
+              component: 'InteractiveChart',
+              data: {
+                balance: balance.toFixed(2),
+                source: result.data?.source || result.data?.data?.source || 'unknown',
+                consecutiveErrors: consecutiveErrors
+              }
+            });
         
         const prevBalance = currentBalance || initialBalanceRef.current || balance;
         const now = Date.now();
@@ -234,50 +290,57 @@ export default function InteractiveChart({
           onBalanceUpdate(balance);
         }
         
-        // NOF1.AI STYLE: Add live data point to chart (only if balance changed or time threshold)
-        setChartData(prevData => {
-          // Ensure we have a starting point
-          if (prevData.length === 0 && chartStartTimeRef.current && initialBalanceRef.current) {
-            return [{
+        // TICK-BY-TICK: Add live data point to historical data, then filter by time range
+        setAllHistoricalData(prevAllData => {
+          // Ensure we have a starting point if no historical data loaded yet
+          if (prevAllData.length === 0 && chartStartTimeRef.current && initialBalanceRef.current) {
+            const initialPoint: ChartDataPoint = {
               timestamp: chartStartTimeRef.current,
               price: initialBalanceRef.current,
               change: 0,
               changePercent: 0
-            }];
+            };
+            // Add initial point to historical data
+            return [initialPoint];
           }
           
-          const timeSinceLastPoint = prevData.length > 0 
-            ? now - prevData[prevData.length - 1].timestamp 
-            : Infinity;
+          // CRITICAL FIX: Calculate change from the LAST point in historical data, not from start
+          // This ensures accurate progression showing actual balance changes
+          const lastPoint = prevAllData.length > 0 ? prevAllData[prevAllData.length - 1] : null;
+          const startBalance = initialBalanceRef.current || (prevAllData.length > 0 ? prevAllData[0].price : balance);
           
-          const balanceChanged = Math.abs(balance - prevBalance) >= 0.001;
-          const timeThresholdReached = timeSinceLastPoint >= 1000; // Add point every 1 second minimum
-          
-          // Only add point if balance changed or 1 second passed
-          if (!balanceChanged && !timeThresholdReached && prevData.length > 0) {
-            return prevData;
-          }
-          
-          const startBalance = initialBalanceRef.current || balance;
-          const change = balance - startBalance;
-          const changePercent = startBalance > 0 
-            ? (change / startBalance) * 100 
+          // Calculate change from start balance (for overall % calculation)
+          const totalChange = balance - startBalance;
+          const totalChangePercent = startBalance > 0 
+            ? (totalChange / startBalance) * 100 
             : 0;
+          
+          // Calculate change from last point (for incremental tracking)
+          const incrementalChange = lastPoint ? balance - lastPoint.price : 0;
           
           const newPoint: ChartDataPoint = {
             timestamp: now,
-            price: balance,
-            change,
-            changePercent
+            price: balance, // Use actual account balance from API
+            change: totalChange, // Total change from start
+            changePercent: totalChangePercent // Total % change from start
           };
           
-          // NOF1.AI STYLE: Keep rolling window of live data (last 24 hours max)
-          const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-          const cutoffTime = now - maxAge;
-          const filteredData = prevData.filter(p => p.timestamp >= cutoffTime);
+          // TICK-BY-TICK: Merge with historical data, remove duplicates by timestamp
+          // Remove any existing point at the same timestamp (or very close - within 1 second)
+          const filteredData = prevAllData.filter(p => {
+            const timeDiff = Math.abs(p.timestamp - now);
+            return timeDiff >= 1000; // Keep points at least 1 second apart
+          });
           
-          // Keep max 2000 points for smooth rendering
-          return [...filteredData, newPoint].slice(-2000);
+          // Add new point at the end
+          const merged = [...filteredData, newPoint];
+          
+          // Sort by timestamp to maintain chronological order
+          merged.sort((a, b) => a.timestamp - b.timestamp);
+          
+          // Keep all data points (no limit for full history) but cap at 5000 for performance
+          // Filtering happens automatically via useMemo when allHistoricalData updates
+          return merged.slice(-5000);
         });
         
         setLastUpdated(now);
@@ -295,6 +358,9 @@ export default function InteractiveChart({
             }
           });
         }
+      } else {
+        // No balance found in response
+        throw new Error('Balance not found in API response');
       }
     } catch (err) {
       const latency = Date.now() - fetchStartTimeRef.current;
@@ -313,76 +379,260 @@ export default function InteractiveChart({
         };
       });
       
-      setConsecutiveErrors(prev => prev + 1);
+      // CRITICAL FIX: Use functional update to get current value
+      setConsecutiveErrors(current => {
+        const newConsecutiveErrors = current + 1;
+        return newConsecutiveErrors;
+      });
       reconnectAttemptsRef.current += 1;
       
       const isAbortError = err instanceof Error && err.name === 'AbortError';
       const errorMessage = isAbortError 
-        ? 'Request timeout' 
+        ? 'Request timeout (15s) - server may be slow' 
         : err instanceof Error ? err.message : 'Unknown error';
       
-      setConnectionStatus(consecutiveErrors + 1 >= MAX_CONSECUTIVE_ERRORS ? 'error' : 'disconnected');
+      // CRITICAL FIX: Get current error count for logging and status
+      setConsecutiveErrors(current => {
+        const newConsecutiveErrors = current + 1;
+        
+        setConnectionStatus(newConsecutiveErrors >= MAX_CONSECUTIVE_ERRORS ? 'error' : 'disconnected');
+        
+        frontendLogger.error('Balance fetch failed', err as Error, { 
+          component: 'InteractiveChart',
+          data: {
+            consecutiveErrors: newConsecutiveErrors,
+            reconnectAttempts: reconnectAttemptsRef.current,
+            latency: `${latency}ms`,
+            errorType: isAbortError ? 'timeout' : 'network',
+            errorMessage
+          }
+        });
+        
+        // CRITICAL FIX: Show error immediately but with helpful message
+        if (newConsecutiveErrors >= 1) {
+          if (isAbortError) {
+            setError('Chart loading... (timeout - server may be slow)');
+          } else if (errorMessage.includes('500') || errorMessage.includes('Account API')) {
+            setError('Chart loading... (server error - check API connection)');
+          } else {
+            setError(`Chart loading... (${errorMessage})`);
+          }
+        }
+        
+        return newConsecutiveErrors;
+      });
+    }
+  }, []); // CRITICAL FIX: Empty deps - use functional state updates
+
+  // CRITICAL FIX: Load full historical balance from account beginning
+  const loadHistoricalBalance = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      frontendLogger.info('Loading full historical balance from account beginning', {
+        component: 'InteractiveChart'
+      });
       
-      frontendLogger.error('Balance fetch failed', err as Error, { 
-        component: 'InteractiveChart',
-        data: {
-          consecutiveErrors: consecutiveErrors + 1,
-          reconnectAttempts: reconnectAttemptsRef.current,
-          latency: `${latency}ms`,
-          errorType: isAbortError ? 'timeout' : 'network'
+      const response = await fetch('/api/real-balance?action=chart-data&timeRange=ALL', {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
         }
       });
       
-      // Only show error to user if persistent
-      if (consecutiveErrors + 1 >= 3) {
-        setError(`Connection issue: ${errorMessage}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      
+      // CRITICAL FIX: Handle nested response structure
+      // Response: { success: true, data: { message: "...", data: [...] } }
+      // OR: { success: true, data: [...] }
+      const chartDataArray = result.data?.data || result.data;
+      
+      if (result.success && chartDataArray && Array.isArray(chartDataArray) && chartDataArray.length > 0) {
+        // CRITICAL FIX: Convert API response to chart data points
+        // API returns: { timestamp, balance, unrealizedPnl, realizedPnl, totalPnL }
+        const historicalPoints: ChartDataPoint[] = chartDataArray.map((point: any) => {
+          const timestamp = typeof point.timestamp === 'number' 
+            ? point.timestamp 
+            : new Date(point.timestamp).getTime();
+          
+          const balance = parseFloat(point.balance || point.price || 0);
+          const firstBalance = chartDataArray[0]?.balance ? parseFloat(chartDataArray[0].balance) : balance;
+          const change = balance - firstBalance;
+          const changePercent = firstBalance > 0 ? (change / firstBalance) * 100 : 0;
+          
+          return {
+            timestamp,
+            price: balance, // Use balance as price for chart
+            change,
+            changePercent
+          };
+        });
+        
+        // Sort by timestamp (oldest first)
+        historicalPoints.sort((a, b) => a.timestamp - b.timestamp);
+        
+        if (historicalPoints.length > 0) {
+          // Set initial balance from first historical point
+          const firstPoint = historicalPoints[0];
+          if (chartStartTimeRef.current === null && initialBalanceRef.current === null) {
+            chartStartTimeRef.current = firstPoint.timestamp;
+            initialBalanceRef.current = firstPoint.price;
+          }
+          
+          // Set current balance from last historical point
+          const lastPoint = historicalPoints[historicalPoints.length - 1];
+          setCurrentBalance(lastPoint.price);
+          
+          // Store full historical data (filtering happens via useMemo)
+          setAllHistoricalData(historicalPoints);
+          setIsLoading(false);
+          isInitialLoadRef.current = false;
+          
+          frontendLogger.info('Historical balance loaded successfully', {
+            component: 'InteractiveChart',
+            data: {
+              points: historicalPoints.length,
+              startTime: new Date(firstPoint.timestamp).toISOString(),
+              endTime: new Date(lastPoint.timestamp).toISOString(),
+              startBalance: firstPoint.price.toFixed(2),
+              currentBalance: lastPoint.price.toFixed(2)
+            }
+          });
+        } else {
+          setIsLoading(false);
+        }
+      } else {
+        setIsLoading(false);
+      }
+    } catch (err) {
+      frontendLogger.error('Failed to load historical balance', err as Error, {
+        component: 'InteractiveChart'
+      });
+      setIsLoading(false);
+      // Don't throw - allow live updates to continue
+    }
+  }, []);
+
+  // CRITICAL FIX: Single source of truth - memoize filtered chart data based on time range
+  // This is the ONLY place where filtering happens - ensures consistency
+  const filteredChartData = useMemo(() => {
+    // If no historical data yet, return empty array (will show loading state)
+    if (allHistoricalData.length === 0) {
+      return [];
+    }
+    
+    const now = Date.now();
+    let cutoffTime: number;
+    
+    switch (timeRange) {
+      case '24H':
+        cutoffTime = now - (24 * 60 * 60 * 1000);
+        break;
+      case '7D':
+        cutoffTime = now - (7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30D':
+        cutoffTime = now - (30 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        cutoffTime = now - (24 * 60 * 60 * 1000);
+    }
+    
+    // Filter data points within the time range
+    const filtered = allHistoricalData.filter(point => point.timestamp >= cutoffTime);
+    
+    // Include the point just before the range to show continuity
+    if (filtered.length > 0 && allHistoricalData.length > 0) {
+      const firstFilteredIndex = allHistoricalData.findIndex(p => p.timestamp >= cutoffTime);
+      if (firstFilteredIndex > 0) {
+        filtered.unshift(allHistoricalData[firstFilteredIndex - 1]);
+      } else if (firstFilteredIndex === 0 && allHistoricalData[0].timestamp < cutoffTime) {
+        // If all data is before cutoff, include first point for reference
+        filtered.unshift(allHistoricalData[0]);
       }
     }
-  }, [currentBalance, consecutiveErrors]);
+    
+    // Sort filtered data by timestamp to ensure proper rendering
+    filtered.sort((a, b) => a.timestamp - b.timestamp);
+    
+    frontendLogger.debug('Filtered chart data by time range', {
+      component: 'InteractiveChart',
+      data: {
+        range: timeRange,
+        totalPoints: allHistoricalData.length,
+        filteredPoints: filtered.length,
+        cutoffTime: new Date(cutoffTime).toISOString(),
+        oldestPoint: filtered.length > 0 ? new Date(filtered[0].timestamp).toISOString() : 'none',
+        newestPoint: filtered.length > 0 ? new Date(filtered[filtered.length - 1].timestamp).toISOString() : 'none'
+      }
+    });
+    
+    return filtered;
+  }, [allHistoricalData, timeRange]);
 
-  // NOF1.AI STYLE: Initialize chart from current balance, then track live
+  // NOF1.AI STYLE: Initialize chart from historical data, then track live tick-by-tick
   useEffect(() => {
+    // Load full historical balance from account beginning
+    loadHistoricalBalance();
+    
     // If initialBalance prop is provided, use it as fallback start point
-    // Otherwise, fetchRealBalance will initialize from API
     if (initialBalance > 0 && chartStartTimeRef.current === null && initialBalanceRef.current === null) {
       initialBalanceRef.current = initialBalance;
       setCurrentBalance(initialBalance);
     }
     
-    // Start fetching live balance updates (will initialize chart on first success)
+    // Start fetching live balance updates (will append to historical data)
     fetchRealBalance();
     
-    // OPTIMIZED: Update balance every 3 seconds (was 1s) - still very responsive
+    // TICK-BY-TICK: Update balance every 2 seconds for real-time feel
     const interval = setInterval(() => {
       fetchRealBalance();
-    }, 10000); // 10 second polling - optimized to match 30s cache (3x reduction from original 3s)
+    }, 2000); // 2 second polling for tick-by-tick updates
 
     return () => {
       clearInterval(interval);
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+      // CRITICAL FIX: Cleanup AbortController if fetch is in progress
+      if (isFetchingRef.current) {
+        isFetchingRef.current = false;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty deps - only run on mount
 
-  // Draw chart on canvas - redraw whenever chartData changes (live updates)
+  // Draw chart on canvas - redraw whenever filteredChartData changes (live updates)
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || chartData.length === 0) {
-      // ENTERPRISE FIX: Show empty state if no data
-      frontendLogger.debug('No chart data to render', {
-        component: 'InteractiveChart',
-        data: { pointCount: chartData.length }
-      });
+    
+    // CRITICAL FIX: Don't render if loading or no filtered data
+    if (!canvas || isLoading || filteredChartData.length === 0) {
+      if (isLoading) {
+        frontendLogger.debug('Chart still loading historical data', {
+          component: 'InteractiveChart'
+        });
+      } else if (filteredChartData.length === 0) {
+        frontendLogger.debug('No chart data to render for selected time range', {
+          component: 'InteractiveChart',
+          data: { 
+            totalHistoricalPoints: allHistoricalData.length,
+            filteredPoints: filteredChartData.length 
+          }
+        });
+      }
       return;
     }
     
     // ENTERPRISE: Safety check - need at least 2 points for a line
-    if (chartData.length < 2) {
+    if (filteredChartData.length < 2) {
       frontendLogger.debug('Not enough data points to draw chart', {
         component: 'InteractiveChart',
-        data: { pointCount: chartData.length }
+        data: { pointCount: filteredChartData.length }
       });
       return;
     }
@@ -429,7 +679,7 @@ export default function InteractiveChart({
     }
 
     // Find min/max values with safety checks
-    const prices = chartData.map(d => d.price).filter(p => Number.isFinite(p));
+    const prices = filteredChartData.map(d => d.price).filter(p => Number.isFinite(p));
     if (prices.length === 0) {
       frontendLogger.warn('No valid prices to display', {
         component: 'InteractiveChart'
@@ -487,7 +737,7 @@ export default function InteractiveChart({
     // ENTERPRISE FIX: Time-based positioning for smooth line movement
     // Calculate time range for proper x-axis scaling
     // CRITICAL FIX: Sort data by timestamp to ensure proper rendering
-    const sortedData = [...chartData].sort((a, b) => a.timestamp - b.timestamp);
+    const sortedData = [...filteredChartData].sort((a, b) => a.timestamp - b.timestamp);
     const timeMin = sortedData[0].timestamp;
     const timeMax = sortedData[sortedData.length - 1].timestamp;
     const timeRange = Math.max(timeMax - timeMin, 1000); // At least 1 second range for stability
@@ -684,11 +934,12 @@ export default function InteractiveChart({
       ctx.fillText(`Current: $${currentPoint.price.toFixed(2)}`, padding + chartWidth - 120, y - 5);
     }
 
-  }, [chartData, hoveredPoint]);
+  }, [filteredChartData, hoveredPoint, isLoading, allHistoricalData.length]);
 
-  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // WORLD-CLASS: Memoize mouse handlers to prevent recreation
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas || chartData.length === 0) return;
+    if (!canvas || filteredChartData.length === 0) return;
 
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -696,18 +947,18 @@ export default function InteractiveChart({
     const chartWidth = rect.width - (padding * 2);
     
     // TIME-BASED: Calculate which timestamp the mouse is over
-    const timeMin = chartData[0].timestamp;
-    const timeMax = chartData[chartData.length - 1].timestamp;
+    const timeMin = filteredChartData[0].timestamp;
+    const timeMax = filteredChartData[filteredChartData.length - 1].timestamp;
     const timeRange = timeMax - timeMin || 1;
     
     const relativeX = mouseX - padding;
     const hoveredTimestamp = timeMin + (relativeX / chartWidth) * timeRange;
     
     // Find the closest data point to this timestamp
-    let closestPoint = chartData[0];
-    let minDistance = Math.abs(chartData[0].timestamp - hoveredTimestamp);
+    let closestPoint = filteredChartData[0];
+    let minDistance = Math.abs(filteredChartData[0].timestamp - hoveredTimestamp);
     
-    for (const point of chartData) {
+    for (const point of filteredChartData) {
       const distance = Math.abs(point.timestamp - hoveredTimestamp);
       if (distance < minDistance) {
         minDistance = distance;
@@ -716,18 +967,18 @@ export default function InteractiveChart({
     }
     
     setHoveredPoint(closestPoint);
-  };
+  }, [filteredChartData]);
 
-  const handleCanvasMouseLeave = () => {
+  const handleCanvasMouseLeave = useCallback(() => {
     setHoveredPoint(null);
-  };
+  }, []);
 
-  // NOF1.AI STYLE: Calculate metrics from chart start point
-  const startBalance = initialBalanceRef.current || (chartData.length > 0 ? chartData[0].price : initialBalance);
+  // NOF1.AI STYLE: Calculate metrics from filtered chart start point
+  const startBalance = initialBalanceRef.current || (filteredChartData.length > 0 ? filteredChartData[0].price : initialBalance);
   const totalChange = currentBalance - startBalance;
   const totalChangePercent = startBalance > 0 ? (totalChange / startBalance) * 100 : 0;
   
-  const validPrices = chartData.map(d => d.price).filter(p => Number.isFinite(p));
+  const validPrices = filteredChartData.map(d => d.price).filter(p => Number.isFinite(p));
   const maxBalance = validPrices.length > 0 ? Math.max(...validPrices) : currentBalance;
   const minBalance = validPrices.length > 0 ? Math.min(...validPrices) : currentBalance;
 
@@ -744,11 +995,14 @@ export default function InteractiveChart({
 
   if (error) {
     return (
-      <div className={`flex items-center justify-center h-96 ${className}`}>
+      <div className={`flex items-center justify-center h-96 ${className}`} role="alert">
         <div className="text-center">
           <p className="text-red-500 mb-2">{error}</p>
           <button
             onClick={() => window.location.reload()}
+            aria-label="Retry loading chart"
+            role="button"
+            tabIndex={0}
             className="px-3 py-1 text-xs border border-red-500 text-red-500 hover:bg-red-500/10 transition-all"
           >
             Retry
@@ -860,6 +1114,10 @@ export default function InteractiveChart({
             <button
               key={range}
               onClick={() => setTimeRange(range)}
+              aria-label={`View ${range} time range`}
+              aria-pressed={timeRange === range}
+              role="button"
+              tabIndex={0}
               className={`px-2 py-1 text-xs font-bold border transition-all ${
                 timeRange === range
                   ? 'border-green-400 bg-green-400/20 text-green-400'
@@ -945,4 +1203,12 @@ export default function InteractiveChart({
       </div>
     </div>
   );
-}
+}, (prevProps, nextProps) => {
+  // WORLD-CLASS: Custom comparison - only re-render if balance actually changed
+  // Prevents re-renders when parent component updates for other reasons
+  return prevProps.initialBalance === nextProps.initialBalance &&
+         prevProps.className === nextProps.className;
+});
+
+export default InteractiveChart;
+

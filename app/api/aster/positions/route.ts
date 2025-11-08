@@ -3,6 +3,7 @@ import { buildSignedQuery } from '@/lib/asterAuth';
 import { logger } from '@/lib/logger';
 import { withRateLimit } from '@/lib/rateLimiter';
 import { asterConfig } from '@/lib/configService';
+import { circuitBreakers } from '@/lib/circuitBreaker';
 
 // Use centralized config service instead of direct env var access
 const ASTER_BASE_URL = asterConfig.baseUrl;

@@ -6,32 +6,66 @@
 
 ## ⚡ Quick Start
 
-### 1. **Start the Server**
+### **Unified Startup (Recommended)**
+
+**One command does everything:**
 ```powershell
-npm run dev
+npm run startup:ps1
 ```
 
-Wait for `✓ Ready` message
-
-### 2. **Initialize Trading System**
-```powershell
-.\scripts\start_trading.ps1
+Or use the cross-platform script:
+```bash
+npm run startup
 ```
+
+**What it does:**
+1. ✅ Checks Ollama is running
+2. ✅ Starts Next.js server (or waits if already running)
+3. ✅ Waits for server to be ready
+4. ✅ Initializes all trading services (5-10 minutes)
+5. ✅ Verifies system status
+6. ✅ Runs diagnostics automatically
 
 **That's it!** The system will:
-- ✅ Initialize all services (5-10 minutes)
+- ✅ Initialize all services
 - ✅ Start trading agents
 - ✅ Enable health monitoring
 - ✅ Begin 24/7 trading
 
----
+### **Simplest: Emergency Start (RECOMMENDED)**
 
-## 📊 System Status
-
-### **Check System Health**
+**Start server, then run emergency script:**
 ```powershell
-.\scripts\diagnose_trading.ps1
+# Terminal 1: Start server
+npm run dev
+
+# Terminal 2: Start Agent Runner (after 10 seconds)
+.\scripts\emergency_start_trading.ps1
 ```
+
+**This bypasses automatic initialization** and starts Agent Runner directly!
+
+**Timeline:** ~10 seconds until trading starts
+
+### **Alternative: Manual Steps** (Only if auto-start fails)
+
+If auto-initialization fails, you can manually initialize:
+
+1. **Start the Server** (if not running)
+   ```powershell
+   npm run dev
+   ```
+   Wait for `✓ Ready` message
+
+2. **Manually Initialize** (only if needed)
+   ```powershell
+   Invoke-RestMethod -Uri "http://localhost:3000/api/startup?action=initialize"
+   ```
+
+3. **Check System Health**
+   ```powershell
+   npm run startup:diagnose
+   ```
 
 ### **View Dashboard**
 ```
@@ -120,14 +154,11 @@ Manna/
 │   ├── apiKeyManager.ts             # 30-key pool management
 │   ├── circuitBreaker.ts            # API failure protection
 │   └── logger.ts                    # Logging system
-├── scripts/                   # PowerShell automation scripts
-│   ├── start_trading.ps1            # ⭐ Automated startup
-│   ├── diagnose_trading.ps1         # System diagnostics
-│   ├── diagnose_chat_tab.ps1        # Chat tab diagnostics
-│   ├── capture_logs.ps1             # Log capture utility
-│   ├── capture_live_logs.ps1        # Live log monitoring
-│   ├── *.sql                        # Database scripts
-│   └── *.js                         # Test scripts
+├── scripts/                   # Operational scripts
+│   ├── emergency_start_trading.ps1  # ⭐ Start Agent Runner
+│   ├── quick_status.ps1              # System status check
+│   ├── start.ps1                     # Full startup (PowerShell)
+│   └── start.js                      # Full startup (Cross-platform)
 └── docs/                      # 📚 Documentation
     ├── PRODUCTION_DEPLOYMENT.md     # Deployment guide
     ├── QUICK_COMMANDS.md            # Command reference
@@ -262,6 +293,7 @@ Built with:
 - **[Quick Commands](docs/QUICK_COMMANDS.md)** - Command reference guide
 - **[AI Models Reference](docs/AI_MODELS_REFERENCE.md)** - AI model documentation
 - **[File Structure](docs/FILE_STRUCTURE.md)** - Complete project structure guide
+- **[Multi-Model & Worktree Guide](docs/MULTI_MODEL_AND_WORKTREE_GUIDE.md)** - Using multiple AI models and GitHub worktrees
 
 ---
 

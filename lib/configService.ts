@@ -33,7 +33,7 @@ function getBooleanEnvVar(key: string, defaultValue: boolean = false): boolean {
 function getNumberEnvVar(key: string, defaultValue: number = 0): number {
   const value = process.env[key];
   if (!value) return defaultValue;
-  const parsed = parseInt(value, 10);
+  const parsed = parseFloat(value); // CRITICAL FIX: Use parseFloat instead of parseInt to handle decimals
   return isNaN(parsed) ? defaultValue : parsed;
 }
 

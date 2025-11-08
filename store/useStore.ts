@@ -43,7 +43,7 @@ interface Position {
   entryConfidence?: number;
   entrySignals?: string[];
   entryMarketRegime?: string;
-  entryScore?: string;
+  entryScore?: number; // CRITICAL FIX: Changed from string to number for consistency with Trade interface
   entryTimestamp?: number;
 }
 

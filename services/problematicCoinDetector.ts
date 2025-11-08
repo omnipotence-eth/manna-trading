@@ -37,9 +37,11 @@ class ProblematicCoinDetector {
     const low24h = parseFloat(ticker.lowPrice) || 0;
     const price = parseFloat(ticker.lastPrice) || 0;
     
-    // Calculate spread
-    const spreadPercent = price > 0 ? ((high24h - low24h) / price) * 100 : 0;
-    const avgSpread = orderBook?.spreadPercent || spreadPercent;
+    // CRITICAL FIX: Only calculate real spread from order book, not 24h price range
+    // The 24h price range (high24h - low24h) is volatility, NOT spread
+    // BTC/USDT can have 4% daily range but 0.01% actual bid-ask spread
+    const spreadPercent = orderBook?.spreadPercent || 0; // Only use real order book spread
+    const avgSpread = orderBook?.spreadPercent || 0; // Same - only use order book data
     
     // Calculate liquidity score
     const baseVolumeLiquidity = Math.min(quoteVolume24h / 5000000, 1.0);
@@ -56,11 +58,13 @@ class ProblematicCoinDetector {
       reasons.push(`Low liquidity score: ${liquidityScore.toFixed(2)} < ${this.PROBLEMATIC_THRESHOLDS.MIN_LIQUIDITY_SCORE} minimum`);
     }
     
-    if (spreadPercent > this.PROBLEMATIC_THRESHOLDS.MAX_SPREAD_PERCENT) {
+    // CRITICAL FIX: Only check spread if we have order book data (real bid-ask spread)
+    // Skip spread check if orderBook is not available - we can't calculate real spread without it
+    if (orderBook && spreadPercent > this.PROBLEMATIC_THRESHOLDS.MAX_SPREAD_PERCENT) {
       reasons.push(`Wide spread: ${spreadPercent.toFixed(2)}% > ${this.PROBLEMATIC_THRESHOLDS.MAX_SPREAD_PERCENT}% maximum`);
     }
     
-    if (avgSpread > this.PROBLEMATIC_THRESHOLDS.MAX_AVG_SPREAD && orderBook) {
+    if (orderBook && avgSpread > this.PROBLEMATIC_THRESHOLDS.MAX_AVG_SPREAD) {
       reasons.push(`Wide average spread: ${avgSpread.toFixed(3)}% > ${this.PROBLEMATIC_THRESHOLDS.MAX_AVG_SPREAD}% maximum`);
     }
     
@@ -125,10 +129,11 @@ class ProblematicCoinDetector {
 
   /**
    * Scan all symbols and detect problematic ones
+   * CRITICAL FIX: Now fetches order books to calculate real spread (not 24h price range)
    */
   async scanAllSymbols(): Promise<ProblematicCoin[]> {
     try {
-      logger.info('🔍 Scanning all symbols for problematic coins...', {
+      logger.info('🔍 Scanning all symbols for problematic coins (with real spread detection)...', {
         context: 'ProblematicCoinDetector'
       });
 
@@ -144,39 +149,82 @@ class ProblematicCoinDetector {
       const { asterConfig } = await import('@/lib/configService');
       const blacklist = asterConfig.trading.blacklistedSymbols || [];
 
-      for (const symbolInfo of symbols) {
-        if (!symbolInfo || !symbolInfo.symbol) continue;
-        
-        const symbol = symbolInfo.symbol;
-        
-        // Skip blacklisted symbols
-        if (blacklist.some(b => symbol.includes(b.replace('/', '')))) {
-          continue;
-        }
+      // CRITICAL FIX: Batch processing to avoid rate limits
+      const BATCH_SIZE = 5; // Process 5 symbols at a time
+      const BATCH_DELAY = 2000; // 2 second delay between batches
 
-        try {
-          // CRITICAL FIX: Use symbolInfo directly as ticker (it already has volume/price data)
-          // Convert to ticker format expected by detectProblematicCoin
-          const ticker = {
-            quoteVolume: symbolInfo.quoteVolume24h || 0,
-            highPrice: symbolInfo.high24h || symbolInfo.lastPrice || 0,
-            lowPrice: symbolInfo.low24h || symbolInfo.lastPrice || 0,
-            lastPrice: symbolInfo.lastPrice || 0,
-            volume: symbolInfo.volume24h || 0
-          };
+      for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+        const batch = symbols.slice(i, i + BATCH_SIZE);
+        
+        // Process batch in parallel
+        await Promise.all(batch.map(async (symbolInfo) => {
+          if (!symbolInfo || !symbolInfo.symbol) return;
           
-          const problematic = await this.detectProblematicCoin(symbol, ticker);
-          if (problematic) {
-            problematicCoins.push(problematic);
+          const symbol = symbolInfo.symbol;
+          
+          // Skip blacklisted symbols
+          if (blacklist.some(b => symbol.includes(b.replace('/', '')))) {
+            return;
           }
-        } catch (error) {
-          logger.debug(`Error checking ${symbol}`, {
-            context: 'ProblematicCoinDetector',
-            data: { 
-              symbol,
-              error: error instanceof Error ? error.message : String(error)
+
+          try {
+            // CRITICAL FIX: Use symbolInfo directly as ticker (it already has volume/price data)
+            // Convert to ticker format expected by detectProblematicCoin
+            const ticker = {
+              quoteVolume: symbolInfo.quoteVolume24h || 0,
+              highPrice: symbolInfo.high24h || symbolInfo.lastPrice || 0,
+              lowPrice: symbolInfo.low24h || symbolInfo.lastPrice || 0,
+              lastPrice: symbolInfo.lastPrice || 0,
+              volume: symbolInfo.volume24h || 0
+            };
+            
+            // CRITICAL FIX: Fetch order book to get REAL spread (not 24h price range)
+            // This ensures accurate spread detection for ALL coins
+            let orderBook: any = null;
+            try {
+              const orderBookData = await asterDexService.getOrderBook(symbol, 20);
+              if (orderBookData) {
+                // Calculate spreadPercent from order book (same logic as marketScannerService)
+                const bestBid = parseFloat(orderBookData.bids[0]?.[0] || '0');
+                const spread = orderBookData.spread;
+                const spreadPercent = bestBid > 0 ? (spread / bestBid) * 100 : 0;
+                
+                // Create order book object with spreadPercent (expected by detectProblematicCoin)
+                orderBook = {
+                  ...orderBookData,
+                  spreadPercent
+                };
+              }
+            } catch (orderBookError) {
+              // If order book fetch fails, continue without it (spread check will be skipped)
+              logger.debug(`Order book fetch failed for ${symbol}, continuing without spread check`, {
+                context: 'ProblematicCoinDetector',
+                data: { 
+                  symbol,
+                  error: orderBookError instanceof Error ? orderBookError.message : String(orderBookError)
+                }
+              });
             }
-          });
+            
+            // CRITICAL FIX: Pass order book to detectProblematicCoin for real spread detection
+            const problematic = await this.detectProblematicCoin(symbol, ticker, orderBook);
+            if (problematic) {
+              problematicCoins.push(problematic);
+            }
+          } catch (error) {
+            logger.debug(`Error checking ${symbol}`, {
+              context: 'ProblematicCoinDetector',
+              data: { 
+                symbol,
+                error: error instanceof Error ? error.message : String(error)
+              }
+            });
+          }
+        }));
+        
+        // CRITICAL FIX: Delay between batches to avoid rate limits
+        if (i + BATCH_SIZE < symbols.length) {
+          await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
         }
       }
 

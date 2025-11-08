@@ -31,11 +31,12 @@ export async function GET(request: NextRequest) {
     const confidences = allOpportunities.map(opp => opp.confidence);
     const scores = allOpportunities.map(opp => opp.score);
     
-    const avgConfidence = confidences.length > 0 
+    // CRITICAL FIX: Use let instead of const since these may be reassigned
+    let avgConfidence = confidences.length > 0 
       ? confidences.reduce((a, b) => a + b, 0) / confidences.length 
       : 0;
     
-    const avgScore = scores.length > 0
+    let avgScore = scores.length > 0
       ? scores.reduce((a, b) => a + b, 0) / scores.length
       : 0;
     

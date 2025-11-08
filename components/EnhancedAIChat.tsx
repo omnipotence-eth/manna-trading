@@ -42,7 +42,8 @@ interface TradeLog {
   reasoning: string;
 }
 
-export default function EnhancedAIChat() {
+// WORLD-CLASS: Memoize chat component to prevent unnecessary re-renders
+const EnhancedAIChat = React.memo(function EnhancedAIChat() {
   const [agentThoughts, setAgentThoughts] = useState<AgentThought[]>([]);
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -53,6 +54,7 @@ export default function EnhancedAIChat() {
   const lastFetchRef = useRef<number>(0);
   const lastScanTimestampRef = useRef<number>(0);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const trades = useStore((state) => state.trades);
   const modelMessages = useStore((state) => state.modelMessages);
@@ -91,9 +93,10 @@ export default function EnhancedAIChat() {
       
       try {
         const controller = new AbortController();
-        // CRITICAL FIX: Increased timeout from 10s to 45s
+        // CRITICAL FIX: Increased timeout from 10s to 60s
         // Market Scanner takes 33s with batch processing (prevents 418 rate limits)
-        const timeoutId = setTimeout(() => controller.abort(), 45000);
+        // But first scan can take longer - allow 60s to be safe
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
         
         const response = await fetch(`/api/agent-insights?limit=10`, {
           signal: controller.signal,
@@ -107,51 +110,124 @@ export default function EnhancedAIChat() {
         if (response.ok) {
           const data = await response.json();
           
-          if (data.success && data.data?.insights && data.data.timestamp) {
-            const scanTimestamp = data.data.timestamp;
+          // CRITICAL FIX: Handle both response structures
+          // { success: true, data: { ... } } OR { success: true, insights: [...], scanResult: {...} }
+          const responseData = data.data || data;
+          
+          if (data.success && responseData) {
+            // CRITICAL FIX: Handle nested data structure
+            const scanResult = responseData.scanResult || data.data?.scanResult || responseData;
+            const isInitializing = scanResult?.initializing === true;
             
-            // Only update if this is a genuinely NEW scan
-            if (scanTimestamp !== lastScanTimestampRef.current) {
-              lastScanTimestampRef.current = scanTimestamp;
-              const newInsights = data.data.insights;
-              
-              // Append new to existing, keep last 50
-              setAgentThoughts(prev => {
-                // Check if we already have these insights
-                const existingIds = new Set(prev.map(i => i.id));
-                const trulyNew = newInsights.filter((i: any) => !existingIds.has(i.id));
-                
-                if (trulyNew.length > 0) {
-                  const combined = [...trulyNew, ...prev];
-                  return combined.slice(0, 50);
-                }
-                return prev; // No new data, don't update
-              });
+            // CRITICAL FIX: Handle initializing state (first request with no cache)
+            if (isInitializing) {
+              // Show helpful message instead of error
+              if (agentThoughts.length === 0) {
+                // Don't show as error - it's a normal loading state
+                setError(null); // Clear any previous errors
+                setIsLoading(true); // Keep loading state
+                // The UI will show "Market scanner is initializing..." message
+              } else {
+                // We have existing data, just keep showing it
+                setIsLoading(false);
+                setError(null); // Clear error if we have data
+              }
+              // Will retry automatically via polling (every 20 seconds)
+              return;
             }
+            
+            // CRITICAL FIX: Always clear error and loading state when we get valid data
             setError(null);
-            setIsLoading(false); // FIXED: Always clear loading state on success
+            setIsLoading(false);
+            
+            // Handle insights - even if empty, we got a valid response
+            const insights = responseData.insights || [];
+            const scanTimestamp = responseData.timestamp || scanResult?.timestamp || Date.now();
+            
+            // Only update if this is a genuinely NEW scan OR if we have no data yet
+            if (scanTimestamp !== lastScanTimestampRef.current || agentThoughts.length === 0) {
+              lastScanTimestampRef.current = scanTimestamp;
+              
+              if (insights.length > 0) {
+                // Append new to existing, keep last 50
+                setAgentThoughts(prev => {
+                  // Check if we already have these insights
+                  const existingIds = new Set(prev.map(i => i.id));
+                  const trulyNew = insights.filter((i: any) => !existingIds.has(i.id));
+                  
+                  if (trulyNew.length > 0 || prev.length === 0) {
+                    const combined = [...trulyNew, ...prev];
+                    return combined.slice(0, 50);
+                  }
+                  return prev; // No new data, don't update
+                });
+              } else if (agentThoughts.length === 0) {
+                // No insights yet, but scan is complete - show helpful message
+                setError('Market scan complete, but no trading opportunities found yet. Waiting for market conditions...');
+              }
+              // If we have existing thoughts and no new insights, keep showing existing data
+            }
           } else {
             // FIXED: Handle case where response is ok but data structure is unexpected
             if (agentThoughts.length === 0) {
-              setError(null); // Clear error, will show empty state
+              setError('No insights available yet. Market scanner is running...');
+            } else {
+              // Clear error if we have existing data
+              setError(null);
             }
             setIsLoading(false);
           }
         } else {
           // FIXED: Handle non-ok responses
           if (!isMounted) return;
+          const errorText = response.status === 500 
+            ? 'Server error - market scanner may be initializing' 
+            : response.status === 408 || response.status === 504
+            ? 'Request timeout - market scan in progress...'
+            : `Failed to load chat: ${response.status}`;
+          
           if (agentThoughts.length === 0) {
-            setError(`Failed to load chat: ${response.status}`);
+            setError(errorText);
+          } else {
+            // If we have data, just log the error but don't show it
+            frontendLogger.warn('Failed to fetch new insights, keeping existing data', {
+              component: 'EnhancedAIChat',
+              data: { status: response.status }
+            });
           }
           setIsLoading(false);
         }
       } catch (err) {
         if (!isMounted) return;
         
-        if (err instanceof Error && err.name !== 'AbortError') {
-          frontendLogger.error('Failed to fetch insights', err);
-          if (agentThoughts.length === 0) {
-            setError('Connecting to market scanner...');
+        if (err instanceof Error) {
+          if (err.name === 'AbortError') {
+            // Timeout - this is expected for long-running scans
+            if (agentThoughts.length === 0) {
+              setError('Market scan is taking longer than expected. Please wait...');
+            } else {
+              // If we have data, just silently continue
+              frontendLogger.debug('Request aborted (timeout), keeping existing data', {
+                component: 'EnhancedAIChat'
+              });
+            }
+          } else {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            frontendLogger.error('Failed to fetch insights', err instanceof Error ? err : new Error(errorMessage));
+            
+            // CRITICAL FIX: Show helpful error messages based on error type
+            if (agentThoughts.length === 0) {
+              if (errorMessage.includes('timeout') || errorMessage.includes('abort')) {
+                setError('Market scanner is taking longer than expected. Please wait... (This can take 30-60 seconds on first scan)');
+              } else if (errorMessage.includes('500') || errorMessage.includes('server')) {
+                setError('Server error - market scanner may be initializing. Please wait...');
+              } else {
+                setError('Connecting to market scanner... (Check server logs if this persists)');
+              }
+            } else {
+              // Clear error if we have existing data
+              setError(null);
+            }
           }
         }
       } finally {
@@ -172,6 +248,10 @@ export default function EnhancedAIChat() {
       if (fetchIntervalRef.current) {
         clearInterval(fetchIntervalRef.current);
         fetchIntervalRef.current = null;
+      }
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+        fetchTimeoutRef.current = null;
       }
     };
   }, []); // EMPTY DEPS - only mount/unmount
@@ -256,7 +336,7 @@ export default function EnhancedAIChat() {
   // Only show loading spinner if no data at all and still loading
   if (isLoading && agentThoughts.length === 0 && tradeLogs.length === 0 && !error) {
     return (
-      <div className="flex items-center justify-center h-96">
+      <div className="flex items-center justify-center h-full">
         <div className="text-center">
           {/* Clean, modern loading animation */}
           <div className="relative w-16 h-16 mx-auto mb-4">
@@ -266,6 +346,7 @@ export default function EnhancedAIChat() {
           </div>
           <p className="text-green-400 text-sm font-semibold mb-1">Analyzing Markets</p>
           <p className="text-green-400/60 text-xs">AI agents are scanning opportunities...</p>
+          <p className="text-green-400/40 text-xs mt-2">This may take 30-45 seconds</p>
         </div>
       </div>
     );
@@ -274,20 +355,31 @@ export default function EnhancedAIChat() {
   // FIXED: Show error message but allow content to display if available
   if (error && agentThoughts.length === 0 && tradeLogs.length === 0) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <p className="text-red-500 mb-2">{error}</p>
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center max-w-md px-4">
+          <div className="text-4xl mb-4">🔍</div>
+          <p className="text-green-400 text-sm font-semibold mb-2">Market Scanner Status</p>
+          <p className="text-green-400/60 text-xs mb-4">{error}</p>
           <button
             onClick={() => {
               setError(null);
               setIsLoading(true);
               // Trigger a fresh fetch by resetting last fetch time
               lastFetchRef.current = 0;
+              // Manually trigger fetch
+              fetch(`/api/agent-insights?limit=10`, {
+                cache: 'no-store'
+              }).then(() => {
+                // Fetch will be handled by the useEffect
+              });
             }}
-            className="px-3 py-1 text-xs border border-red-500 text-red-500 hover:bg-red-500/10 transition-all"
+            className="px-4 py-2 text-xs border border-green-500 text-green-500 hover:bg-green-500/10 transition-all rounded"
           >
-            Retry
+            Retry Scan
           </button>
+          <p className="text-green-400/40 text-xs mt-3">
+            If this persists, check that the server is running and Ollama is available.
+          </p>
         </div>
       </div>
     );
@@ -315,6 +407,22 @@ export default function EnhancedAIChat() {
 
       {/* Messages - Scrollable with history */}
       <div className="flex-1 overflow-y-auto space-y-3 px-4 py-3" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+        {/* Show error banner if there's an error but we have data */}
+        {error && allMessages.length > 0 && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2 mb-2">
+            <p className="text-yellow-400 text-xs">{error}</p>
+            <button
+              onClick={() => {
+                setError(null);
+                lastFetchRef.current = 0;
+              }}
+              className="text-xs text-yellow-400/60 hover:text-yellow-400 mt-1 underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        
         <AnimatePresence mode="popLayout">
           {allMessages.length === 0 ? (
             <div className="text-center py-12 text-green-400/60 px-4">
@@ -324,8 +432,19 @@ export default function EnhancedAIChat() {
               </div>
               <div className="text-sm font-semibold mb-2">Agents Scanning Markets</div>
               <div className="text-xs opacity-75 leading-relaxed">
-                Market analysis in progress...<br/>
-                Updates appear every 2 minutes
+                {isLoading ? (
+                  <>
+                    Market scanner is initializing...<br/>
+                    First scan may take 30-60 seconds<br/>
+                    Updates appear every 20 seconds
+                  </>
+                ) : (
+                  <>
+                    Market analysis in progress...<br/>
+                    Updates appear every 20 seconds
+                  </>
+                )}
+                {error && <span className="text-yellow-400/60 mt-2 block">{error}</span>}
               </div>
             </div>
           ) : (
@@ -617,4 +736,6 @@ export default function EnhancedAIChat() {
       </div>
     </div>
   );
-}
+});
+
+export default EnhancedAIChat;
