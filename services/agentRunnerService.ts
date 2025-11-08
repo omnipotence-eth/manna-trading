@@ -189,12 +189,21 @@ export class AgentRunnerService {
         error: error instanceof Error ? error.message : String(error),
         willUseFallback: true
       });
-      // Continue anyway - will retry in runTradingCycle
-      // Use fallback symbols
+      // CRITICAL FIX: ALWAYS use fallback symbols if fetch fails - don't let empty symbols block startup
       if (this.config.symbols.length === 0) {
-        this.config.symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT'];
-        logger.info('Using fallback symbols for first cycle', { context: 'AgentRunner', symbols: this.config.symbols });
+        this.config.symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT'];
+        logger.warn('⚠️ Using fallback symbols - Agent Runner will start anyway', { 
+          context: 'AgentRunner', 
+          symbols: this.config.symbols,
+          reason: 'Symbol fetch failed - will retry on first cycle'
+        });
       }
+    }
+    
+    // CRITICAL FIX: Ensure we have symbols before starting (double-check)
+    if (this.config.symbols.length === 0) {
+      logger.error('❌ CRITICAL: No symbols available - using emergency fallback', { context: 'AgentRunner' });
+      this.config.symbols = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT'];
     }
 
     // CRITICAL FIX: Start interval BEFORE setting isRunning to verify it works
@@ -275,19 +284,14 @@ export class AgentRunnerService {
       }
     });
 
-    // Run first cycle in background (don't await)
-    logger.info('▶️ Starting first trading cycle immediately...', {
+    // CRITICAL FIX: Don't run first cycle immediately during initialization
+    // Market scanner can timeout and flood terminal with errors
+    // Let the interval handle the first cycle naturally
+    logger.info('✅ Agent Runner started - first trading cycle will run in ${this.config.intervalMinutes} minutes', {
       context: 'AgentRunner',
-      isRunning: this.isRunning
-    });
-    
-    this.runTradingCycle().catch(error => {
-      logger.error('❌ Error in first trading cycle', error, {
-        context: 'AgentRunner',
-        isRunning: this.isRunning, // Log state after error
-        willContinue: true
-      });
-      // CRITICAL FIX: Don't stop on errors, keep running!
+      isRunning: this.isRunning,
+      nextCycleIn: `${this.config.intervalMinutes} minutes`,
+      note: 'Skipping immediate first cycle to prevent initialization timeouts'
     });
     
     // CRITICAL FIX: Keep-alive mechanism - restart if stops unexpectedly
@@ -543,10 +547,15 @@ export class AgentRunnerService {
 
       // MVP OPTIMIZATION: Lower thresholds for testing - more trades, still safe
       // Quality filters relaxed for MVP, but blacklist + problematic coin detector still active
+      // CRITICAL FIX: Use centralized confidence threshold from config (respects .env.local)
+      const confidenceThreshold = asterConfig.trading.confidenceThreshold;
       const topOpportunities = scanResult.opportunities
         .filter(opp => opp.score >= 35) // MVP: Lowered from 40 to 35 - more opportunities
-        .filter(opp => opp.confidence >= 0.35) // MVP: Lowered from 40% to 35% - more trades
-        .filter(opp => opp.recommendation === 'STRONG_BUY' || opp.recommendation === 'BUY' || opp.recommendation === 'NEUTRAL')
+        .filter(opp => opp.confidence >= confidenceThreshold) // CRITICAL FIX: Use config value, not hardcoded
+        // CRITICAL FIX: Include SELL and STRONG_SELL recommendations (SHORT trades)
+        // SELL makes money just as fast as BUY - treat them equally
+        .filter(opp => opp.recommendation === 'STRONG_BUY' || opp.recommendation === 'BUY' || 
+                      opp.recommendation === 'NEUTRAL' || opp.recommendation === 'SELL' || opp.recommendation === 'STRONG_SELL')
         .filter(opp => {
           // MVP OPTIMIZATION: Relaxed filters - let the problematic coin detector do the heavy filtering
           const quoteVolume = opp.marketData?.quoteVolume24h || 0;
@@ -576,7 +585,7 @@ export class AgentRunnerService {
           data: {
             totalOpportunities: scanResult.opportunities.length,
             afterScoreFilter: scanResult.opportunities.filter(o => o.score >= 35).length,
-            afterConfidenceFilter: scanResult.opportunities.filter(o => o.confidence >= 0.35).length,
+            afterConfidenceFilter: scanResult.opportunities.filter(o => o.confidence >= confidenceThreshold).length,
             topOpportunity: scanResult.bestOpportunity ? {
               symbol: scanResult.bestOpportunity.symbol,
               score: scanResult.bestOpportunity.score,
@@ -607,6 +616,19 @@ export class AgentRunnerService {
 
       // Start workflows for top opportunities that don't have active workflows
       const availableSlots = this.config.maxConcurrentWorkflows - this.activeWorkflows.size;
+      
+      logger.info(`🔍 Workflow creation check`, {
+        context: 'AgentRunner',
+        data: {
+          topOpportunitiesCount: topOpportunities.length,
+          maxConcurrentWorkflows: this.config.maxConcurrentWorkflows,
+          activeWorkflowsCount: this.activeWorkflows.size,
+          availableSlots,
+          activeWorkflowSymbols: Array.from(this.activeWorkflows),
+          willCreateWorkflows: availableSlots > 0 && topOpportunities.length > 0
+        }
+      });
+      
       const opportunitiesToTrade = topOpportunities.slice(0, availableSlots);
 
       // OPTIMIZATION: Start all workflows in parallel instead of sequentially
@@ -621,16 +643,55 @@ export class AgentRunnerService {
           symbol: formatSymbol(opportunity.symbol),
           opportunity
         }))
-        .filter(({ symbol }) => !this.activeWorkflows.has(symbol))
+        .filter(({ symbol }) => {
+          const alreadyActive = this.activeWorkflows.has(symbol);
+          if (alreadyActive) {
+            logger.debug(`Skipping ${symbol} - workflow already active`, {
+              context: 'AgentRunner',
+              activeWorkflows: Array.from(this.activeWorkflows)
+            });
+          }
+          return !alreadyActive;
+        })
         .map(({ symbol, opportunity }) => {
-          logger.info(`Starting workflow for opportunity: ${symbol}`, {
+          logger.info(`🚀 Creating workflow for opportunity: ${symbol}`, {
             context: 'AgentRunner',
-            score: opportunity.score,
-            confidence: (opportunity.confidence * 100).toFixed(0) + '%',
-            signals: opportunity.signals.slice(0, 3)
+            data: {
+              symbol,
+              score: opportunity.score,
+              confidence: (opportunity.confidence * 100).toFixed(0) + '%',
+              recommendation: opportunity.recommendation,
+              signals: opportunity.signals.slice(0, 3),
+              volume: opportunity.marketData?.quoteVolume24h,
+              liquidity: (opportunity.marketData?.liquidity * 100).toFixed(0) + '%'
+            }
           });
           return this.startWorkflowForSymbol(symbol);
         });
+
+      // CRITICAL: Log how many workflows will be created
+      if (workflowPromises.length === 0) {
+        logger.warn('⚠️ No workflows will be created - all opportunities filtered out', {
+          context: 'AgentRunner',
+          data: {
+            topOpportunitiesCount: topOpportunities.length,
+            opportunitiesToTradeCount: opportunitiesToTrade.length,
+            filteredOutCount: opportunitiesToTrade.length - workflowPromises.length,
+            activeWorkflows: Array.from(this.activeWorkflows),
+            reason: opportunitiesToTrade.length > 0 
+              ? 'All symbols already have active workflows' 
+              : 'No opportunities passed filters'
+          }
+        });
+      } else {
+        logger.info(`✅ Creating ${workflowPromises.length} workflow(s)`, {
+          context: 'AgentRunner',
+          data: {
+            workflowCount: workflowPromises.length,
+            symbols: opportunitiesToTrade.map(o => formatSymbol(o.symbol))
+          }
+        });
+      }
 
       // Start all workflows concurrently
       await Promise.all(workflowPromises);

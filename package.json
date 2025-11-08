@@ -1,6 +1,6 @@
 {
   "name": "manna-ai-arena",
-  "version": "3.5.0",
+  "version": "4.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,7 +9,9 @@
     "lint": "next lint",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "startup": "node scripts/start.js",
+    "startup:ps1": "powershell -ExecutionPolicy Bypass -File scripts/start.ps1"
   },
   "dependencies": {
     "@tremor/react": "^3.18.7",

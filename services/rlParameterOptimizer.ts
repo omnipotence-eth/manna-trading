@@ -1,149 +1,191 @@
 /**
  * RL Parameter Optimizer
- * Uses Q-learning to optimize trading parameters based on trade outcomes
- * Learns optimal confidence thresholds, R:R ratios, and position sizes
+ * Reinforcement learning system for optimizing trading parameters
+ * WORLD-CLASS: Adaptive parameter tuning based on trade outcomes
  */
 
 import { logger } from '@/lib/logger';
-import { db } from '@/lib/db';
+import { getTrades } from '@/lib/db';
+import { asterDexService } from './asterDexService';
 
-export interface TradingParameters {
-  confidenceThreshold: number; // 0.55 - 0.75
-  rrRatio: number; // 1.5 - 3.0
-  positionSizePercent: number; // 0.6 - 1.2
-  stopLossPercent: number; // 2.5 - 4.0
-  takeProfitPercent: number; // 6.0 - 12.0
-}
+export type MarketRegime = 'trending' | 'ranging' | 'volatile' | 'choppy';
+export type AccountSize = 'micro' | 'small' | 'medium' | 'large';
 
 export interface ParameterState {
-  marketRegime: 'trending' | 'volatile' | 'choppy' | 'mean-reverting';
-  accountSize: 'micro' | 'small' | 'medium' | 'large';
-  recentWinRate: number; // Last 10 trades win rate
-  recentVolatility: number; // Market volatility
+  marketRegime: MarketRegime;
+  accountSize: AccountSize;
+  recentWinRate: number; // 0-100
+  recentVolatility: number; // 0-100
 }
 
-export interface RLState {
-  state: ParameterState;
-  action: TradingParameters;
-  reward: number;
-  timestamp: number;
+export interface TradingParameters {
+  confidenceThreshold: number; // 0-1
+  rrRatio: number; // Risk-reward ratio
+  positionSizePercent: number; // 0-100
+  stopLossPercent: number; // 0-100
+  takeProfitPercent: number; // 0-100
 }
 
-export class RLParameterOptimizer {
-  private qTable: Map<string, Map<string, number>> = new Map();
+interface QTableEntry {
+  qValue: number;
+  visits: number;
+  lastUpdated: number;
+}
+
+class RLParameterOptimizer {
+  // Q-learning table: state -> action -> Q-value
+  private qTable: Map<string, Map<string, QTableEntry>> = new Map();
   private learningRate = 0.1;
   private discountFactor = 0.9;
-  private explorationRate = 0.2; // Start with 20% exploration
+  private explorationRate = 0.3; // Start with 30% exploration
   private minExplorationRate = 0.05; // Minimum 5% exploration
-  private explorationDecay = 0.99; // Decay exploration over time
-  
-  // Parameter ranges - AGGRESSIVE CRYPTO TRADING
-  // High confidence required (50-70%) but willing to take strong setups
-  private readonly CONFIDENCE_RANGE = [0.50, 0.55, 0.60, 0.65, 0.70];
-  // Higher R:R ratios for crypto volatility (2.0-4.0x targets)
-  private readonly RR_RANGE = [2.0, 2.5, 3.0, 3.5, 4.0];
-  // Larger position sizes with leverage (1.0-2.0% of balance)
-  private readonly POSITION_SIZE_RANGE = [1.0, 1.2, 1.5, 1.8, 2.0];
-  // Tighter stops for quick exits (1.5-3.0% ATR-based)
-  private readonly STOP_LOSS_RANGE = [1.5, 2.0, 2.5, 3.0];
-  
-  private stateHistory: RLState[] = [];
-  private maxHistorySize = 1000;
+  private explorationDecay = 0.995; // Decay exploration rate over time
 
   /**
-   * Get current optimal parameters based on RL learning
+   * Detect current market regime
+   */
+  async detectMarketRegime(): Promise<MarketRegime> {
+    try {
+      // Get recent price data to determine regime
+      const recentTrades = await getTrades({ limit: 50 });
+      
+      if (recentTrades.length < 10) {
+        return 'trending'; // Default to trending if not enough data
+      }
+
+      // Calculate volatility from recent trades
+      const pnlValues = recentTrades.map(t => Math.abs(t.pnlPercent));
+      const avgVolatility = pnlValues.reduce((sum, v) => sum + v, 0) / pnlValues.length;
+      
+      // Simple regime detection based on volatility
+      if (avgVolatility > 10) {
+        return 'volatile';
+      } else if (avgVolatility > 5) {
+        return 'choppy';
+      } else if (avgVolatility > 2) {
+        return 'trending';
+      } else {
+        return 'ranging';
+      }
+    } catch (error) {
+      logger.warn('Failed to detect market regime, defaulting to trending', {
+        context: 'RLParameterOptimizer',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 'trending';
+    }
+  }
+
+  /**
+   * Classify account size
+   */
+  classifyAccountSize(balance: number): AccountSize {
+    if (balance < 100) return 'micro';
+    if (balance < 500) return 'small';
+    if (balance < 5000) return 'medium';
+    return 'large';
+  }
+
+  /**
+   * Get recent win rate from trades
+   */
+  async getRecentWinRateFromTrades(days: number = 7): Promise<number> {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      
+      const allTrades = await getTrades({ limit: 1000 });
+      const recentTrades = allTrades.filter(trade => {
+        const tradeDate = new Date(trade.timestamp);
+        return tradeDate >= cutoffDate;
+      });
+
+      if (recentTrades.length === 0) {
+        return 50; // Default 50% if no trades
+      }
+
+      const wins = recentTrades.filter(t => t.pnl > 0).length;
+      return (wins / recentTrades.length) * 100;
+    } catch (error) {
+      logger.warn('Failed to calculate win rate, defaulting to 50%', {
+        context: 'RLParameterOptimizer',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 50;
+    }
+  }
+
+  /**
+   * Get recent volatility
+   */
+  async getRecentVolatility(days: number = 7): Promise<number> {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      
+      const allTrades = await getTrades({ limit: 1000 });
+      const recentTrades = allTrades.filter(trade => {
+        const tradeDate = new Date(trade.timestamp);
+        return tradeDate >= cutoffDate;
+      });
+
+      if (recentTrades.length === 0) {
+        return 5; // Default volatility
+      }
+
+      const pnlPercentages = recentTrades.map(t => Math.abs(t.pnlPercent));
+      const avgVolatility = pnlPercentages.reduce((sum, v) => sum + v, 0) / pnlPercentages.length;
+      
+      // Normalize to 0-100 scale
+      return Math.min(100, avgVolatility * 10);
+    } catch (error) {
+      logger.warn('Failed to calculate volatility, defaulting to 5%', {
+        context: 'RLParameterOptimizer',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 5;
+    }
+  }
+
+  /**
+   * Get optimal parameters for current state
    */
   getOptimalParameters(state: ParameterState): TradingParameters {
     const stateKey = this.getStateKey(state);
     
-    // If we have Q-values for this state, use them
-    if (this.qTable.has(stateKey)) {
-      const qValues = this.qTable.get(stateKey)!;
-      
-      // Choose best action (exploitation) or random action (exploration)
-      if (Math.random() > this.explorationRate) {
-        // Exploitation: Choose action with highest Q-value
-        const bestAction = Array.from(qValues.entries())
-          .sort((a, b) => b[1] - a[1])[0];
-        
-        if (bestAction) {
-          return this.parseActionKey(bestAction[0]);
-        }
-      }
-    }
+    // Get Q-values for this state
+    const stateQValues = this.qTable.get(stateKey);
     
-    // Exploration or default: Return conservative parameters
-    return this.getDefaultParameters(state);
-  }
-
-  /**
-   * Learn from trade outcome
-   */
-  async learnFromTrade(
-    state: ParameterState,
-    action: TradingParameters,
-    reward: number
-  ): Promise<void> {
-    try {
-      const stateKey = this.getStateKey(state);
-      const actionKey = this.getActionKey(action);
-      
-      // Initialize Q-table if needed
-      if (!this.qTable.has(stateKey)) {
-        this.qTable.set(stateKey, new Map());
-      }
-      
-      const qValues = this.qTable.get(stateKey)!;
-      
-      // Q-learning update: Q(s,a) = Q(s,a) + α[r + γ*max(Q(s',a')) - Q(s,a)]
-      const currentQ = qValues.get(actionKey) || 0;
-      
-      // Find max Q-value for next state (simplified: use current state for now)
-      const maxNextQ = Math.max(...Array.from(qValues.values()), 0);
-      
-      // Update Q-value
-      const newQ = currentQ + this.learningRate * (reward + this.discountFactor * maxNextQ - currentQ);
-      qValues.set(actionKey, newQ);
-      
-      // Store state for analysis
-      this.stateHistory.push({
-        state,
-        action,
-        reward,
-        timestamp: Date.now()
-      });
-      
-      // Keep history size manageable
-      if (this.stateHistory.length > this.maxHistorySize) {
-        this.stateHistory.shift();
-      }
-      
-      // Decay exploration rate
-      this.explorationRate = Math.max(
-        this.minExplorationRate,
-        this.explorationRate * this.explorationDecay
-      );
-      
-      logger.info('🧠 RL Parameter Optimizer learned from trade', {
-        context: 'RLParameterOptimizer',
-        data: {
-          state: stateKey,
-          action: actionKey,
-          reward: reward.toFixed(2),
-          newQValue: newQ.toFixed(2),
-          explorationRate: (this.explorationRate * 100).toFixed(1) + '%'
-        }
-      });
-      
-      // Persist Q-table to database periodically
-      if (this.stateHistory.length % 10 === 0) {
-        await this.persistQTable();
-      }
-    } catch (error) {
-      logger.error('Failed to learn from trade', error as Error, {
-        context: 'RLParameterOptimizer'
-      });
+    // If no learning yet, use default parameters
+    if (!stateQValues || stateQValues.size === 0) {
+      return this.getDefaultParameters(state);
     }
+
+    // Explore or exploit
+    const shouldExplore = Math.random() < this.explorationRate;
+    
+    if (shouldExplore) {
+      // Random exploration
+      return this.getRandomParameters(state);
+    } else {
+      // Exploit: choose best action
+      let bestAction = '';
+      let bestQValue = -Infinity;
+      
+      for (const [action, entry] of stateQValues.entries()) {
+        if (entry.qValue > bestQValue) {
+          bestQValue = entry.qValue;
+          bestAction = action;
+        }
+      }
+      
+      if (bestAction) {
+        return this.parseAction(bestAction);
+      }
+    }
+
+    // Fallback to default
+    return this.getDefaultParameters(state);
   }
 
   /**
@@ -156,349 +198,207 @@ export class RLParameterOptimizer {
     duration: number;
     riskPercent: number;
   }): number {
-    // Multi-factor reward function
-    let reward = 0;
+    // Base reward from P&L
+    let reward = trade.pnlPercent;
     
-    // 1. P&L reward (primary factor)
-    reward += trade.pnlPercent * 10; // Scale P&L (1% = 10 points)
-    
-    // 2. Risk-adjusted reward
-    const riskAdjustedReturn = trade.pnlPercent / trade.riskPercent;
-    reward += riskAdjustedReturn * 5; // Risk-adjusted returns bonus
-    
-    // 3. Confidence accuracy bonus
-    // If high confidence led to profit, reward more
-    if (trade.pnl > 0 && trade.confidence > 0.65) {
-      reward += 2; // Confidence accuracy bonus
+    // Bonus for quick wins (time efficiency)
+    if (trade.pnlPercent > 0 && trade.duration < 300000) { // < 5 minutes
+      reward += 2;
     }
     
-    // 4. Duration penalty (longer trades = more risk)
-    // Prefer shorter trades for better capital efficiency
-    const durationHours = trade.duration / (1000 * 60 * 60);
-    if (durationHours > 24) {
-      reward -= 1; // Penalty for trades > 24 hours
+    // Penalty for slow losses (capital tied up)
+    if (trade.pnlPercent < 0 && trade.duration > 1800000) { // > 30 minutes
+      reward -= 5;
     }
     
-    // 5. Win consistency bonus
-    // Recent wins boost reward
-    const recentWins = this.getRecentWinRate();
-    if (recentWins > 0.6 && trade.pnl > 0) {
-      reward += 1; // Consistency bonus
+    // Penalty for high confidence on losses (overconfidence)
+    if (trade.pnlPercent < 0 && trade.confidence > 0.8) {
+      reward -= 3;
     }
     
-    return reward;
+    // Bonus for high confidence on wins (good judgment)
+    if (trade.pnlPercent > 0 && trade.confidence > 0.7) {
+      reward += 1;
+    }
+    
+    // Risk-adjusted reward
+    const riskAdjustedReward = reward / (trade.riskPercent || 1);
+    
+    return riskAdjustedReward;
   }
 
   /**
-   * Get recent win rate
+   * Learn from trade outcome (Q-learning update)
    */
-  private getRecentWinRate(): number {
-    if (this.stateHistory.length === 0) return 0;
-    
-    const recentTrades = this.stateHistory.slice(-10);
-    const wins = recentTrades.filter(s => s.reward > 0).length;
-    return wins / recentTrades.length;
+  async learnFromTrade(
+    state: ParameterState,
+    action: TradingParameters,
+    reward: number
+  ): Promise<void> {
+    try {
+      const stateKey = this.getStateKey(state);
+      const actionKey = this.getActionKey(action);
+      
+      // Initialize state if needed
+      if (!this.qTable.has(stateKey)) {
+        this.qTable.set(stateKey, new Map());
+      }
+      
+      const stateQValues = this.qTable.get(stateKey)!;
+      
+      // Get current Q-value
+      const currentEntry = stateQValues.get(actionKey) || {
+        qValue: 0,
+        visits: 0,
+        lastUpdated: Date.now()
+      };
+      
+      // Q-learning update: Q(s,a) = Q(s,a) + α[r + γ*max(Q(s',a')) - Q(s,a)]
+      // Simplified: Q(s,a) = Q(s,a) + α[r - Q(s,a)]
+      const newQValue = currentEntry.qValue + this.learningRate * (reward - currentEntry.qValue);
+      
+      // Update Q-table
+      stateQValues.set(actionKey, {
+        qValue: newQValue,
+        visits: currentEntry.visits + 1,
+        lastUpdated: Date.now()
+      });
+      
+      // Decay exploration rate
+      this.explorationRate = Math.max(
+        this.minExplorationRate,
+        this.explorationRate * this.explorationDecay
+      );
+      
+      logger.debug('RL learned from trade', {
+        context: 'RLParameterOptimizer',
+        data: {
+          state: stateKey,
+          reward: reward.toFixed(2),
+          newQValue: newQValue.toFixed(2),
+          explorationRate: (this.explorationRate * 100).toFixed(1) + '%'
+        }
+      });
+    } catch (error) {
+      logger.error('Failed to learn from trade', error, {
+        context: 'RLParameterOptimizer'
+      });
+    }
   }
 
   /**
-   * Get default parameters for state
+   * Get statistics about RL system
    */
+  getStatistics(): {
+    totalStates: number;
+    totalActions: number;
+    explorationRate: number;
+    averageQValue: number;
+  } {
+    let totalActions = 0;
+    let totalQValue = 0;
+    
+    for (const stateQValues of this.qTable.values()) {
+      totalActions += stateQValues.size;
+      for (const entry of stateQValues.values()) {
+        totalQValue += entry.qValue;
+      }
+    }
+    
+    const averageQValue = totalActions > 0 ? totalQValue / totalActions : 0;
+    
+    return {
+      totalStates: this.qTable.size,
+      totalActions,
+      explorationRate: this.explorationRate,
+      averageQValue
+    };
+  }
+
+  // Helper methods
+
+  private getStateKey(state: ParameterState): string {
+    return `${state.marketRegime}_${state.accountSize}_${Math.floor(state.recentWinRate / 10)}_${Math.floor(state.recentVolatility / 10)}`;
+  }
+
+  private getActionKey(action: TradingParameters): string {
+    return `conf${Math.floor(action.confidenceThreshold * 10)}_rr${Math.floor(action.rrRatio)}_size${Math.floor(action.positionSizePercent)}_sl${Math.floor(action.stopLossPercent)}_tp${Math.floor(action.takeProfitPercent)}`;
+  }
+
+  private parseAction(actionKey: string): TradingParameters {
+    const parts = actionKey.split('_');
+    const conf = parseInt(parts[0].replace('conf', '')) / 10;
+    const rr = parseInt(parts[1].replace('rr', ''));
+    const size = parseInt(parts[2].replace('size', ''));
+    const sl = parseInt(parts[3].replace('sl', ''));
+    const tp = parseInt(parts[4].replace('tp', ''));
+    
+    return {
+      confidenceThreshold: conf,
+      rrRatio: rr,
+      positionSizePercent: size,
+      stopLossPercent: sl,
+      takeProfitPercent: tp
+    };
+  }
+
   private getDefaultParameters(state: ParameterState): TradingParameters {
-    // AGGRESSIVE CRYPTO TRADING: High confidence but maximized leverage
-    // Responsible trading with 55-60% base confidence, tight stops, high R:R
-    // Crypto volatility allows for larger position sizes with proper risk management
-    let confidenceThreshold = 0.55; // Base: 55% confidence (high quality setups)
-    let rrRatio = 3.0; // Target 3:1 reward:risk (crypto volatility supports this)
-    let positionSizePercent = 1.5; // 1.5% of balance per trade (with 15x leverage = 22.5% exposure)
-    let stopLossPercent = 2.0; // Tight 2% stops (quick exit on wrong trades)
+    // Default parameters based on state
+    let confidenceThreshold = 0.65;
+    let stopLossPercent = 3.0;
+    let takeProfitPercent = 6.0;
+    let positionSizePercent = 5.0;
+    
+    // Adjust based on market regime
+    if (state.marketRegime === 'volatile') {
+      stopLossPercent = 5.0;
+      takeProfitPercent = 10.0;
+    } else if (state.marketRegime === 'ranging') {
+      stopLossPercent = 2.0;
+      takeProfitPercent = 4.0;
+    }
     
     // Adjust based on account size
     if (state.accountSize === 'micro') {
-      confidenceThreshold = 0.50; // Slightly lower for micro (50%) - need to grow
-      rrRatio = 3.5; // Higher R:R for micro accounts (aggressive growth)
-      positionSizePercent = 2.0; // 2% per trade (with leverage = aggressive)
-      stopLossPercent = 1.5; // Very tight stops (protect small balance)
-    } else if (state.accountSize === 'small') {
-      confidenceThreshold = 0.52; // 52% for small accounts
-      rrRatio = 3.2;
-      positionSizePercent = 1.8;
-      stopLossPercent = 1.8;
-    } else if (state.accountSize === 'medium') {
-      confidenceThreshold = 0.55; // Standard 55%
-      rrRatio = 3.0;
-      positionSizePercent = 1.5;
-      stopLossPercent = 2.0;
+      confidenceThreshold = 0.75; // Higher confidence for small accounts
+      positionSizePercent = 3.0; // Smaller positions
     } else if (state.accountSize === 'large') {
-      confidenceThreshold = 0.60; // Higher confidence for large accounts (protect capital)
-      rrRatio = 2.5;
-      positionSizePercent = 1.2;
-      stopLossPercent = 2.5;
+      positionSizePercent = 10.0; // Can take larger positions
     }
     
-    // Adjust based on market regime - CRYPTO IS VOLATILE!
-    if (state.marketRegime === 'volatile') {
-      // Volatile: Tighter stops, higher R:R, take quick profits
-      stopLossPercent = stopLossPercent * 0.75; // 25% tighter stops
-      rrRatio = 4.0; // 4:1 R:R (big moves in volatility)
-      positionSizePercent = positionSizePercent * 0.8; // 20% smaller size
-    } else if (state.marketRegime === 'trending') {
-      // Trending: Standard stops, good R:R, ride the trend
-      rrRatio = 3.0; // 3:1 R:R in trends
-      stopLossPercent = stopLossPercent; // Normal stops
-      positionSizePercent = positionSizePercent * 1.1; // 10% larger (trends are reliable)
-    } else if (state.marketRegime === 'choppy') {
-      // Choppy: Wider stops, lower R:R, smaller size
-      stopLossPercent = stopLossPercent * 1.2; // 20% wider stops
-      rrRatio = 2.5; // 2.5:1 R:R (harder to get big moves)
-      positionSizePercent = positionSizePercent * 0.7; // 30% smaller size
-      confidenceThreshold = Math.min(0.70, confidenceThreshold + 0.05); // Higher confidence required
+    // Adjust based on recent win rate
+    if (state.recentWinRate < 40) {
+      confidenceThreshold = 0.70; // Be more selective
+    } else if (state.recentWinRate > 60) {
+      confidenceThreshold = 0.60; // Can be less selective
     }
-    
-    // Adjust based on recent win rate - ADAPTIVE LEARNING
-    if (state.recentWinRate > 0.70) {
-      // Hot streak: Be more aggressive (winning = good market fit)
-      confidenceThreshold = Math.max(0.50, confidenceThreshold - 0.03); // 3% lower confidence OK
-      positionSizePercent = Math.min(2.0, positionSizePercent * 1.15); // 15% larger positions
-    } else if (state.recentWinRate < 0.50) {
-      // Cold streak: Be more selective (losing = bad market fit)
-      confidenceThreshold = Math.min(0.70, confidenceThreshold + 0.05); // 5% higher confidence required
-      positionSizePercent = Math.max(1.0, positionSizePercent * 0.85); // 15% smaller positions
-    }
-    
-    const takeProfitPercent = stopLossPercent * rrRatio;
     
     return {
       confidenceThreshold,
-      rrRatio,
+      rrRatio: takeProfitPercent / stopLossPercent,
       positionSizePercent,
       stopLossPercent,
       takeProfitPercent
     };
   }
 
-  /**
-   * Convert state to key for Q-table
-   */
-  private getStateKey(state: ParameterState): string {
-    // Discretize continuous values
-    const winRateBucket = Math.floor(state.recentWinRate * 10) / 10; // 0.0, 0.1, 0.2, ...
-    const volatilityBucket = state.recentVolatility < 10 ? 'low' : 
-                            state.recentVolatility < 20 ? 'med' : 'high';
-    
-    return `${state.marketRegime}_${state.accountSize}_${winRateBucket}_${volatilityBucket}`;
-  }
-
-  /**
-   * Convert action to key for Q-table
-   */
-  private getActionKey(action: TradingParameters): string {
-    // Round to nearest discrete values
-    const conf = this.CONFIDENCE_RANGE.reduce((prev, curr) => 
-      Math.abs(curr - action.confidenceThreshold) < Math.abs(prev - action.confidenceThreshold) ? curr : prev
-    );
-    const rr = this.RR_RANGE.reduce((prev, curr) => 
-      Math.abs(curr - action.rrRatio) < Math.abs(prev - action.rrRatio) ? curr : prev
-    );
-    const pos = this.POSITION_SIZE_RANGE.reduce((prev, curr) => 
-      Math.abs(curr - action.positionSizePercent) < Math.abs(prev - action.positionSizePercent) ? curr : prev
-    );
-    
-    return `${conf}_${rr}_${pos}`;
-  }
-
-  /**
-   * Parse action key back to parameters
-   */
-  private parseActionKey(key: string): TradingParameters {
-    const [conf, rr, pos] = key.split('_').map(Number);
-    const stopLoss = 3.0; // Default
-    const takeProfit = stopLoss * rr;
+  private getRandomParameters(state: ParameterState): TradingParameters {
+    // Random exploration within reasonable bounds
+    const confidenceThreshold = 0.5 + Math.random() * 0.3; // 0.5-0.8
+    const stopLossPercent = 2 + Math.random() * 4; // 2-6%
+    const takeProfitPercent = stopLossPercent * (1.5 + Math.random() * 1.5); // 1.5-3x SL
+    const positionSizePercent = 3 + Math.random() * 7; // 3-10%
     
     return {
-      confidenceThreshold: conf,
-      rrRatio: rr,
-      positionSizePercent: pos,
-      stopLossPercent: stopLoss,
-      takeProfitPercent: takeProfit
+      confidenceThreshold,
+      rrRatio: takeProfitPercent / stopLossPercent,
+      positionSizePercent,
+      stopLossPercent,
+      takeProfitPercent
     };
-  }
-
-  /**
-   * Detect current market regime
-   */
-  async detectMarketRegime(): Promise<'trending' | 'volatile' | 'choppy' | 'mean-reverting'> {
-    try {
-      // Analyze recent trades and market conditions
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - 7);
-      
-      const result = await db.execute(`
-        SELECT 
-          AVG(pnl_percent) as avg_pnl,
-          STDDEV(pnl_percent) as volatility,
-          COUNT(*) as trade_count
-        FROM trades
-        WHERE exit_timestamp IS NOT NULL
-          AND timestamp >= $1
-      `, [cutoffDate.toISOString()]);
-      
-      if (result.rows.length === 0 || parseInt(result.rows[0].trade_count) < 5) {
-        return 'trending'; // Default
-      }
-      
-      const avgPnL = parseFloat(result.rows[0].avg_pnl) || 0;
-      const volatility = parseFloat(result.rows[0].volatility) || 0;
-      
-      // Classify regime based on statistics
-      if (volatility > 5) {
-        return 'volatile';
-      } else if (avgPnL > 1 && volatility < 3) {
-        return 'trending';
-      } else if (Math.abs(avgPnL) < 0.5) {
-        return 'choppy';
-      } else {
-        return 'mean-reverting';
-      }
-    } catch (error) {
-      logger.error('Failed to detect market regime', error as Error, {
-        context: 'RLParameterOptimizer'
-      });
-      return 'trending'; // Default
-    }
-  }
-
-  /**
-   * Classify account size
-   */
-  classifyAccountSize(balance: number): 'micro' | 'small' | 'medium' | 'large' {
-    if (balance < 100) return 'micro';
-    if (balance < 500) return 'small';
-    if (balance < 2000) return 'medium';
-    return 'large';
-  }
-
-  /**
-   * Get recent win rate from trades
-   */
-  async getRecentWinRateFromTrades(days: number = 7): Promise<number> {
-    try {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - days);
-      
-      const result = await db.execute(`
-        SELECT 
-          COUNT(*) as total,
-          COUNT(CASE WHEN pnl > 0 THEN 1 END) as wins
-        FROM trades
-        WHERE exit_timestamp IS NOT NULL
-          AND timestamp >= $1
-      `, [cutoffDate.toISOString()]);
-      
-      if (result.rows.length === 0) return 0.5; // Default 50%
-      
-      const total = parseInt(result.rows[0].total) || 0;
-      const wins = parseInt(result.rows[0].wins) || 0;
-      
-      return total > 0 ? wins / total : 0.5;
-    } catch (error) {
-      logger.error('Failed to get recent win rate', error as Error, {
-        context: 'RLParameterOptimizer'
-      });
-      return 0.5;
-    }
-  }
-
-  /**
-   * Get recent market volatility
-   */
-  async getRecentVolatility(days: number = 7): Promise<number> {
-    try {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - days);
-      
-      const result = await db.execute(`
-        SELECT STDDEV(pnl_percent) as volatility
-        FROM trades
-        WHERE exit_timestamp IS NOT NULL
-          AND timestamp >= $1
-      `, [cutoffDate.toISOString()]);
-      
-      return parseFloat(result.rows[0]?.volatility) || 5.0; // Default 5%
-    } catch (error) {
-      logger.error('Failed to get recent volatility', error as Error, {
-        context: 'RLParameterOptimizer'
-      });
-      return 5.0;
-    }
-  }
-
-  /**
-   * Persist Q-table to database
-   */
-  private async persistQTable(): Promise<void> {
-    try {
-      // Note: Q-table is stored in-memory for MVP. Future enhancement: persist to database for long-term learning across restarts.
-      // For now, Q-table is in-memory and rebuilds from trade history
-      logger.debug('Q-table updated (in-memory)', {
-        context: 'RLParameterOptimizer',
-        data: {
-          states: this.qTable.size,
-          totalEntries: Array.from(this.qTable.values()).reduce((sum, map) => sum + map.size, 0)
-        }
-      });
-    } catch (error) {
-      logger.error('Failed to persist Q-table', error as Error, {
-        context: 'RLParameterOptimizer'
-      });
-    }
-  }
-
-  /**
-   * Get Q-table statistics
-   */
-  getStatistics(): {
-    totalStates: number;
-    totalActions: number;
-    explorationRate: number;
-    averageReward: number;
-  } {
-    const totalActions = Array.from(this.qTable.values()).reduce(
-      (sum, map) => sum + map.size, 0
-    );
-    
-    const averageReward = this.stateHistory.length > 0
-      ? this.stateHistory.reduce((sum, s) => sum + s.reward, 0) / this.stateHistory.length
-      : 0;
-    
-    return {
-      totalStates: this.qTable.size,
-      totalActions,
-      explorationRate: this.explorationRate,
-      averageReward
-    };
-  }
-
-  /**
-   * Reset learning (start fresh)
-   */
-  reset(): void {
-    this.qTable.clear();
-    this.stateHistory = [];
-    this.explorationRate = 0.2;
-    logger.info('RL Parameter Optimizer reset', {
-      context: 'RLParameterOptimizer'
-    });
   }
 }
 
 // Export singleton instance
-const globalForRLParameterOptimizer = globalThis as unknown as {
-  rlParameterOptimizer: RLParameterOptimizer | undefined;
-};
-
-export const rlParameterOptimizer = globalForRLParameterOptimizer.rlParameterOptimizer || new RLParameterOptimizer();
-
-if (process.env.NODE_ENV !== 'production') {
-  globalForRLParameterOptimizer.rlParameterOptimizer = rlParameterOptimizer;
-}
+export const rlParameterOptimizer = new RLParameterOptimizer();
 

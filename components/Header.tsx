@@ -82,6 +82,33 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
       </div>
       <div className="container mx-auto px-2 sm:px-4 py-3 sm:py-4">
         <div className="flex flex-col items-center gap-4">
+          {/* Wave ASCII Design */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 1 }}
+            className="text-green-400/30 font-mono text-[6px] sm:text-[10px] leading-[0.5] select-none overflow-hidden w-full"
+          >
+            <motion.div
+              animate={{
+                x: [0, -20, 0],
+              }}
+              transition={{
+                duration: 8,
+                repeat: Infinity,
+                ease: "linear"
+              }}
+              className="whitespace-pre text-center"
+            >
+{`     ╭─╮     ╭─╮     ╭─╮     ╭─╮     ╭─╮     ╭─╮     ╭─╮
+    ╱   ╲   ╱   ╲   ╱   ╲   ╱   ╲   ╱   ╲   ╱   ╲   ╱   ╲
+   ╱     ╲ ╱     ╲ ╱     ╲ ╱     ╲ ╱     ╲ ╱     ╲ ╱     ╲
+  ╱       ╱       ╱       ╱       ╱       ╱       ╱       ╱
+ ╱       ╱       ╱       ╱       ╱       ╱       ╱       ╱
+╱       ╱       ╱       ╱       ╱       ╱       ╱       ╱`}
+            </motion.div>
+          </motion.div>
+          
           {/* Centered MANNA AI */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}

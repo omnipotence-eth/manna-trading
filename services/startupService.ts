@@ -8,6 +8,7 @@ import { agentRunnerService } from '@/services/agentRunnerService';
 import { realBalanceService } from '@/services/realBalanceService';
 import { positionMonitorService } from '@/services/positionMonitorService';
 import { healthMonitorService } from '@/services/healthMonitorService';
+import { criticalServiceMonitor } from '@/services/criticalServiceMonitor';
 import { asterConfig } from '@/lib/configService';
 
 class StartupService {
@@ -38,62 +39,28 @@ class StartupService {
 
     logger.info('Initializing application services', { context: 'Startup' });
 
-    // STEP 0: Verify DeepSeek R1 Connection (REQUIRED - system will NOT start without DeepSeek!)
-    logger.info('[0/5] Verifying DeepSeek R1 connection...', { context: 'Startup' });
+    // STEP 0: Quick DeepSeek R1 check (NON-BLOCKING - just warn if not available)
+    logger.info('[0/5] Checking DeepSeek R1 connection...', { context: 'Startup' });
     try {
       const { deepseekService } = await import('@/services/deepseekService');
       
-      // CRITICAL FIX: Reduce wait time since model is prewarmed
-      // If model is already loaded (ollama ps shows it), skip most of the wait
-      logger.info('[0/5] Checking if model is prewarmed...', { context: 'Startup' });
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds for Ollama to be ready
-      
-      // Test DeepSeek R1 with simple prompt and EXTENDED TIMEOUT
-      // DeepSeek R1 (18.49GB) needs time to load into memory on first request
-      const testPrompt = 'Respond with: {"status":"ready","model":"deepseek-r1"}';
-      
-      // Extended timeout: 420 seconds (7 minutes) for first model load (allows for very slow systems to load 18.9GB model)
-      // Some systems need up to 7 minutes for first model load into memory (slow disk, limited RAM)
+      // Quick test with SHORT timeout (10 seconds)
+      const testPromise = deepseekService.chat('test', undefined, { max_tokens: 5 });
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('DeepSeek R1 verification timeout after 420 seconds (7 minutes) - ensure Ollama is running and model is loaded. Try pre-loading the model first: ollama run deepseek-r1:14b')), 420000);
+        setTimeout(() => reject(new Error('timeout')), 10000);
       });
       
-      logger.info('[0/5] Testing DeepSeek R1 response (this may take 60-90 seconds if model is loading on first request)...', { context: 'Startup' });
+      await Promise.race([testPromise, timeoutPromise]);
       
-      const testResult = await Promise.race([
-        deepseekService.chat(testPrompt, undefined, {
-          format: 'json',
-          max_tokens: 50
-        }),
-        timeoutPromise
-      ]);
-      
-      // Handle response (could be object or string depending on format parsing)
-      const responseText = typeof testResult === 'string' 
-        ? testResult 
-        : JSON.stringify(testResult);
-      
-      logger.info('[0/5] DeepSeek R1 is READY and responding!', {
-        context: 'Startup',
-        data: {
-          model: 'deepseek-r1',
-          status: 'connected',
-          ollamaUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-          response: responseText.substring(0, 100)
-        }
-      });
+      logger.info('[0/5] ✅ DeepSeek R1 is available!', { context: 'Startup' });
     } catch (error) {
-      logger.error('[0/5] CRITICAL: DeepSeek R1 NOT AVAILABLE!', error as Error, {
+      // CRITICAL CHANGE: Don't fail startup if DeepSeek is slow
+      // Agent Runner can start, workflows will fail but system continues
+      logger.warn('[0/5] ⚠️ DeepSeek R1 not responding (workflows may fail until Ollama starts)', {
         context: 'Startup',
-        data: {
-          message: 'Trading CANNOT start without DeepSeek R1 - this system ONLY trades using DeepSeek AI',
-          solution: '1. Ensure Ollama is running: ollama serve  2. Wait 60 seconds for model to load  3. Verify: curl http://localhost:11434/api/tags  4. Restart this server',
-          error: error instanceof Error ? error.message : String(error),
-          note: 'The system requires DeepSeek R1 to be fully loaded and responding before services can start'
-        }
+        note: 'Starting services anyway - ensure Ollama is running: ollama serve'
       });
-      // CRITICAL: Throw error - system MUST have DeepSeek R1 to trade
-      throw new Error('DeepSeek R1 not available - trading system REQUIRES DeepSeek R1 AI to be running and loaded. Please ensure Ollama is running and wait 60 seconds for the model to load before starting the server.');
+      // Continue with initialization - don't throw!
     }
 
     try {
@@ -149,15 +116,14 @@ class StartupService {
       if (asterConfig.trading.enable24_7Agents) {
         logger.info('[4/5] Starting 24/7 Agent Runner (this may take 10-20 seconds)...', { context: 'Startup' });
         
-        // CRITICAL FIX: Increase timeout - symbol update can take time if Aster DEX API is slow
-        // Start Agent Runner with timeout protection (increased to 60s for symbol fetching)
-        const startPromise = agentRunnerService.start();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Agent Runner startup timeout after 60 seconds - symbol update may be slow')), 60000)
-        );
-        
+        // CRITICAL FIX: Don't use Promise.race with timeout - it can interrupt start() before isRunning is set
+        // start() already handles its own 20-second timeout for symbol fetch and uses fallback symbols
+        // Let start() complete fully so isRunning gets set to true
         try {
-          await Promise.race([startPromise, timeoutPromise]);
+          await agentRunnerService.start();
+          
+          // CRITICAL FIX: Wait a moment for isRunning to be set (start() sets it after interval creation)
+          await new Promise(resolve => setTimeout(resolve, 500));
           
           // CRITICAL FIX: Verify Agent Runner actually started (not just that promise resolved)
           const runnerStatus = agentRunnerService.getStatus();
@@ -178,9 +144,29 @@ class StartupService {
             throw new Error('Agent Runner failed to start - start() completed but isRunning=false');
           }
         } catch (error) {
-          logger.error('[4/5] Agent Runner startup failed or timed out', error as Error, { context: 'Startup' });
-          // CRITICAL: Don't mark as initialized if Agent Runner fails - it's required for trading
-          throw new Error(`Agent Runner startup failed: ${error instanceof Error ? error.message : String(error)}`);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          
+          // CRITICAL FIX: Check status even after error - start() might have succeeded despite throwing
+          // This handles cases where start() throws but isRunning was set before the throw
+          const runnerStatus = agentRunnerService.getStatus();
+          if (runnerStatus.isRunning) {
+            logger.warn('[4/5] Agent Runner reported error but is actually running - continuing', {
+              context: 'Startup',
+              data: { error: errorMsg, isRunning: true, symbols: runnerStatus.config.symbols.length }
+            });
+            // Continue - Agent Runner is running despite error
+          } else {
+            logger.error('[4/5] Agent Runner startup failed', error as Error, { 
+              context: 'Startup',
+              data: {
+                error: errorMsg,
+                isRunning: false,
+                suggestion: 'Check if Aster DEX API is accessible. Agent Runner uses fallback symbols if symbol fetch fails.'
+              }
+            });
+            // CRITICAL: Don't mark as initialized if Agent Runner fails - it's required for trading
+            throw new Error(`Agent Runner startup failed: ${errorMsg}`);
+          }
         }
       } else {
         logger.info('[4/5] 24/7 Agent Runner disabled in config', { context: 'Startup' });
@@ -223,21 +209,59 @@ class StartupService {
       if (asterConfig.trading.enable24_7Agents) {
         const finalRunnerCheck = agentRunnerService.getStatus();
         if (!finalRunnerCheck.isRunning) {
-          logger.error('CRITICAL: Agent Runner not running after initialization - marking as NOT initialized', {
+          logger.error('🚨 CRITICAL: Agent Runner not running after initialization - SYSTEM CANNOT START', {
             context: 'Startup',
-            data: { status: finalRunnerCheck }
+            data: { status: finalRunnerCheck },
+            impact: 'Trading system is NON-FUNCTIONAL without Agent Runner',
+            action: 'Initialization FAILED - will NOT mark as initialized'
           });
           this.initialized = false;
-          throw new Error('Agent Runner not running after initialization - system cannot trade without it');
+          throw new Error('CRITICAL FAILURE: Agent Runner not running after initialization. System REQUIRES Agent Runner for trading. Check Ollama, DeepSeek, and Aster DEX API connectivity.');
         }
+        
+        logger.info('✅ VERIFIED: Agent Runner is running and healthy', {
+          context: 'Startup',
+          isRunning: finalRunnerCheck.isRunning,
+          symbols: finalRunnerCheck.config.symbols.length,
+          activeWorkflows: finalRunnerCheck.activeWorkflowCount
+        });
       }
       
       this.initialized = true;
       
       // Step 6: Start Health Monitor (auto-restart crashed services)
-      logger.info('[6/6] Starting Health Monitor (auto-restart system)...', { context: 'Startup' });
+      logger.info('[6/7] Starting Health Monitor (auto-restart system)...', { context: 'Startup' });
       healthMonitorService.start();
-      logger.info('[6/6] Health Monitor started - services will auto-restart if they crash', { context: 'Startup' });
+      logger.info('[6/7] Health Monitor started - services will auto-restart if they crash', { context: 'Startup' });
+      
+      // Step 7: Start Critical Service Monitor (NUCLEAR OPTION - crashes server if Agent Runner stops)
+      if (asterConfig.trading.enable24_7Agents) {
+        logger.info('[7/7] Starting Critical Service Monitor (will crash server if Agent Runner stops)...', { context: 'Startup' });
+        
+        // Check if we're in development or production
+        const isDevelopment = process.env.NODE_ENV === 'development';
+        if (!isDevelopment) {
+          // Production: Crash server if Agent Runner stops (ensures visibility)
+          criticalServiceMonitor.setFailureMode('crash');
+          logger.warn('⚠️ CRITICAL MONITOR IN CRASH MODE: Server will crash if Agent Runner stops!', {
+            context: 'Startup',
+            mode: 'crash',
+            gracePeriod: '30 seconds',
+            note: 'This ensures immediate visibility of critical failures'
+          });
+        } else {
+          // Development: Log warnings instead of crashing (more developer-friendly)
+          criticalServiceMonitor.setFailureMode('log');
+          logger.info('Critical Monitor in LOG mode (development)', {
+            context: 'Startup',
+            mode: 'log',
+            note: 'Set NODE_ENV=production for crash mode'
+          });
+        }
+        
+        criticalServiceMonitor.start();
+        logger.info('[7/7] Critical Service Monitor started - Agent Runner is under active protection', { context: 'Startup' });
+      }
       
       logger.info('Application services initialized successfully', { 
         context: 'Startup',
@@ -288,9 +312,15 @@ class StartupService {
     logger.info('Shutting down application services', { context: 'Startup' });
 
     try {
+      // Stop monitors first
+      criticalServiceMonitor.stop();
+      healthMonitorService.stop();
+      
+      // Stop services
       realBalanceService.stop();
       positionMonitorService.stop();
       await agentRunnerService.stop();
+      
       this.initialized = false;
       logger.info('Application services shut down successfully', { context: 'Startup' });
     } catch (error) {

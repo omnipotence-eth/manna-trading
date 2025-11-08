@@ -69,6 +69,13 @@ export interface ScanResult {
   topByVolume: MarketOpportunity[];
   volumeSpikes: MarketOpportunity[];
   bestOpportunity: MarketOpportunity | null;
+  // Additional fields for API responses
+  opportunitiesCount?: number;
+  topVolumeSpikes?: MarketOpportunity[];
+  dataSource?: string;
+  cached?: boolean;
+  cacheAgeSeconds?: number;
+  scanDuration?: number;
 }
 
 class MarketScannerService {
@@ -105,6 +112,10 @@ class MarketScannerService {
       
       const exchangeInfo = await asterDexService.getExchangeInfo();
       
+      // CRITICAL FIX: Symbol validation cache is automatically initialized
+      // when getExchangeInfo() is called (see asterDexService.ts)
+      // This prevents concurrent getExchangeInfo() calls during symbol validation
+      
       // exchangeInfo.topSymbolsByVolume already has ticker data with volumes, sorted by volume!
       const symbolsWithVolume = exchangeInfo.topSymbolsByVolume || [];
       
@@ -118,16 +129,26 @@ class MarketScannerService {
         }
         
         // Build ticker object from exchangeInfo data
+        // CRITICAL FIX: Estimate missing fields to prevent division by zero errors
+        const lastPrice = symbolData.lastPrice || 0;
+        const priceChangePercent = symbolData.priceChangePercent24h || 0;
+        
+        // Estimate high/low/open from price and price change if not available
+        const estimatedOpen = lastPrice > 0 && priceChangePercent !== 0
+          ? lastPrice / (1 + priceChangePercent / 100)
+          : lastPrice;
+        
         const ticker = {
           symbol: symbolData.symbol,
-          lastPrice: symbolData.lastPrice || 0,
+          lastPrice: lastPrice,
           volume: symbolData.volume24h || 0,
           quoteVolume: symbolData.quoteVolume24h || 0,
           priceChange: symbolData.priceChange24h || 0,
-          priceChangePercent: symbolData.priceChangePercent24h || 0,
-          highPrice: 0, // Not available from exchangeInfo
-          lowPrice: 0,  // Not available from exchangeInfo
-          openPrice: 0  // Not available from exchangeInfo
+          priceChangePercent: priceChangePercent,
+          // CRITICAL FIX: Estimate high/low/open to prevent division by zero
+          highPrice: symbolData.highPrice || (lastPrice > 0 ? lastPrice * 1.02 : 0), // Estimate 2% range
+          lowPrice: symbolData.lowPrice || (lastPrice > 0 ? lastPrice * 0.98 : 0),   // Estimate 2% range
+          openPrice: symbolData.openPrice || estimatedOpen
         };
         
         tickerMap.set(symbolData.symbol, ticker);
@@ -211,6 +232,10 @@ class MarketScannerService {
             context: 'MarketScanner'
           });
 
+          // CRITICAL FIX: Add timeout protection to prevent 15+ minute hangs
+          // Each symbol analysis has a maximum of 30 seconds (5 API calls * 6s timeout each)
+          const SYMBOL_ANALYSIS_TIMEOUT = 30000; // 30 seconds per symbol
+          
           // Process this batch in parallel (only 10 at a time is safe)
           const batchPromises = batch.map(async (symbolInfo) => {
             try {
@@ -232,20 +257,36 @@ class MarketScannerService {
                 return null;
               }
 
-              const opportunity = await this.analyzeSymbol(symbolInfo, ticker);
-              if (opportunity) {
-                // Double-check for problematic coins before adding
-                const orderBook = opportunity.marketData?.orderBook;
-                const problematic = await problematicCoinDetector.detectProblematicCoin(symbolInfo.symbol, ticker, orderBook);
-                
-                if (problematic) {
-                  return null;
+              // CRITICAL FIX: Wrap analyzeSymbol with timeout to prevent hanging
+              const timeoutPromise = new Promise<null>((resolve) => {
+                setTimeout(() => {
+                  logger.warn(`⏱️ Symbol analysis timeout for ${symbolInfo.symbol} (${SYMBOL_ANALYSIS_TIMEOUT}ms) - skipping`, {
+                    context: 'MarketScanner',
+                    data: { symbol: symbolInfo.symbol, timeout: SYMBOL_ANALYSIS_TIMEOUT }
+                  });
+                  resolve(null);
+                }, SYMBOL_ANALYSIS_TIMEOUT);
+              });
+
+              const analysisPromise = this.analyzeSymbol(symbolInfo, ticker).then(async (opportunity) => {
+                if (opportunity) {
+                  // Double-check for problematic coins before adding
+                  const orderBook = opportunity.marketData?.orderBook;
+                  // CRITICAL FIX: detectProblematicCoin is async - must await it
+                  const problematic = await problematicCoinDetector.detectProblematicCoin(symbolInfo.symbol, ticker, orderBook);
+                  
+                  if (problematic) {
+                    return null;
+                  }
+                  
+                  return opportunity;
                 }
-                
-                return opportunity;
-              }
+                return null;
+              });
+
+              const opportunity = await Promise.race([analysisPromise, timeoutPromise]);
               
-              return null;
+              return opportunity;
             } catch (error) {
               logger.error(`Failed to analyze ${symbolInfo.symbol}`, error as Error, {
                 context: 'MarketScanner',
@@ -255,8 +296,23 @@ class MarketScannerService {
             }
           });
 
-          // Wait for this batch to complete
-          const batchResults = await Promise.all(batchPromises);
+          // CRITICAL FIX: Add timeout for entire batch (max 5 minutes per batch)
+          const BATCH_TIMEOUT = 300000; // 5 minutes max per batch
+          const batchTimeoutPromise = new Promise<(MarketOpportunity | null)[]>((resolve) => {
+            setTimeout(() => {
+              logger.error(`⏱️ Batch ${batchIndex + 1} timeout after ${BATCH_TIMEOUT}ms - cancelling remaining symbols`, {
+                context: 'MarketScanner',
+                data: { batchIndex: batchIndex + 1, totalBatches, batchSize: batch.length }
+              });
+              resolve(batch.map(() => null)); // Return nulls for all symbols in this batch
+            }, BATCH_TIMEOUT);
+          });
+
+          // Wait for this batch to complete (with timeout protection)
+          const batchResults = await Promise.race([
+            Promise.all(batchPromises),
+            batchTimeoutPromise
+          ]);
           analysisResults.push(...batchResults);
 
           // Wait before processing next batch (unless this is the last batch)
@@ -364,6 +420,9 @@ class MarketScannerService {
       let validTimeframes = 0;
       const allSignals = new Set<string>();
       
+      // CRITICAL FIX: Add timeout for each timeframe API call (6 seconds max per call)
+      const TIMEFRAME_API_TIMEOUT = 6000; // 6 seconds per timeframe
+      
       // OPTIMIZED: Process timeframes with delays and skip on rate limit
       for (const timeframe of timeframes) {
         try {
@@ -372,7 +431,19 @@ class MarketScannerService {
             await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay between timeframes
           }
           
-          const klines = await asterDexService.getKlines(symbol.replace('/', ''), timeframe, 100);
+          // CRITICAL FIX: Wrap getKlines with timeout to prevent hanging
+          const klinesPromise = asterDexService.getKlines(symbol.replace('/', ''), timeframe, 100);
+          const timeoutPromise = new Promise<null>((resolve) => {
+            setTimeout(() => {
+              logger.warn(`⏱️ Timeframe ${timeframe} timeout for ${symbol} (${TIMEFRAME_API_TIMEOUT}ms) - skipping`, {
+                context: 'MarketScanner',
+                data: { symbol, timeframe, timeout: TIMEFRAME_API_TIMEOUT }
+              });
+              resolve(null);
+            }, TIMEFRAME_API_TIMEOUT);
+          });
+          
+          const klines = await Promise.race([klinesPromise, timeoutPromise]);
           if (klines && klines.length > 0) {
             const analysis = this.analyzeKlineData(klines, timeframe);
             if (analysis) {
@@ -539,13 +610,49 @@ class MarketScannerService {
       const symbolRaw = symbolInfo.symbol || ticker.symbol || '';
       const symbol = symbolRaw.replace('/', ''); // Normalize to BTCUSDT format
       const displaySymbol = formatSymbolDisplay(symbol); // Display format BTC/USDT
-      const price = parseFloat(ticker.lastPrice);
-      const volume24h = parseFloat(ticker.volume);
-      const quoteVolume24h = parseFloat(ticker.quoteVolume);
-      const priceChange24h = parseFloat(ticker.priceChangePercent);
-      const high24h = parseFloat(ticker.highPrice);
-      const low24h = parseFloat(ticker.lowPrice);
-      const openPrice = parseFloat(ticker.openPrice);
+      // CRITICAL FIX: Defensive parsing with fallbacks
+      const price = parseFloat(ticker?.lastPrice || ticker?.price || 0);
+      const volume24h = parseFloat(ticker?.volume || 0);
+      const quoteVolume24h = parseFloat(ticker?.quoteVolume || 0);
+      const priceChange24h = parseFloat(ticker?.priceChangePercent || ticker?.priceChange || 0);
+      
+      // CRITICAL FIX: Estimate high/low/open if missing (exchangeInfo doesn't provide these)
+      let high24h = parseFloat(ticker?.highPrice || 0);
+      let low24h = parseFloat(ticker?.lowPrice || 0);
+      let openPrice = parseFloat(ticker?.openPrice || 0);
+      
+      // If high/low/open are 0 (missing from exchangeInfo), estimate them
+      if (high24h === 0 && price > 0) {
+        high24h = price * 1.02; // Estimate 2% daily range
+      }
+      if (low24h === 0 && price > 0) {
+        low24h = price * 0.98; // Estimate 2% daily range
+      }
+      if (openPrice === 0 && price > 0) {
+        // Estimate open from current price and price change
+        if (priceChange24h !== 0) {
+          openPrice = price / (1 + priceChange24h / 100);
+        } else {
+          openPrice = price; // Use current price if no change data
+        }
+      }
+
+      // CRITICAL FIX: Validate all required price data exists
+      if (!price || price === 0 || isNaN(price)) {
+        logger.warn(`❌ Skipping ${displaySymbol}: Invalid or zero price`, {
+          context: 'MarketScanner',
+          data: { symbol: displaySymbol, price, ticker }
+        });
+        return null;
+      }
+      
+      if (!high24h || !low24h || !openPrice || high24h === 0 || low24h === 0 || openPrice === 0) {
+        logger.warn(`❌ Skipping ${displaySymbol}: Missing critical price data after fallbacks`, {
+          context: 'MarketScanner',
+          data: { symbol: displaySymbol, price, high24h, low24h, openPrice }
+        });
+        return null;
+      }
 
       // DIAGNOSTIC: Log all ticker data for debugging
       logger.info(`📊 Analyzing ${displaySymbol}`, {
@@ -600,7 +707,24 @@ class MarketScannerService {
       
       // MULTI-TIMEFRAME ANALYSIS (1m, 5m, 15m, 1h, 4h)
       // OPTIMIZED: Only analyze multi-timeframe for high-scoring opportunities to reduce API load
-      const mtfAnalysis = displaySymbol && preliminaryScore >= 60 ? await this.analyzeMultipleTimeframes(displaySymbol) : null;
+      // CRITICAL FIX: Can be disabled to prevent timeouts
+      const MTF_ANALYSIS_TIMEOUT = 30000; // 30 seconds for all 5 timeframes
+      const skipMTF = process.env.SKIP_MULTI_TIMEFRAME_ANALYSIS === 'true';
+      
+      let mtfAnalysis = null;
+      if (!skipMTF && displaySymbol && preliminaryScore >= 60) {
+        const mtfPromise = this.analyzeMultipleTimeframes(displaySymbol);
+        const mtfTimeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => {
+            logger.warn(`⏱️ Multi-timeframe analysis timeout for ${displaySymbol} (${MTF_ANALYSIS_TIMEOUT}ms) - continuing without MTF`, {
+              context: 'MarketScanner',
+              data: { symbol: displaySymbol, timeout: MTF_ANALYSIS_TIMEOUT }
+            });
+            resolve(null);
+          }, MTF_ANALYSIS_TIMEOUT);
+        });
+        mtfAnalysis = await Promise.race([mtfPromise, mtfTimeoutPromise]);
+      }
       let mtfBonus = 0;
       let mtfSignals: string[] = [];
       
@@ -645,7 +769,18 @@ class MarketScannerService {
       const volatility = atrPercent; // Use ATR as volatility measure
       
       // OPTIMIZED: Rate of Change momentum (more sensitive)
-      const momentum = ((price - openPrice) / openPrice) * 100;
+      // CRITICAL FIX: Prevent division by zero that causes Infinity momentum
+      let momentum = openPrice > 0 ? ((price - openPrice) / openPrice) * 100 : 0;
+      
+      // Validate momentum is finite (not Infinity or NaN)
+      if (!isFinite(momentum)) {
+        logger.warn(`Invalid momentum calculated for ${displaySymbol}, using 0`, {
+          context: 'MarketScanner',
+          data: { price, openPrice, calculatedMomentum: momentum }
+        });
+        momentum = 0;
+      }
+      
       const momentumStrength = Math.abs(momentum) / 10; // Normalize to 0-1
       
       // OPTIMIZED: Better RSI estimation using price extremes
@@ -669,37 +804,37 @@ class MarketScannerService {
       const spreadQuality = Math.max(0, 1 - (spread / 5)); // Lower spread = better
       
       // OPTIMIZED: Use aggregated trades for volume confirmation
+      // CRITICAL FIX: Skip if causing timeouts
       let buySellRatio = 1.0;
       let buyVolume = 0;
       let sellVolume = 0;
       
-      try {
-        const { asterDexService } = await import('./asterDexService');
-        const normalizedSymbol = symbol.replace('/', ''); // BTCUSDT format for API
-        const aggTrades = await asterDexService.getAggregatedTrades(normalizedSymbol, 500);
-        
-        if (aggTrades) {
-          buySellRatio = aggTrades.buySellRatio;
-          buyVolume = aggTrades.buyVolume;
-          sellVolume = aggTrades.sellVolume;
-          
-          logger.debug(`Aggregated trades for ${displaySymbol}: Buy/Sell ratio ${buySellRatio.toFixed(2)}`, {
-            context: 'MarketScanner',
-            data: { 
-              symbol: displaySymbol, 
-              buySellRatio, 
-              buyVolume, 
-              sellVolume,
-              totalTrades: aggTrades.totalTrades
-            }
+      const skipAggTrades = process.env.SKIP_AGGREGATED_TRADES === 'true';
+      
+      if (!skipAggTrades) {
+        try {
+          const { asterDexService } = await import('./asterDexService');
+          // Pass display symbol (BTC/USDT) - getAggregatedTrades will normalize it
+          // This ensures consistent symbol format handling
+          // CRITICAL FIX: Add timeout protection (5 seconds max)
+          const AGG_TRADES_TIMEOUT = 5000;
+          const aggTradesPromise = asterDexService.getAggregatedTrades(displaySymbol, 500);
+          const aggTradesTimeoutPromise = new Promise<null>((resolve) => {
+            setTimeout(() => {
+              // Silent skip - don't flood logs
+              resolve(null);
+            }, AGG_TRADES_TIMEOUT);
           });
+          const aggTrades = await Promise.race([aggTradesPromise, aggTradesTimeoutPromise]);
+          
+          if (aggTrades) {
+            buySellRatio = aggTrades.buySellRatio;
+            buyVolume = aggTrades.buyVolume;
+            sellVolume = aggTrades.sellVolume;
+          }
+        } catch (aggTradesError) {
+          // Non-critical - continue without aggregated trades
         }
-      } catch (aggTradesError) {
-        // Non-critical - continue without aggregated trades
-        logger.debug(`Failed to get aggregated trades for ${displaySymbol} (non-critical)`, {
-          context: 'MarketScanner',
-          data: { symbol: displaySymbol }
-        });
       }
       
       // HIGH PRIORITY FIX: Calculate volumeRatio (current volume vs average)
@@ -712,7 +847,20 @@ class MarketScannerService {
       try {
         const { asterDexService } = await import('./asterDexService');
         const normalizedSymbol = symbol.replace('/', ''); // BTCUSDT format for API
-        const klines = await asterDexService.getKlines(normalizedSymbol, '1d', 7); // 7 days
+        // CRITICAL FIX: Increase timeout to 15 seconds to account for rate limiting and network latency
+        // API calls can take 6-10 seconds during rate limit delays, so we need a longer timeout
+        const DAILY_KLINES_TIMEOUT = 15000; // 15 seconds (was 5s - too short)
+        const klinesPromise = asterDexService.getKlines(normalizedSymbol, '1d', 7); // 7 days
+        const klinesTimeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => {
+            logger.warn(`⏱️ Daily klines timeout for ${displaySymbol} (${DAILY_KLINES_TIMEOUT}ms) - continuing without`, {
+              context: 'MarketScanner',
+              data: { symbol: displaySymbol, timeout: DAILY_KLINES_TIMEOUT }
+            });
+            resolve(null);
+          }, DAILY_KLINES_TIMEOUT);
+        });
+        const klines = await Promise.race([klinesPromise, klinesTimeoutPromise]);
         
         if (klines && klines.length > 0) {
           // Calculate average volume over last 7 days
@@ -1097,38 +1245,45 @@ class MarketScannerService {
         });
       }
 
+      // Build marketData object with multi-timeframe support
+      const marketData: any = {
+        price,
+        volume24h,
+        volumeChange: (volumeRatio - 1) * 100,
+        priceChange24h,
+        avgVolume: avgVolume24h,
+        volumeRatio,
+        spread,
+        liquidity,
+        momentum,
+        volatility,
+        rsi,
+        orderBook,
+        quoteVolume24h, // Add quoteVolume24h to marketData
+        high: high24h,
+        low: low24h,
+        open: openPrice,
+        // CRITICAL FIX: Include buy/sell volume data for agent analysis
+        buySellRatio,
+        buyVolume,
+        sellVolume,
+        // ENHANCED: Include multi-timeframe analysis data
+        multiTimeframe: mtfAnalysis ? {
+          timeframes: mtfAnalysis.timeframes,
+          aggregateScore: mtfAnalysis.aggregateScore,
+          aggregateSignals: mtfAnalysis.aggregateSignals,
+          bestTimeframe: mtfAnalysis.bestTimeframe,
+          bullishTimeframes: Object.values(mtfAnalysis.timeframes).filter((tf: any) => tf.trend === 'BULLISH').length,
+          bearishTimeframes: Object.values(mtfAnalysis.timeframes).filter((tf: any) => tf.trend === 'BEARISH').length,
+          totalTimeframes: Object.keys(mtfAnalysis.timeframes).length
+        } : null
+      };
+
       return {
         symbol: displaySymbol, // Use display format (BTC/USDT)
         score,
         signals,
-        marketData: {
-          price,
-          volume24h,
-          volumeChange: (volumeRatio - 1) * 100,
-          priceChange24h,
-          avgVolume: avgVolume24h,
-          volumeRatio,
-          spread,
-          liquidity,
-          momentum,
-          volatility,
-          rsi,
-          orderBook,
-          quoteVolume24h, // Add quoteVolume24h to marketData
-          high: high24h,
-          low: low24h,
-          open: openPrice,
-          // ENHANCED: Include multi-timeframe analysis data (as any to bypass type check - runtime data is correct)
-          multiTimeframe: mtfAnalysis ? {
-            timeframes: mtfAnalysis.timeframes,
-            aggregateScore: mtfAnalysis.aggregateScore,
-            aggregateSignals: mtfAnalysis.aggregateSignals,
-            bestTimeframe: mtfAnalysis.bestTimeframe,
-            bullishTimeframes: Object.values(mtfAnalysis.timeframes).filter((tf: any) => tf.trend === 'BULLISH').length,
-            bearishTimeframes: Object.values(mtfAnalysis.timeframes).filter((tf: any) => tf.trend === 'BEARISH').length,
-            totalTimeframes: Object.keys(mtfAnalysis.timeframes).length
-          } : null
-        } as any, // Type assertion to allow multiTimeframe field
+        marketData,
         recommendation,
         confidence,
         reasoning
@@ -1148,48 +1303,53 @@ class MarketScannerService {
    */
   private async analyzeOrderBookDepth(symbol: string): Promise<OrderBookDepth | null> {
     try {
-      // OPTIMIZED: Use configService instead of direct process.env access
-      const { asterConfig } = await import('@/lib/configService');
-      const baseUrl = asterConfig.baseUrl || 'https://fapi.asterdex.com';
-      const response = await fetch(
-        `${baseUrl}/fapi/v1/depth?symbol=${symbol}&limit=100`
-      );
+      // WORLD-CLASS OPTIMIZATION: Use asterDexService.getOrderBook() for 30-key support and rate limiting
+      // This leverages the 30-key system for maximum throughput and proper rate limit handling
+      const { asterDexService } = await import('./asterDexService');
       
-      if (!response.ok) {
-        // CRITICAL FIX: Handle 400/404 gracefully - symbol may not exist or order book unavailable
-        // This is expected for some symbols and should not be logged as ERROR
-        if (response.status === 400 || response.status === 404) {
-          logger.debug(`Order book not available for ${symbol} (${response.status}) - skipping depth analysis`, {
+      // CRITICAL FIX: Normalize symbol format (BTC/USDT -> BTCUSDT)
+      const normalizedSymbol = symbol.replace('/', '').toUpperCase();
+      
+      // Use asterDexService which handles 30-key rotation, rate limiting, and caching
+      // CRITICAL FIX: Increase timeout to 15 seconds to match API timeout (10s) + buffer for rate limiting
+      // getOrderBook() has a 10-second internal timeout, so we need at least 12-15 seconds here
+      const ORDER_BOOK_TIMEOUT = 15000; // 15 seconds (was 5s - too short, API uses 10s)
+      const orderBookPromise = asterDexService.getOrderBook(normalizedSymbol, 100);
+      const orderBookTimeoutPromise = new Promise<null>((resolve) => {
+        setTimeout(() => {
+          logger.warn(`⏱️ Order book timeout for ${symbol} (${ORDER_BOOK_TIMEOUT}ms) - continuing without`, {
             context: 'MarketScanner',
-            symbol
+            data: { symbol, timeout: ORDER_BOOK_TIMEOUT }
           });
-          return null;
-        }
-        throw new Error(`Failed to fetch order book: ${response.status}`);
+          resolve(null);
+        }, ORDER_BOOK_TIMEOUT);
+      });
+      const orderBookData = await Promise.race([orderBookPromise, orderBookTimeoutPromise]);
+      
+      if (!orderBookData) {
+        logger.debug(`Order book not available for ${symbol} - skipping depth analysis`, {
+          context: 'MarketScanner',
+          symbol
+        });
+        return null;
       }
-
-      const depth = await response.json();
       
-      // Calculate bid/ask depth (total value in USDT)
-      const bidDepth = depth.bids.reduce((sum: number, bid: any) => {
-        return sum + (parseFloat(bid[0]) * parseFloat(bid[1]));
-      }, 0);
+      // CRITICAL FIX: Use pre-calculated liquidity from asterDexService
+      // This avoids duplicate calculations and ensures consistency
+      const bidDepth = orderBookData.bidLiquidity;
+      const askDepth = orderBookData.askLiquidity;
       
-      const askDepth = depth.asks.reduce((sum: number, ask: any) => {
-        return sum + (parseFloat(ask[0]) * parseFloat(ask[1]));
-      }, 0);
+      const totalDepth = orderBookData.totalLiquidity;
+      const spread = orderBookData.spread;
       
-      const totalDepth = bidDepth + askDepth;
+      // Calculate spread percentage
+      const bestBid = parseFloat(orderBookData.bids[0]?.[0] || '0');
+      const spreadPercent = bestBid > 0 ? (spread / bestBid) * 100 : 0;
       
-      // Calculate spread
-      const bestBid = parseFloat(depth.bids[0][0]);
-      const bestAsk = parseFloat(depth.asks[0][0]);
-      const spread = bestAsk - bestBid;
-      const spreadPercent = (spread / bestBid) * 100;
-      
+      // WORLD-CLASS: Advanced orderbook analysis with support/resistance detection
       // Find support levels (large bid orders - top 5)
-      const supportLevels = depth.bids
-        .map((bid: any) => ({
+      const supportLevels = orderBookData.bids
+        .map((bid: [string, string]) => ({
           price: parseFloat(bid[0]),
           value: parseFloat(bid[0]) * parseFloat(bid[1])
         }))
@@ -1199,8 +1359,8 @@ class MarketScannerService {
         .map((bid: any) => bid.price);
       
       // Find resistance levels (large ask orders - top 5)
-      const resistanceLevels = depth.asks
-        .map((ask: any) => ({
+      const resistanceLevels = orderBookData.asks
+        .map((ask: [string, string]) => ({
           price: parseFloat(ask[0]),
           value: parseFloat(ask[0]) * parseFloat(ask[1])
         }))
@@ -1209,11 +1369,11 @@ class MarketScannerService {
         .slice(0, 5)
         .map((ask: any) => ask.price);
       
-      // Detect whale orders (orders > 10% of total depth)
+      // WORLD-CLASS: Detect whale orders (orders > 10% of total depth)
       const whaleThreshold = totalDepth / 10;
       const whaleOrders: Array<{ price: number; size: number; side: 'BID' | 'ASK' }> = [];
       
-      depth.bids.forEach((bid: any) => {
+      orderBookData.bids.forEach((bid: [string, string]) => {
         const orderValue = parseFloat(bid[0]) * parseFloat(bid[1]);
         if (orderValue > whaleThreshold) {
           whaleOrders.push({
@@ -1224,7 +1384,7 @@ class MarketScannerService {
         }
       });
       
-      depth.asks.forEach((ask: any) => {
+      orderBookData.asks.forEach((ask: [string, string]) => {
         const orderValue = parseFloat(ask[0]) * parseFloat(ask[1]);
         if (orderValue > whaleThreshold) {
           whaleOrders.push({
@@ -1235,8 +1395,9 @@ class MarketScannerService {
         }
       });
       
-      // Calculate liquidity score (0-1 scale, normalized to $1M)
-      const liquidityScore = Math.min(totalDepth / TRADING_THRESHOLDS.VOLUME_DISPLAY_DIVISOR, 1.0);
+      // WORLD-CLASS: Use pre-calculated liquidity score from asterDexService
+      // This ensures consistency and leverages optimized calculations
+      const liquidityScore = orderBookData.liquidityScore / 100; // Convert from 0-100 to 0-1
       
       // Calculate order book imbalance
       const imbalance = (bidDepth - askDepth) / totalDepth;
@@ -1255,23 +1416,13 @@ class MarketScannerService {
       };
       
     } catch (error) {
-      // CRITICAL FIX: Only log as error if it's not a 400/404 (expected API errors)
-      // 400/404 errors are expected for symbols that don't exist or don't have order book data
-      const isExpectedError = error instanceof Error && 
-        (error.message.includes('400') || error.message.includes('404'));
-      
-      if (isExpectedError) {
-        logger.debug(`Order book not available for ${symbol} - skipping depth analysis`, {
-          context: 'MarketScanner',
-          symbol,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      } else {
-        logger.error('Failed to analyze order book depth', error as Error, {
-          context: 'MarketScanner',
-          symbol
-        });
-      }
+      // WORLD-CLASS: Enhanced error handling with context
+      logger.debug(`Order book analysis failed for ${symbol} - skipping depth analysis`, {
+        context: 'MarketScanner',
+        symbol,
+        error: error instanceof Error ? error.message : String(error),
+        note: 'Order book may be unavailable for this symbol'
+      });
       return null;
     }
   }

@@ -65,3 +65,11 @@ logs/
 # Cache
 .cache/
 .temp/
+
+# Local data storage (trades, positions, etc.)
+data/
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!next.config.js

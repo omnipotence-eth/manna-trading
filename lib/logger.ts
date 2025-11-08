@@ -1,6 +1,7 @@
 /**
  * Logging utility for the application
  * Provides structured logging with different levels
+ * ENHANCED: Integrated with centralized logging configuration
  */
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -14,6 +15,7 @@ interface LogOptions {
 class Logger {
   private isDev = process.env.NODE_ENV === 'development';
   private isProd = process.env.NODE_ENV === 'production';
+  private loggingConfig: any = null; // Lazy-loaded to prevent circular dependency
 
   private formatMessage(level: LogLevel, message: string, options?: LogOptions): string {
     const timestamp = new Date().toISOString();
@@ -22,7 +24,24 @@ class Logger {
   }
 
   private log(level: LogLevel, message: string, options?: LogOptions, ...args: unknown[]) {
-    // Skip debug logs in production
+    // Lazy-load logging config to prevent circular dependency
+    if (!this.loggingConfig) {
+      try {
+        const { loggingConfig } = require('@/lib/loggingConfig');
+        this.loggingConfig = loggingConfig;
+      } catch {
+        // Logging config not available, use default behavior
+        this.loggingConfig = { shouldLog: () => true };
+      }
+    }
+
+    // Check if this log should be emitted
+    const context = options?.context || 'Default';
+    if (!this.loggingConfig.shouldLog(context, level)) {
+      return; // Suppressed by logging configuration
+    }
+
+    // Skip debug logs in production (fallback)
     if (level === 'debug' && this.isProd) return;
 
     const formattedMessage = this.formatMessage(level, message, options);

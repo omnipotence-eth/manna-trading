@@ -94,12 +94,78 @@ async function getRunnerStatus() {
 }
 
 async function startRunner() {
-  await agentRunnerService.start();
-  
-  return createSuccessResponse({
-    message: 'Agent Runner Started',
-    timestamp: new Date().toISOString()
-  });
+  try {
+    // Get status before starting
+    const statusBefore = agentRunnerService.getStatus();
+    
+    if (statusBefore.isRunning) {
+      return createSuccessResponse({
+        message: 'Agent Runner is already running',
+        status: statusBefore,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Start the Agent Runner
+    await agentRunnerService.start();
+    
+    // Wait a moment for isRunning flag to be set
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Verify it actually started
+    const statusAfter = agentRunnerService.getStatus();
+    
+    if (!statusAfter.isRunning) {
+      logger.error('Agent Runner start() completed but isRunning=false', {
+        context: 'AgentRunnerAPI',
+        data: { statusBefore, statusAfter }
+      });
+      
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Agent Runner start() completed but isRunning=false',
+          statusBefore,
+          statusAfter,
+          timestamp: new Date().toISOString()
+        },
+        { status: 500 }
+      );
+    }
+    
+    logger.info('Agent Runner started successfully via API', {
+      context: 'AgentRunnerAPI',
+      data: {
+        isRunning: statusAfter.isRunning,
+        symbols: statusAfter.config.symbols.length,
+        activeWorkflows: statusAfter.activeWorkflowCount
+      }
+    });
+    
+    return createSuccessResponse({
+      message: 'Agent Runner Started Successfully',
+      status: statusAfter,
+      verified: true,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Failed to start Agent Runner', error, {
+      context: 'AgentRunnerAPI'
+    });
+    
+    // Check if it started despite the error
+    const status = agentRunnerService.getStatus();
+    if (status.isRunning) {
+      return createSuccessResponse({
+        message: 'Agent Runner started (with warning)',
+        status,
+        warning: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    return handleApiError(error, 'AgentRunnerAPI');
+  }
 }
 
 async function stopRunner() {
@@ -112,12 +178,46 @@ async function stopRunner() {
 }
 
 async function forceRunCycle() {
-  await agentRunnerService.forceRunCycle();
-  
-  return createSuccessResponse({
-    message: 'Trading Cycle Forced',
-    timestamp: new Date().toISOString()
-  });
+  try {
+    // Check if Agent Runner is running first
+    const status = agentRunnerService.getStatus();
+    
+    if (!status.isRunning) {
+      logger.warn('Force run cycle called but Agent Runner is not running - starting it first', {
+        context: 'AgentRunnerAPI'
+      });
+      
+      // Try to start it
+      await agentRunnerService.start();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const newStatus = agentRunnerService.getStatus();
+      if (!newStatus.isRunning) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Agent Runner is not running and could not be started',
+            timestamp: new Date().toISOString()
+          },
+          { status: 500 }
+        );
+      }
+    }
+    
+    // Force run the cycle
+    await agentRunnerService.forceRunCycle();
+    
+    return createSuccessResponse({
+      message: 'Trading Cycle Forced',
+      status: agentRunnerService.getStatus(),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Failed to force run cycle', error, {
+      context: 'AgentRunnerAPI'
+    });
+    return handleApiError(error, 'AgentRunnerAPI');
+  }
 }
 
 async function updateConfig(config: any) {
