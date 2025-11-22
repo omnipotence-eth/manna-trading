@@ -1,36 +1,69 @@
 /**
  * Database connection and schema for Neon/Supabase PostgreSQL
  * Stores trade history permanently with optimized connection pooling
+ * 
+ * CRITICAL: Uses lazy import of pg to prevent Next.js from analyzing the import chain during build
  */
 
-import { Pool } from 'pg';
 import { logger } from './logger';
 import { dbConfig } from './configService';
 import { circuitBreakers } from './circuitBreaker';
 import { PerformanceMonitor } from './performanceMonitor';
 
-// Create optimized database connection pool for Neon PostgreSQL
-const pool = new Pool({
-  connectionString: dbConfig.connectionString,
-  ssl: dbConfig.ssl ? { 
-    rejectUnauthorized: false
-  } : false,
-  max: dbConfig.maxConnections, // Maximum number of clients in the pool
-  idleTimeoutMillis: dbConfig.idleTimeout, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: dbConfig.connectionTimeout, // Return an error after 10 seconds if connection could not be established
-  allowExitOnIdle: true, // Allow the pool to close all connections and exit
-  // Additional Neon-specific options
-  keepAlive: true,
-  keepAliveInitialDelayMillis: 0,
-});
+// CRITICAL FIX: Lazy import pg to prevent Next.js from analyzing import chain during build
+// This prevents the "Can't resolve 'stream'" error by only importing pg at runtime
+let Pool: any;
+let pool: any;
+let poolInitialized = false;
+
+async function initializePool() {
+  if (poolInitialized) {
+    return pool;
+  }
+  
+  // Only import pg on server-side and at runtime (not during build)
+  if (typeof window === 'undefined') {
+    try {
+      const pg = await import('pg');
+      Pool = pg.Pool;
+      
+      pool = new Pool({
+        connectionString: dbConfig.connectionString,
+        ssl: dbConfig.ssl ? { 
+          rejectUnauthorized: false
+        } : false,
+        max: dbConfig.maxConnections, // Maximum number of clients in the pool
+        idleTimeoutMillis: dbConfig.idleTimeout, // Close idle clients after 30 seconds
+        connectionTimeoutMillis: dbConfig.connectionTimeout, // Return an error after 10 seconds if connection could not be established
+        allowExitOnIdle: true, // Allow the pool to close all connections and exit
+        // Additional Neon-specific options
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 0,
+      });
+      
+      poolInitialized = true;
+      logger.info('Database pool initialized', { context: 'Database' });
+    } catch (error) {
+      logger.error('Failed to initialize database pool', error as Error, { context: 'Database' });
+      throw error;
+    }
+  } else {
+    throw new Error('Database is not available on the client side');
+  }
+  
+  return pool;
+}
 
 // Enhanced SQL execution with circuit breaker protection and performance monitoring
 async function sql(query: string, params: any[] = []) {
   const timer = PerformanceMonitor.startTimer('database:query');
   
   try {
+    // CRITICAL: Initialize pool if not already initialized (lazy loading)
+    const dbPool = await initializePool();
+    
     return await circuitBreakers.database.execute(async () => {
-      const client = await pool.connect();
+      const client = await dbPool.connect();
       try {
         const result = await client.query(query, params);
         PerformanceMonitor.recordCounter('database:query:success');
@@ -410,6 +443,18 @@ export async function deleteModelMessagesBySymbol(symbol: string): Promise<numbe
 // Export the database helper for direct queries
 export const db = {
   execute: sql,
-  pool
+  get pool() {
+    // Lazy getter - will initialize pool on first access
+    if (!poolInitialized) {
+      // Initialize synchronously if possible, otherwise return null
+      // In practice, callers should use db.execute() which handles initialization
+      return null;
+    }
+    return pool;
+  },
+  // Helper to get pool (async)
+  async getPool() {
+    return await initializePool();
+  }
 };
 

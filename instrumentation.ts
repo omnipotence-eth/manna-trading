@@ -5,6 +5,9 @@
  * 
  * IMPORTANT: This file is ONLY executed on the server-side
  * It will NOT be bundled for the client
+ * 
+ * CRITICAL: All imports are dynamic to prevent Next.js from analyzing
+ * the import chain during build time (which causes stream module errors)
  */
 
 // CRITICAL FIX: Track if error handlers are already registered (prevents duplicates in dev mode)
