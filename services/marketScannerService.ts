@@ -233,8 +233,8 @@ class MarketScannerService {
           });
 
           // CRITICAL FIX: Add timeout protection to prevent 15+ minute hangs
-          // Each symbol analysis has a maximum of 30 seconds (5 API calls * 6s timeout each)
-          const SYMBOL_ANALYSIS_TIMEOUT = 30000; // 30 seconds per symbol
+          // Each symbol analysis has a maximum of 60 seconds (allows for rate limiting delays)
+          const SYMBOL_ANALYSIS_TIMEOUT = 60000; // 60 seconds per symbol (increased for rate limiting)
           
           // Process this batch in parallel (only 10 at a time is safe)
           const batchPromises = batch.map(async (symbolInfo) => {
@@ -847,9 +847,9 @@ class MarketScannerService {
       try {
         const { asterDexService } = await import('./asterDexService');
         const normalizedSymbol = symbol.replace('/', ''); // BTCUSDT format for API
-        // CRITICAL FIX: Increase timeout to 15 seconds to account for rate limiting and network latency
-        // API calls can take 6-10 seconds during rate limit delays, so we need a longer timeout
-        const DAILY_KLINES_TIMEOUT = 15000; // 15 seconds (was 5s - too short)
+        // CRITICAL FIX: Increase timeout to 30 seconds to account for rate limiting and network latency
+        // API calls can take 15-25 seconds during heavy rate limiting, so we need a longer timeout
+        const DAILY_KLINES_TIMEOUT = 30000; // 30 seconds (increased from 15s for heavy rate limiting)
         const klinesPromise = asterDexService.getKlines(normalizedSymbol, '1d', 7); // 7 days
         const klinesTimeoutPromise = new Promise<null>((resolve) => {
           setTimeout(() => {
@@ -1311,9 +1311,9 @@ class MarketScannerService {
       const normalizedSymbol = symbol.replace('/', '').toUpperCase();
       
       // Use asterDexService which handles 30-key rotation, rate limiting, and caching
-      // CRITICAL FIX: Increase timeout to 15 seconds to match API timeout (10s) + buffer for rate limiting
-      // getOrderBook() has a 10-second internal timeout, so we need at least 12-15 seconds here
-      const ORDER_BOOK_TIMEOUT = 15000; // 15 seconds (was 5s - too short, API uses 10s)
+      // CRITICAL FIX: Increase timeout to 30 seconds to match API timeout (10s) + buffer for heavy rate limiting
+      // getOrderBook() has a 10-second internal timeout, but rate limiting can add 15-20 seconds
+      const ORDER_BOOK_TIMEOUT = 30000; // 30 seconds (increased from 15s for heavy rate limiting)
       const orderBookPromise = asterDexService.getOrderBook(normalizedSymbol, 100);
       const orderBookTimeoutPromise = new Promise<null>((resolve) => {
         setTimeout(() => {

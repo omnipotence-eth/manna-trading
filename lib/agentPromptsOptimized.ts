@@ -90,15 +90,15 @@ OBJECTIVE: Determine if this is a tradeable setup with institutional edge
 PRICE & VOLUME DATA
 ══════════════════════════════════════════════════
 Current Price: $${data.price}
-24h Range: $${data.low24h} - $${data.high24h}
-24h Change: ${data.priceChange24h.toFixed(2)}%
-Price Position: ${(data.high24h - data.low24h) > 0 ? ((data.price - data.low24h) / (data.high24h - data.low24h) * 100).toFixed(1) : '50.0'}% of daily range
+24h Range: ${(data as any).low24h !== undefined && (data as any).high24h !== undefined ? `$${(data as any).low24h} - $${(data as any).high24h}` : (data.low24h !== undefined && data.high24h !== undefined ? `$${data.low24h} - $${data.high24h}` : 'N/A')}
+24h Change: ${data.priceChange24h !== undefined && data.priceChange24h !== null ? `${data.priceChange24h.toFixed(2)}%` : (data.priceChangePercent24h !== undefined && data.priceChangePercent24h !== null ? `${data.priceChangePercent24h.toFixed(2)}%` : 'N/A')}
+Price Position: ${(data as any).high24h !== undefined && (data as any).low24h !== undefined && ((data as any).high24h - (data as any).low24h) > 0 ? `${((data.price - (data as any).low24h) / ((data as any).high24h - (data as any).low24h) * 100).toFixed(1)}%` : (data.high24h !== undefined && data.low24h !== undefined && (data.high24h - data.low24h) > 0 ? `${((data.price - data.low24h) / (data.high24h - data.low24h) * 100).toFixed(1)}%` : 'N/A')} of daily range
 
 VOLUME ANALYSIS (CRITICAL):
 Current Volume: ${(data.volume || 0).toLocaleString()}
-Average Volume: ${(data.avgVolume || data.volume || 0).toLocaleString()}
-Volume Ratio: ${data.avgVolume > 0 ? (data.volume / data.avgVolume).toFixed(2) : '1.00'}x ${data.volume > (data.avgVolume || data.volume) * 1.5 ? 'SURGE' : data.volume < (data.avgVolume || data.volume) * 0.5 ? 'DRY' : 'NORMAL'}
-Volume Strength: ${data.volume > (data.avgVolume || data.volume) * 2 ? 'EXTREME (institutional activity likely)' : data.volume > (data.avgVolume || data.volume) * 1.5 ? 'HIGH (strong interest)' : data.volume > (data.avgVolume || data.volume) ? 'ABOVE AVERAGE' : 'BELOW AVERAGE (weak hands)'}
+Average Volume: ${((data as any).avgVolume !== undefined && (data as any).avgVolume !== null ? (data as any).avgVolume : (data.volume || 0)).toLocaleString()}
+Volume Ratio: ${(data as any).avgVolume !== undefined && (data as any).avgVolume !== null && (data as any).avgVolume > 0 ? ((data.volume || 0) / (data as any).avgVolume).toFixed(2) : '1.00'}x ${(data as any).avgVolume !== undefined && (data as any).avgVolume !== null && data.volume ? (data.volume > ((data as any).avgVolume || data.volume) * 1.5 ? 'SURGE' : data.volume < ((data as any).avgVolume || data.volume) * 0.5 ? 'DRY' : 'NORMAL') : 'NORMAL'}
+Volume Strength: ${(data as any).avgVolume !== undefined && data.volume ? (data.volume > ((data as any).avgVolume || data.volume) * 2 ? 'EXTREME (institutional activity likely)' : data.volume > ((data as any).avgVolume || data.volume) * 1.5 ? 'HIGH (strong interest)' : data.volume > ((data as any).avgVolume || data.volume) ? 'ABOVE AVERAGE' : 'BELOW AVERAGE (weak hands)') : 'NORMAL'}
 
 BUY/SELL VOLUME ANALYSIS (CRITICAL FOR DIRECTION):
 ${(data as any).buyVolume !== undefined && (data as any).sellVolume !== undefined ? `
@@ -111,58 +111,68 @@ ${((data as any).buySellRatio || 1.0) > 1.5 ? '⚠️ More buyers than sellers =
 ══════════════════════════════════════════════════
 LIQUIDITY & EXECUTION QUALITY
 ══════════════════════════════════════════════════
-${data.orderBookDepth ? `
-Bid Liquidity: $${(data.orderBookDepth.bidLiquidity / 1000).toFixed(1)}K
-Ask Liquidity: $${(data.orderBookDepth.askLiquidity / 1000).toFixed(1)}K
-Total Depth: $${(data.orderBookDepth.totalLiquidity / 1000).toFixed(1)}K
-Bid/Ask Ratio: ${(data.orderBookDepth.bidLiquidity / data.orderBookDepth.askLiquidity).toFixed(2)} ${data.orderBookDepth.bidLiquidity > data.orderBookDepth.askLiquidity ? '(BULLISH IMBALANCE)' : '(BEARISH IMBALANCE)'}
-Spread: ${data.orderBookDepth.spread.toFixed(4)} (${((data.orderBookDepth.spread / data.price) * 100).toFixed(3)}%)
-Liquidity Score: ${data.orderBookDepth.liquidityScore}/100
+${(data as any).orderBookDepth ? `
+Bid Liquidity: $${(((data as any).orderBookDepth.bidLiquidity || 0) / 1000).toFixed(1)}K
+Ask Liquidity: $${(((data as any).orderBookDepth.askLiquidity || 0) / 1000).toFixed(1)}K
+Total Depth: $${(((data as any).orderBookDepth.totalLiquidity || 0) / 1000).toFixed(1)}K
+Bid/Ask Ratio: ${(data as any).orderBookDepth.askLiquidity > 0 ? (((data as any).orderBookDepth.bidLiquidity / (data as any).orderBookDepth.askLiquidity).toFixed(2)) : 'N/A'} ${(data as any).orderBookDepth.bidLiquidity > (data as any).orderBookDepth.askLiquidity ? '(BULLISH IMBALANCE)' : '(BEARISH IMBALANCE)'}
+Spread: ${((data as any).orderBookDepth.spread || 0).toFixed(4)} (${((data as any).orderBookDepth.spread && data.price ? (((data as any).orderBookDepth.spread / data.price) * 100).toFixed(3) : '0.000')}%)
+Liquidity Score: ${(data as any).orderBookDepth.liquidityScore || 0}/100
 ` : 'Order book data unavailable'}
-Bid/Ask Spread: ${data.bidAskSpread?.toFixed(4) || 'N/A'} ${data.bidAskSpread && data.bidAskSpread < data.price * 0.003 ? 'TIGHT' : 'WIDE'}
+Bid/Ask Spread: ${(data as any).bidAskSpread !== undefined && (data as any).bidAskSpread !== null ? (data as any).bidAskSpread.toFixed(4) : (data.spread !== undefined && data.spread !== null ? data.spread.toFixed(4) : 'N/A')} ${(() => { const spreadValue = (data as any).bidAskSpread !== undefined && (data as any).bidAskSpread !== null ? (data as any).bidAskSpread : (data.spread !== undefined && data.spread !== null ? data.spread : null); return spreadValue !== null && spreadValue !== undefined && data.price && spreadValue < data.price * 0.003 ? 'TIGHT' : 'WIDE'; })()}
 Overall Liquidity: ${data.liquidityScore || 0}/100 ${(data.liquidityScore || 0) > 75 ? 'EXCELLENT' : (data.liquidityScore || 0) > 50 ? 'GOOD' : 'THIN'}
 
 ══════════════════════════════════════════════════
 TECHNICAL INDICATORS
 ══════════════════════════════════════════════════
-RSI(14): ${data.rsi.toFixed(1)} ${
-  data.rsi > 75 ? 'EXTREMELY OVERBOUGHT' :
-  data.rsi > 70 ? 'OVERBOUGHT' :
-  data.rsi < 25 ? 'EXTREMELY OVERSOLD' :
-  data.rsi < 30 ? 'OVERSOLD' :
-  data.rsi >= 45 && data.rsi <= 55 ? 'NEUTRAL ZONE (breakout pending)' :
-  'NORMAL'
+RSI(14): ${(data as any).rsi !== undefined && (data as any).rsi !== null ? (data as any).rsi.toFixed(1) : 'N/A'} ${
+  (data as any).rsi !== undefined && (data as any).rsi !== null ? (
+    (data as any).rsi > 75 ? 'EXTREMELY OVERBOUGHT' :
+    (data as any).rsi > 70 ? 'OVERBOUGHT' :
+    (data as any).rsi < 25 ? 'EXTREMELY OVERSOLD' :
+    (data as any).rsi < 30 ? 'OVERSOLD' :
+    (data as any).rsi >= 45 && (data as any).rsi <= 55 ? 'NEUTRAL ZONE (breakout pending)' :
+    'NORMAL'
+  ) : 'UNAVAILABLE'
 }
 
 Moving Averages:
-- MA(20): $${data.ma20.toFixed(2)} | Price vs MA20: ${data.priceVsMA20.toFixed(2)}% ${data.priceVsMA20 > 0 ? '(ABOVE - bullish)' : '(BELOW - bearish)'}
-- MA(50): $${data.ma50.toFixed(2)} | Price vs MA50: ${((data.price - data.ma50) / data.ma50 * 100).toFixed(2)}% ${data.price > data.ma50 ? '(ABOVE)' : '(BELOW)'}
-- MA(200): $${data.ma200.toFixed(2)} | Price vs MA200: ${((data.price - data.ma200) / data.ma200 * 100).toFixed(2)}% ${data.price > data.ma200 ? '(ABOVE - long-term bullish)' : '(BELOW - long-term bearish)'}
+- MA(20): ${(data as any).ma20 !== undefined && (data as any).ma20 !== null ? `$${(data as any).ma20.toFixed(2)}` : 'N/A'} | Price vs MA20: ${(data as any).priceVsMA20 !== undefined && (data as any).priceVsMA20 !== null ? `${(data as any).priceVsMA20.toFixed(2)}%` : 'N/A'} ${(data as any).priceVsMA20 !== undefined && (data as any).priceVsMA20 !== null ? ((data as any).priceVsMA20 > 0 ? '(ABOVE - bullish)' : '(BELOW - bearish)') : ''}
+- MA(50): ${(data as any).ma50 !== undefined && (data as any).ma50 !== null ? `$${(data as any).ma50.toFixed(2)}` : 'N/A'} | Price vs MA50: ${(data as any).ma50 !== undefined && (data as any).ma50 !== null ? `${((data.price - (data as any).ma50) / (data as any).ma50 * 100).toFixed(2)}%` : 'N/A'} ${(data as any).ma50 !== undefined && (data as any).ma50 !== null ? (data.price > (data as any).ma50 ? '(ABOVE)' : '(BELOW)') : ''}
+- MA(200): ${(data as any).ma200 !== undefined && (data as any).ma200 !== null ? `$${(data as any).ma200.toFixed(2)}` : 'N/A'} | Price vs MA200: ${(data as any).ma200 !== undefined && (data as any).ma200 !== null ? `${((data.price - (data as any).ma200) / (data as any).ma200 * 100).toFixed(2)}%` : 'N/A'} ${(data as any).ma200 !== undefined && (data as any).ma200 !== null ? (data.price > (data as any).ma200 ? '(ABOVE - long-term bullish)' : '(BELOW - long-term bearish)') : ''}
 
 MA Alignment: ${
-  data.price > data.ma20 && data.ma20 > data.ma50 && data.ma50 > data.ma200 ? 'PERFECT BULL ALIGNMENT' :
-  data.price < data.ma20 && data.ma20 < data.ma50 && data.ma50 < data.ma200 ? 'PERFECT BEAR ALIGNMENT' :
-  'MIXED / TRANSITION'
+  (data as any).ma20 !== undefined && (data as any).ma50 !== undefined && (data as any).ma200 !== undefined && 
+  (data as any).ma20 !== null && (data as any).ma50 !== null && (data as any).ma200 !== null ? (
+    data.price > (data as any).ma20 && (data as any).ma20 > (data as any).ma50 && (data as any).ma50 > (data as any).ma200 ? 'PERFECT BULL ALIGNMENT' :
+    data.price < (data as any).ma20 && (data as any).ma20 < (data as any).ma50 && (data as any).ma50 < (data as any).ma200 ? 'PERFECT BEAR ALIGNMENT' :
+    'MIXED / TRANSITION'
+  ) : 'UNAVAILABLE (missing MA data)'
 }
 
-Volatility (ATR%): ${data.volatility.toFixed(2)}% ${
-  data.volatility > 15 ? 'EXTREME (reduce size)' :
-  data.volatility > 10 ? 'HIGH (normal crypto)' :
-  data.volatility > 5 ? 'MODERATE (ideal for trading)' :
-  'LOW (range-bound)'
+Volatility (ATR%): ${(data as any).volatility !== undefined && (data as any).volatility !== null ? `${(data as any).volatility.toFixed(2)}%` : 'N/A'} ${
+  (data as any).volatility !== undefined && (data as any).volatility !== null ? (
+    (data as any).volatility > 15 ? 'EXTREME (reduce size)' :
+    (data as any).volatility > 10 ? 'HIGH (normal crypto)' :
+    (data as any).volatility > 5 ? 'MODERATE (ideal for trading)' :
+    'LOW (range-bound)'
+  ) : ''
 }
 
 ══════════════════════════════════════════════════
 MOMENTUM & TREND
 ══════════════════════════════════════════════════
-1h Change: ${data.change1h.toFixed(2)}% ${data.change1h > 2 ? 'UP' : data.change1h < -2 ? 'DOWN' : 'FLAT'}
-4h Change: ${data.change4h.toFixed(2)}% ${data.change4h > 5 ? 'UP' : data.change4h < -5 ? 'DOWN' : 'FLAT'}
-24h Change: ${data.priceChange24h.toFixed(2)}%
+1h Change: ${(data as any).change1h !== undefined && (data as any).change1h !== null ? `${(data as any).change1h.toFixed(2)}%` : 'N/A'} ${(data as any).change1h !== undefined && (data as any).change1h !== null ? ((data as any).change1h > 2 ? 'UP' : (data as any).change1h < -2 ? 'DOWN' : 'FLAT') : ''}
+4h Change: ${(data as any).change4h !== undefined && (data as any).change4h !== null ? `${(data as any).change4h.toFixed(2)}%` : 'N/A'} ${(data as any).change4h !== undefined && (data as any).change4h !== null ? ((data as any).change4h > 5 ? 'UP' : (data as any).change4h < -5 ? 'DOWN' : 'FLAT') : ''}
+24h Change: ${data.priceChange24h !== undefined && data.priceChange24h !== null ? `${data.priceChange24h.toFixed(2)}%` : (data.priceChangePercent24h !== undefined && data.priceChangePercent24h !== null ? `${data.priceChangePercent24h.toFixed(2)}%` : 'N/A')}
 
 Momentum Score: ${
-  Math.abs(data.change1h) > 2 && Math.abs(data.change4h) > 4 ? 'STRONG' :
-  Math.abs(data.change1h) > 1 || Math.abs(data.change4h) > 2 ? 'MODERATE' :
-  'WEAK'
+  (data as any).change1h !== undefined && (data as any).change4h !== undefined && 
+  (data as any).change1h !== null && (data as any).change4h !== null ? (
+    Math.abs((data as any).change1h) > 2 && Math.abs((data as any).change4h) > 4 ? 'STRONG' :
+    Math.abs((data as any).change1h) > 1 || Math.abs((data as any).change4h) > 2 ? 'MODERATE' :
+    'WEAK'
+  ) : 'UNAVAILABLE (missing timeframe data)'
 }
 
 ══════════════════════════════════════════════════

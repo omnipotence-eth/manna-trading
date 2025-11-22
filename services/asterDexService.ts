@@ -85,10 +85,12 @@ class AsterDexService {
   private cacheRefreshPromise: Promise<void> | null = null; // Lock to prevent concurrent refreshes
   
   // Rate limiting strategy - NOW SUPPORTS 30 KEYS = 600 req/sec!
-  private requestQueue: Array<() => Promise<any>> = [];
+  private requestQueue: Array<{ fn: () => Promise<any>; delay: number }> = [];
   private isProcessingQueue: boolean = false;
   private lastRequestTime: number = 0;
-  private readonly MIN_REQUEST_DELAY = LIMITS.MIN_REQUEST_DELAY; // 50ms per-key
+  private readonly MIN_REQUEST_DELAY = LIMITS.MIN_REQUEST_DELAY; // 50ms per-key (for authenticated requests)
+  // CRITICAL: Public endpoints don't use API keys, so they can be faster
+  private readonly MIN_PUBLIC_REQUEST_DELAY = 20; // 20ms for public endpoints (no API key limits)
   // CRITICAL FIX: Reduced batch size to respect Aster DEX IP rate limits
   // According to API docs: IP limits apply, need to throttle requests
   private readonly BATCH_SIZE = LIMITS.BATCH_SIZE_DEFAULT; // 5 to prevent 429 errors
@@ -173,7 +175,38 @@ class AsterDexService {
   }
 
   /**
-   * Rate-limited request wrapper
+   * Rate-limited request wrapper for public endpoints (faster - no API key limits)
+   */
+  private async rateLimitedPublicRequest<T>(requestFn: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const wrappedRequest = async () => {
+        try {
+          // Public endpoints can be faster (20ms delay instead of 50ms)
+          const now = Date.now();
+          const timeSinceLastRequest = now - this.lastRequestTime;
+          if (timeSinceLastRequest < this.MIN_PUBLIC_REQUEST_DELAY) {
+            await new Promise(r => setTimeout(r, this.MIN_PUBLIC_REQUEST_DELAY - timeSinceLastRequest));
+          }
+          
+          this.lastRequestTime = Date.now();
+          const result = await requestFn();
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      // Add to queue with public endpoint delay (20ms)
+      this.requestQueue.push({ fn: wrappedRequest, delay: this.MIN_PUBLIC_REQUEST_DELAY });
+      
+      if (!this.isProcessingQueue) {
+        this.processQueue();
+      }
+    });
+  }
+
+  /**
+   * Rate-limited request wrapper for authenticated endpoints (uses API keys)
    */
   private async rateLimitedRequest<T>(requestFn: () => Promise<T>): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -233,8 +266,8 @@ class AsterDexService {
         }
       };
 
-      // Add to queue
-      this.requestQueue.push(wrappedRequest);
+      // Add to queue with authenticated endpoint delay (50ms)
+      this.requestQueue.push({ fn: wrappedRequest, delay: this.MIN_REQUEST_DELAY });
       
       // Start processing queue if not already running
       if (!this.isProcessingQueue) {
@@ -258,13 +291,15 @@ class AsterDexService {
       const batch = this.requestQueue.splice(0, this.BATCH_SIZE);
       
       // CRITICAL FIX: Execute batch with delays to respect Aster DEX rate limits
-      // Add small delay between each request in batch to prevent 429 errors
-      for (const fn of batch) {
+      // Use the delay specified for each request (public=20ms, authenticated=50ms)
+      for (let i = 0; i < batch.length; i++) {
+        const request = batch[i];
         try {
-          await fn();
-          // Add 50ms delay between requests in batch to respect rate limits
-          if (batch.indexOf(fn) < batch.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 50));
+          await request.fn();
+          // Add delay between requests using the request's specified delay
+          // This allows public endpoints (20ms) to be faster than authenticated (50ms)
+          if (i < batch.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, request.delay));
           }
         } catch (err) {
           logger.error('Request in queue failed', err, { context: 'AsterDex' });
@@ -698,7 +733,7 @@ class AsterDexService {
       return cachedPrice;
     }
     
-    return this.rateLimitedRequest(async () => {
+    return this.rateLimitedPublicRequest(async () => {
       try {
         // Convert BTC/USDT to BTCUSDT format
         const binanceSymbol = symbol.replace('/', '');
@@ -748,7 +783,7 @@ class AsterDexService {
       return cached;
     }
     
-    return this.rateLimitedRequest(async () => {
+    return this.rateLimitedPublicRequest(async () => {
       try {
         // CRITICAL FIX: Use correct Aster DEX API endpoint
         // API docs: https://github.com/asterdex/api-docs/blob/master/aster-finance-futures-api.md
@@ -842,8 +877,8 @@ class AsterDexService {
       return cachedTicker;
     }
     
-    // WORLD-CLASS: Use rateLimitedRequest which respects 30-key system
-    return this.rateLimitedRequest(async () => {
+    // WORLD-CLASS: Public endpoint - use faster rate limiter (no API key limits)
+    return this.rateLimitedPublicRequest(async () => {
       try {
         // Convert BTC/USDT to BTCUSDT format
         const binanceSymbol = symbol.replace('/', '').toUpperCase();
@@ -919,9 +954,9 @@ class AsterDexService {
       return priceMap;
     }
     
-    // WORLD-CLASS: Fetch all prices at once using batch endpoint
+    // WORLD-CLASS: Fetch all prices at once using batch endpoint (public - faster)
     // According to Aster DEX API docs: /ticker/price without symbol returns all prices
-    return this.rateLimitedRequest(async () => {
+    return this.rateLimitedPublicRequest(async () => {
       try {
         const url = `https://fapi.asterdex.com/fapi/v1/ticker/price`;
         
@@ -995,9 +1030,9 @@ class AsterDexService {
       return tickerMap;
     }
     
-    // WORLD-CLASS: Fetch all 24hr tickers at once using batch endpoint
+    // WORLD-CLASS: Fetch all 24hr tickers at once using batch endpoint (public - faster)
     // According to Aster DEX API docs: /ticker/24hr without symbol returns all tickers
-    return this.rateLimitedRequest(async () => {
+    return this.rateLimitedPublicRequest(async () => {
       try {
         const url = `https://fapi.asterdex.com/fapi/v1/ticker/24hr`;
         
@@ -1101,15 +1136,15 @@ class AsterDexService {
           await new Promise(resolve => setTimeout(resolve, backoffDelay));
         }
         
-        return await this.rateLimitedRequest(async () => {
+        return await this.rateLimitedPublicRequest(async () => {
           // Convert BTC/USDT to BTCUSDT format
           const binanceSymbol = symbol.replace('/', '');
           const url = `https://fapi.asterdex.com/fapi/v1/klines?symbol=${binanceSymbol}&interval=${interval}&limit=${limit}`;
           
-          // CRITICAL FIX: Add timeout protection (15 seconds) to match order book timeout
+          // CRITICAL FIX: Add timeout protection (30 seconds) to account for heavy rate limiting
           // Based on Aster DEX API docs: https://github.com/asterdex/api-docs/blob/master/aster-finance-futures-api.md
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout (increased for rate limiting)
           
           try {
             const response = await fetch(url, { signal: controller.signal });
@@ -1163,7 +1198,7 @@ class AsterDexService {
           } catch (fetchError) {
             clearTimeout(timeoutId);
             if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-              throw new Error('Klines fetch timeout after 15 seconds');
+              throw new Error('Klines fetch timeout after 30 seconds');
             }
             // Re-throw to be caught by outer retry loop
             throw fetchError;
@@ -1421,7 +1456,7 @@ class AsterDexService {
       return cached;
     }
     
-    return this.rateLimitedRequest(async () => {
+    return this.rateLimitedPublicRequest(async () => {
       try {
         // Convert BTC/USDT to BTCUSDT format (already normalized)
         const binanceSymbol = normalizedSymbol;
@@ -1920,7 +1955,7 @@ class AsterDexService {
       
       logger.debug('Fetching all trading pairs from Aster DEX (cache miss)', { context: 'AsterDex', data: { url } });
       
-      return this.rateLimitedRequest(async () => {
+      return this.rateLimitedPublicRequest(async () => {
         const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`API returned ${response.status}`);
