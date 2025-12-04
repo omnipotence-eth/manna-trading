@@ -287,7 +287,7 @@ export class AgentRunnerService {
     // CRITICAL FIX: Don't run first cycle immediately during initialization
     // Market scanner can timeout and flood terminal with errors
     // Let the interval handle the first cycle naturally
-    logger.info('✅ Agent Runner started - first trading cycle will run in ${this.config.intervalMinutes} minutes', {
+    logger.info(`✅ Agent Runner started - first trading cycle will run in ${this.config.intervalMinutes} minutes`, {
       context: 'AgentRunner',
       isRunning: this.isRunning,
       nextCycleIn: `${this.config.intervalMinutes} minutes`,

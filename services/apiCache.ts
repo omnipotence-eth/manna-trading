@@ -15,13 +15,28 @@ class APICache {
   /**
    * Cache TTLs (Time To Live) in milliseconds
    * OPTIMIZED: Increased cache times to prevent 429 rate limit errors
+   * 
+   * CRITICAL: Public endpoints (klines, order book, tickers) are IP-RATE-LIMITED
+   * Your 30 API keys only help with authenticated endpoints (trades, account)!
+   * Longer cache TTLs = fewer API calls = less rate limiting
+   * 
+   * MTF ANALYSIS ENABLED: With WebSocket for real-time prices, we can afford
+   * to cache klines longer since we still have fresh price data
    */
   private readonly TTL = {
-    POSITIONS: 20000,    // 20 seconds - increased from 10s (positions don't change that fast)
-    BALANCE: 30000,      // 30 seconds - increased from 15s (balance updates are not critical)
-    PRICE: 10000,        // 10 seconds - increased from 5s (acceptable for trading decisions)
-    TICKER: 10000,       // 10 seconds - ticker data (unchanged)
-    MARKETS: 300000,     // 5 minutes - markets rarely change (unchanged)
+    POSITIONS: 30000,      // 30 seconds - positions change on trades only
+    BALANCE: 60000,        // 60 seconds - balance is stable between trades
+    PRICE: 10000,          // 10 seconds - WebSocket updates this anyway
+    TICKER: 30000,         // 30 seconds - ticker data (IP rate limited!)
+    MARKETS: 600000,       // 10 minutes - markets rarely change
+    ORDER_BOOK: 120000,    // 2 minutes - order book for confirmation only
+    KLINES_1M: 60000,      // 1 minute - for entry timing
+    KLINES_5M: 180000,     // 3 minutes - for short-term direction
+    KLINES_15M: 300000,    // 5 minutes - for medium confirmation
+    KLINES_1H: 600000,     // 10 minutes - for trend confirmation
+    KLINES_4H: 900000,     // 15 minutes - for major trend
+    KLINES: 180000,        // 3 minutes - default fallback
+    EXCHANGE_INFO: 3600000, // 1 hour - exchange info rarely changes
   };
 
   /**
@@ -94,6 +109,28 @@ class APICache {
    */
   getTTL(type: keyof typeof this.TTL): number {
     return this.TTL[type];
+  }
+
+  /**
+   * Get TTL for klines based on interval
+   * Higher timeframes can be cached longer since they change less frequently
+   */
+  getKlinesTTL(interval: string): number {
+    switch (interval) {
+      case '1m': return this.TTL.KLINES_1M;
+      case '3m':
+      case '5m': return this.TTL.KLINES_5M;
+      case '15m':
+      case '30m': return this.TTL.KLINES_15M;
+      case '1h':
+      case '2h': return this.TTL.KLINES_1H;
+      case '4h':
+      case '6h':
+      case '12h':
+      case '1d':
+      case '1w': return this.TTL.KLINES_4H;
+      default: return this.TTL.KLINES;
+    }
   }
 }
 

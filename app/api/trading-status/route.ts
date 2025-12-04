@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       isRunning: runnerStatus.isRunning,
       enabled: runnerStatus.config.enabled,
       symbolsCount: runnerStatus.config.symbols.length,
-      activeWorkflows: runnerStatus.activeWorkflows.size,
+      activeWorkflows: runnerStatus.activeWorkflowCount,
       maxConcurrentWorkflows: runnerStatus.config.maxConcurrentWorkflows,
       intervalMinutes: runnerStatus.config.intervalMinutes,
       symbols: runnerStatus.config.symbols.slice(0, 10) // First 10
@@ -192,7 +192,7 @@ export async function GET(request: NextRequest) {
       diagnostics.recommendations.push('Check server logs for workflow execution details');
       diagnostics.recommendations.push('Monitor /api/agent-insights for agent thoughts');
     } else {
-      const criticalIssues = diagnostics.issues.filter(i => i.severity === 'CRITICAL');
+      const criticalIssues = diagnostics.issues.filter((i: any) => i.severity === 'CRITICAL');
       if (criticalIssues.length > 0) {
         diagnostics.recommendations.push('🚨 CRITICAL issues found - these must be fixed before trading can start');
       }

@@ -7,7 +7,7 @@
  */
 
 // Re-export types from their actual locations
-export type { MarketData, SentimentData, OnChainData } from '@/services/dataIngestionService';
+export type { MarketData } from '@/services/dataIngestionService';
 export type { 
   AnalystReports, 
   FinalDecision, 

@@ -1,6 +1,6 @@
 {
   "name": "manna-ai-arena",
-  "version": "4.0.0",
+  "version": "7.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -14,10 +14,12 @@
     "startup:ps1": "powershell -ExecutionPolicy Bypass -File scripts/start.ps1"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.2.4",
     "@tremor/react": "^3.18.7",
     "@types/pg": "^8.15.5",
     "@vercel/postgres": "^0.10.0",
     "async-mutex": "^0.5.0",
+    "class-variance-authority": "^0.7.1",
     "ethers": "^6.13.2",
     "framer-motion": "^11.18.2",
     "lightweight-charts": "^5.0.9",
@@ -39,6 +41,7 @@
     "@types/node": "^20.14.10",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.19",
     "eslint": "^8.57.0",
     "eslint-config-next": "14.2.5",

@@ -5,8 +5,13 @@
  */
 
 import { logger } from '@/lib/logger';
-import { getTrades } from '@/lib/db';
 import { asterDexService } from './asterDexService';
+
+// Dynamic import to prevent Next.js from analyzing pg during build
+async function getTradesFromDb(filters?: { limit?: number }) {
+  const { getTrades } = await import('@/lib/db');
+  return getTrades(filters);
+}
 
 export type MarketRegime = 'trending' | 'ranging' | 'volatile' | 'choppy';
 export type AccountSize = 'micro' | 'small' | 'medium' | 'large';
@@ -47,7 +52,7 @@ class RLParameterOptimizer {
   async detectMarketRegime(): Promise<MarketRegime> {
     try {
       // Get recent price data to determine regime
-      const recentTrades = await getTrades({ limit: 50 });
+      const recentTrades = await getTradesFromDb({ limit: 50 });
       
       if (recentTrades.length < 10) {
         return 'trending'; // Default to trending if not enough data
@@ -94,7 +99,7 @@ class RLParameterOptimizer {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
       
-      const allTrades = await getTrades({ limit: 1000 });
+      const allTrades = await getTradesFromDb({ limit: 1000 });
       const recentTrades = allTrades.filter(trade => {
         const tradeDate = new Date(trade.timestamp);
         return tradeDate >= cutoffDate;
@@ -123,7 +128,7 @@ class RLParameterOptimizer {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
       
-      const allTrades = await getTrades({ limit: 1000 });
+      const allTrades = await getTradesFromDb({ limit: 1000 });
       const recentTrades = allTrades.filter(trade => {
         const tradeDate = new Date(trade.timestamp);
         return tradeDate >= cutoffDate;
@@ -343,35 +348,82 @@ class RLParameterOptimizer {
   }
 
   private getDefaultParameters(state: ParameterState): TradingParameters {
-    // Default parameters based on state
-    let confidenceThreshold = 0.65;
+    // ADAPTIVE PARAMETERS for all market types
+    // Goal: Find profitable opportunities in ANY market condition while staying safe
+    
+    // Base parameters - adaptive to market type
+    let confidenceThreshold = 0.50; // LOWERED: Start at 50% - we need to trade to learn
     let stopLossPercent = 3.0;
     let takeProfitPercent = 6.0;
     let positionSizePercent = 5.0;
     
-    // Adjust based on market regime
-    if (state.marketRegime === 'volatile') {
-      stopLossPercent = 5.0;
-      takeProfitPercent = 10.0;
-    } else if (state.marketRegime === 'ranging') {
-      stopLossPercent = 2.0;
-      takeProfitPercent = 4.0;
+    // MARKET REGIME ADJUSTMENTS
+    switch (state.marketRegime) {
+      case 'trending':
+        // Trend following: Let winners run
+        confidenceThreshold = 0.55;
+        stopLossPercent = 3.5;
+        takeProfitPercent = 9.0; // 2.5:1 R:R for trends
+        break;
+        
+      case 'ranging':
+        // CRITICAL: Range trading strategy - lower confidence OK for mean reversion
+        // Range-bound = predictable support/resistance bounces
+        confidenceThreshold = 0.45; // LOWER for ranges - they're actually predictable!
+        stopLossPercent = 2.5; // Tighter SL since ranges are bounded
+        takeProfitPercent = 5.0; // Smaller targets in ranges
+        break;
+        
+      case 'volatile':
+        // High volatility: Be more selective, wider stops
+        confidenceThreshold = 0.60;
+        stopLossPercent = 5.0;
+        takeProfitPercent = 10.0;
+        break;
+        
+      case 'choppy':
+        // Choppy: Most dangerous - require higher confidence
+        confidenceThreshold = 0.55;
+        stopLossPercent = 3.0;
+        takeProfitPercent = 4.5; // 1.5:1 - quick exits in chop
+        break;
     }
     
-    // Adjust based on account size
-    if (state.accountSize === 'micro') {
-      confidenceThreshold = 0.75; // Higher confidence for small accounts
-      positionSizePercent = 3.0; // Smaller positions
-    } else if (state.accountSize === 'large') {
-      positionSizePercent = 10.0; // Can take larger positions
+    // ACCOUNT SIZE ADJUSTMENTS - Position sizing, not confidence!
+    switch (state.accountSize) {
+      case 'micro':
+        // Micro accounts: LOWER confidence to allow learning, SMALLER positions for safety
+        // Key insight: We need trades to learn! 75% confidence = no trades = no learning
+        positionSizePercent = 2.0; // Smaller positions for safety
+        // DON'T increase confidence - that prevents learning
+        break;
+        
+      case 'small':
+        positionSizePercent = 3.0;
+        break;
+        
+      case 'medium':
+        positionSizePercent = 5.0;
+        break;
+        
+      case 'large':
+        positionSizePercent = 8.0;
+        break;
     }
     
-    // Adjust based on recent win rate
-    if (state.recentWinRate < 40) {
-      confidenceThreshold = 0.70; // Be more selective
-    } else if (state.recentWinRate > 60) {
-      confidenceThreshold = 0.60; // Can be less selective
+    // WIN RATE ADJUSTMENTS (but don't be too restrictive)
+    if (state.recentWinRate < 30) {
+      // Poor performance: Slightly more selective + smaller positions
+      confidenceThreshold += 0.05;
+      positionSizePercent *= 0.8;
+    } else if (state.recentWinRate > 65) {
+      // Great performance: Can be slightly less selective
+      confidenceThreshold -= 0.05;
     }
+    
+    // SAFETY BOUNDS
+    confidenceThreshold = Math.max(0.40, Math.min(0.70, confidenceThreshold)); // 40-70% range
+    positionSizePercent = Math.max(1.0, Math.min(10.0, positionSizePercent)); // 1-10% range
     
     return {
       confidenceThreshold,
@@ -383,11 +435,32 @@ class RLParameterOptimizer {
   }
 
   private getRandomParameters(state: ParameterState): TradingParameters {
-    // Random exploration within reasonable bounds
-    const confidenceThreshold = 0.5 + Math.random() * 0.3; // 0.5-0.8
-    const stopLossPercent = 2 + Math.random() * 4; // 2-6%
+    // ADAPTIVE exploration within market-appropriate bounds
+    let confBase = 0.45;
+    let confRange = 0.25; // 0.45-0.70
+    let slBase = 2.5;
+    let slRange = 3.0;
+    
+    // Adjust exploration based on market regime
+    if (state.marketRegime === 'volatile') {
+      slBase = 3.5;
+      slRange = 3.5;
+      confBase = 0.50;
+    } else if (state.marketRegime === 'ranging') {
+      slBase = 2.0;
+      slRange = 2.0;
+      confBase = 0.40;
+    }
+    
+    const confidenceThreshold = confBase + Math.random() * confRange;
+    const stopLossPercent = slBase + Math.random() * slRange;
     const takeProfitPercent = stopLossPercent * (1.5 + Math.random() * 1.5); // 1.5-3x SL
-    const positionSizePercent = 3 + Math.random() * 7; // 3-10%
+    
+    // Position size based on account size
+    let positionSizePercent = 2 + Math.random() * 4; // 2-6%
+    if (state.accountSize === 'micro') {
+      positionSizePercent = 1 + Math.random() * 2; // 1-3% for micro
+    }
     
     return {
       confidenceThreshold,

@@ -5,7 +5,12 @@
 
 import { logger } from '@/lib/logger';
 import { asterConfig } from '@/lib/configService';
-import { db } from '@/lib/db';
+
+// Dynamic import to prevent Next.js from analyzing pg during build
+async function getDb() {
+  const { db } = await import('@/lib/db');
+  return db;
+}
 import { startupService } from '@/services/startupService';
 import { agentRunnerService } from '@/services/agentRunnerService';
 import { positionMonitorService } from '@/services/positionMonitorService';
@@ -127,6 +132,7 @@ class SystemAuditor {
     
     try {
       // Test connection
+      const db = await getDb();
       const testResult = await db.execute('SELECT 1 as test', []);
       this.addResult('Database', 'Connection', 'PASS', 'Database connection successful');
       
@@ -134,7 +140,8 @@ class SystemAuditor {
       const tables = ['trades', 'open_positions', 'trade_performance'];
       for (const table of tables) {
         try {
-          const result = await db.execute(`SELECT COUNT(*) FROM ${table} LIMIT 1`, []);
+          const tableDb = await getDb();
+          const result = await tableDb.execute(`SELECT COUNT(*) FROM ${table} LIMIT 1`, []);
           this.addResult('Database', `Table: ${table}`, 'PASS', `Table exists and accessible`);
         } catch (error) {
           this.addResult('Database', `Table: ${table}`, 'FAIL', 
@@ -143,7 +150,8 @@ class SystemAuditor {
       }
       
       // Check open positions
-      const openPositionsResult = await db.execute('SELECT COUNT(*) as count FROM open_positions WHERE status = $1', ['OPEN']);
+      const posDb = await getDb();
+      const openPositionsResult = await posDb.execute('SELECT COUNT(*) as count FROM open_positions WHERE status = $1', ['OPEN']);
       const openPositionsCount = parseInt(openPositionsResult.rows[0]?.count) || 0;
       this.addResult('Database', 'Open Positions', 
         openPositionsCount === 0 ? 'PASS' : 'WARNING',

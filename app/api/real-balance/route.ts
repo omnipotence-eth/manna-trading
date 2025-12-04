@@ -267,7 +267,7 @@ async function getBalanceHistory(timeRange: string) {
       [new Date(startTime)]
     );
 
-    const formattedHistory = history.rows.map(row => ({
+    const formattedHistory = history.rows.map((row: any) => ({
       timestamp: new Date(row.timestamp).getTime(),
       balance: parseFloat(row.balance),
       unrealizedPnl: parseFloat(row.unrealized_pnl || 0),

@@ -165,8 +165,28 @@ html {
 }
 
 :root {
-  --background: #000000;
-  --foreground: #00ff41;
+  --background: 0 0% 0%;
+  --foreground: 142 100% 50%;
+  
+  /* shadcn/ui variables - dark theme (matching trading aesthetic) */
+  --card: 0 0% 0%;
+  --card-foreground: 142 100% 50%;
+  --popover: 0 0% 0%;
+  --popover-foreground: 142 100% 50%;
+  --primary: 142 100% 50%;
+  --primary-foreground: 0 0% 0%;
+  --secondary: 0 0% 15%;
+  --secondary-foreground: 142 100% 50%;
+  --muted: 0 0% 10%;
+  --muted-foreground: 142 100% 40%;
+  --accent: 0 0% 15%;
+  --accent-foreground: 142 100% 50%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 142 100% 20%;
+  --input: 142 100% 20%;
+  --ring: 142 100% 50%;
+  --radius: 0.5rem;
 }
 
 /* Light mode variables */
@@ -183,14 +203,33 @@ html {
 
 /* Dark mode variables */
 .dark {
-  --background: #000000;
-  --foreground: #00ff41;
+  --background: 0 0% 0%;
+  --foreground: 142 100% 50%;
   --glass-bg: rgba(0, 0, 0, 0.7);
   --border-color: rgba(0, 255, 65, 0.2);
   --text-primary: #00ff41;
   --text-secondary: rgba(0, 255, 65, 0.6);
   --neon-green: #00ff41;
   --neon-blue: #00d4ff;
+  
+  /* shadcn/ui dark theme variables */
+  --card: 0 0% 0%;
+  --card-foreground: 142 100% 50%;
+  --popover: 0 0% 0%;
+  --popover-foreground: 142 100% 50%;
+  --primary: 142 100% 50%;
+  --primary-foreground: 0 0% 0%;
+  --secondary: 0 0% 15%;
+  --secondary-foreground: 142 100% 50%;
+  --muted: 0 0% 10%;
+  --muted-foreground: 142 100% 40%;
+  --accent: 0 0% 15%;
+  --accent-foreground: 142 100% 50%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 142 100% 20%;
+  --input: 142 100% 20%;
+  --ring: 142 100% 50%;
 }
 
 body {
