@@ -12,6 +12,7 @@ import { TRADING_THRESHOLDS, MARKET_SCANNER_CONSTANTS } from '@/constants/tradin
 import indicatorMemory from '@/lib/indicatorMemory';
 import { calculateSimpleATR } from '@/lib/atr';
 import { formatSymbolDisplay } from '@/lib/symbolUtils';
+import { wsMarketService } from './websocketMarketService';
 
 export interface OrderBookDepth {
   bidDepth: number;
@@ -163,12 +164,43 @@ class MarketScannerService {
         }
       });
       
-      logger.info('Ticker data loaded from cached exchangeInfo', {
+      // WEBSOCKET OPTIMIZATION: Enhance ticker data with real-time WebSocket data if available
+      const wsStatus = wsMarketService.getStatus();
+      let wsEnhancedCount = 0;
+      
+      if (wsStatus.connected && wsStatus.cachedSymbols > 0) {
+        // Update tickers with fresher WebSocket data
+        for (const item of tickersWithVolume) {
+          const wsTicker = wsMarketService.getTicker(item.symbol);
+          if (wsTicker && wsTicker.lastUpdate > Date.now() - 60000) { // Data less than 1 min old
+            // Update with WebSocket data (more current than REST API)
+            item.ticker.lastPrice = wsTicker.price;
+            item.ticker.priceChangePercent = wsTicker.priceChangePercent;
+            item.ticker.priceChange = wsTicker.priceChange;
+            item.ticker.volume = wsTicker.volume;
+            item.ticker.quoteVolume = wsTicker.quoteVolume;
+            item.ticker.highPrice = wsTicker.high;
+            item.ticker.lowPrice = wsTicker.low;
+            item.ticker.openPrice = wsTicker.open;
+            item.volume = wsTicker.quoteVolume; // Update volume for sorting
+            wsEnhancedCount++;
+          }
+        }
+        
+        // Re-sort by volume with updated WebSocket data
+        if (wsEnhancedCount > 0) {
+          tickersWithVolume.sort((a, b) => b.volume - a.volume);
+        }
+      }
+      
+      logger.info('Ticker data loaded', {
         context: 'MarketScanner',
         data: { 
           totalSymbols: tickersWithVolume.length,
-          cached: true,
-          method: '30-key asterDexService'
+          wsConnected: wsStatus.connected,
+          wsEnhanced: wsEnhancedCount,
+          wsCachedSymbols: wsStatus.cachedSymbols,
+          method: wsStatus.connected ? 'WebSocket + REST fallback' : 'REST API only'
         }
       });
 
@@ -232,9 +264,9 @@ class MarketScannerService {
             context: 'MarketScanner'
           });
 
-          // CRITICAL FIX: Add timeout protection to prevent 15+ minute hangs
-          // Each symbol analysis has a maximum of 60 seconds (allows for rate limiting delays)
-          const SYMBOL_ANALYSIS_TIMEOUT = 60000; // 60 seconds per symbol (increased for rate limiting)
+          // CRITICAL FIX: Add timeout protection to prevent hangs
+          // OPTIMIZED: Reduced to 15 seconds - analyzeSymbol should be fast now (no klines API)
+          const SYMBOL_ANALYSIS_TIMEOUT = 15000; // 15 seconds per symbol
           
           // Process this batch in parallel (only 10 at a time is safe)
           const batchPromises = batch.map(async (symbolInfo) => {
@@ -654,20 +686,10 @@ class MarketScannerService {
         return null;
       }
 
-      // DIAGNOSTIC: Log all ticker data for debugging
-      logger.info(`📊 Analyzing ${displaySymbol}`, {
+      // OPTIMIZED: Reduced logging - only debug level
+      logger.debug(`📊 Analyzing ${displaySymbol}`, {
         context: 'MarketScanner',
-        data: {
-          symbol: displaySymbol,
-          price,
-          volume24h,
-          quoteVolume24h,
-          priceChange24h,
-          high24h,
-          low24h,
-          openPrice,
-          spread: ((high24h - low24h) / price) * 100
-        }
+        data: { symbol: displaySymbol, price, quoteVolume24h }
       });
 
       // CRITICAL: Filter out problematic low-liquidity coins BEFORE analysis
@@ -692,9 +714,9 @@ class MarketScannerService {
         return null; // Skip only coins with extreme execution problems
       }
       
-      logger.info(`✅ ${displaySymbol} passed pre-filters, continuing analysis...`, {
-        context: 'MarketScanner',
-        data: { symbol: displaySymbol, quoteVolume24h, spreadPercent }
+      // OPTIMIZED: Debug level logging for pre-filter pass
+      logger.debug(`✅ ${displaySymbol} passed pre-filters`, {
+        context: 'MarketScanner'
       });
       
       // PRELIMINARY SCORE: Quick calculation to decide if MTF analysis is worth it
@@ -838,63 +860,36 @@ class MarketScannerService {
       }
       
       // HIGH PRIORITY FIX: Calculate volumeRatio (current volume vs average)
-      // OPTIMIZED: Use klines for better volume ratio calculation (7-day average)
+      // OPTIMIZED: Skip klines API call to avoid IP rate limits - use ticker data instead!
+      // CRITICAL: Klines API is IP-rate-limited, not API key based!
+      // The 24hr ticker already contains volume data - no need for additional API calls
       let volumeRatio = 1.0;
       let avgVolume24h = 0;
       
-      // Try to get klines for better volume ratio calculation
-      // CRITICAL FIX: Add timeout and error handling for rate limits
-      try {
-        const { asterDexService } = await import('./asterDexService');
-        const normalizedSymbol = symbol.replace('/', ''); // BTCUSDT format for API
-        // CRITICAL FIX: Increase timeout to 30 seconds to account for rate limiting and network latency
-        // API calls can take 15-25 seconds during heavy rate limiting, so we need a longer timeout
-        const DAILY_KLINES_TIMEOUT = 30000; // 30 seconds (increased from 15s for heavy rate limiting)
-        const klinesPromise = asterDexService.getKlines(normalizedSymbol, '1d', 7); // 7 days
-        const klinesTimeoutPromise = new Promise<null>((resolve) => {
-          setTimeout(() => {
-            logger.warn(`⏱️ Daily klines timeout for ${displaySymbol} (${DAILY_KLINES_TIMEOUT}ms) - continuing without`, {
-              context: 'MarketScanner',
-              data: { symbol: displaySymbol, timeout: DAILY_KLINES_TIMEOUT }
-            });
-            resolve(null);
-          }, DAILY_KLINES_TIMEOUT);
-        });
-        const klines = await Promise.race([klinesPromise, klinesTimeoutPromise]);
-        
-        if (klines && klines.length > 0) {
-          // Calculate average volume over last 7 days
-          avgVolume24h = klines.reduce((sum: number, k: any) => sum + (k.volume || 0), 0) / klines.length;
-          volumeRatio = avgVolume24h > 0 ? quoteVolume24h / avgVolume24h : 1.2;
-          
-          logger.debug(`Using klines-based volume ratio for ${displaySymbol}: ${volumeRatio.toFixed(2)}x`, {
-            context: 'MarketScanner',
-            data: { symbol: displaySymbol, volumeRatio, avgVolume24h, currentVolume: quoteVolume24h }
-          });
-        } else {
-          // Fallback: Use ticker average if available
-          avgVolume24h = parseFloat(ticker.avgVolume || ticker.quoteVolume || '0');
-          volumeRatio = avgVolume24h > 0 ? quoteVolume24h / avgVolume24h : 1.2;
+      // OPTIMIZATION: Use ticker data directly to avoid IP rate limits
+      // Klines are IP-rate-limited and cause 429 errors with many symbols
+      // Ticker volume is already available from the initial batch fetch
+      avgVolume24h = parseFloat(ticker.avgVolume || ticker.quoteVolume || '0');
+      
+      // If no avgVolume available, estimate based on current volume
+      // Most coins have similar 24h volume day-to-day, so assume current = average
+      if (avgVolume24h === 0 || avgVolume24h === quoteVolume24h) {
+        // No average available - use a conservative estimate (1.0x = average)
+        volumeRatio = 1.0;
+        // But check if price change indicates unusual activity
+        const priceChangeAbs = Math.abs(priceChange24h);
+        if (priceChangeAbs > 5) {
+          // Price moved >5% - likely above average volume
+          volumeRatio = 1.2 + (priceChangeAbs / 20); // Higher price change = higher estimated volume
         }
-      } catch (klinesError) {
-        // CRITICAL FIX: Gracefully handle rate limit errors
-        const errorMsg = klinesError instanceof Error ? klinesError.message : String(klinesError);
-        if (errorMsg.includes('429') || errorMsg.includes('rate limit')) {
-          logger.debug(`Rate limited on volume ratio for ${displaySymbol} - using ticker fallback (non-critical)`, {
-            context: 'MarketScanner',
-            symbol: displaySymbol
-          });
-        }
-        
-        // Fallback: Use ticker average if klines fail
-        avgVolume24h = parseFloat(ticker.avgVolume || ticker.quoteVolume || '0');
-        volumeRatio = avgVolume24h > 0 ? quoteVolume24h / avgVolume24h : 1.2;
-        
-        logger.debug(`Using ticker-based volume ratio for ${displaySymbol}: ${volumeRatio.toFixed(2)}x`, {
-          context: 'MarketScanner',
-          data: { symbol: displaySymbol, volumeRatio, avgVolume24h, currentVolume: quoteVolume24h }
-        });
+      } else {
+        volumeRatio = quoteVolume24h / avgVolume24h;
       }
+      
+      logger.debug(`Using ticker-based volume ratio for ${displaySymbol}: ${volumeRatio.toFixed(2)}x (no klines API call - avoiding rate limits)`, {
+        context: 'MarketScanner',
+        data: { symbol: displaySymbol, volumeRatio, avgVolume24h, currentVolume: quoteVolume24h }
+      });
       
       // HIGH PRIORITY FIX: Calculate volumeStrength (normalized volume ratio)
       // RELAXED: More lenient calculation for quiet markets
@@ -1159,17 +1154,18 @@ class MarketScannerService {
       );
 
       // ========================================
-      // SMART ORDER BOOK ANALYSIS (RE-ENABLED with Throttling)
+      // SMART ORDER BOOK ANALYSIS (OPTIONAL - IP Rate Limited!)
       // ========================================
-      // Order book analysis adds valuable depth/liquidity insights
-      // With 30s caching + high score threshold (85+), this is now safe
-      // OPTIMIZATION: Only analyze top opportunities (score >= 85) to minimize API calls
+      // CRITICAL: Order book API is IP-rate-limited (not API key based)
+      // Set SKIP_ORDER_BOOK_ANALYSIS=true to avoid 429 errors
+      // The 30-key pool does NOT help with public endpoints!
       // ========================================
       let orderBook: OrderBookDepth | undefined = undefined;
+      const skipOrderBook = process.env.SKIP_ORDER_BOOK_ANALYSIS === 'true';
       
       // SMART THROTTLING: Only analyze order book for ELITE opportunities (score >= 85)
-      // This reduces API calls by ~95% (was: all 50 symbols, now: ~2-3 elite symbols)
-      if (score >= 85) {
+      // AND only if not explicitly disabled via environment variable
+      if (score >= 85 && !skipOrderBook) {
         logger.debug(`📖 Analyzing order book for ELITE opportunity ${symbol} (score ${score})`, {
           context: 'MarketScanner',
           symbol,

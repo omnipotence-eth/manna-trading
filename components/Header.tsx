@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 interface HeaderProps {
   activeView: 'live' | 'models';
@@ -124,16 +126,17 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
               <motion.div
                 animate={{ opacity: [0.5, 1, 0.5] }}
                 transition={{ duration: 2, repeat: Infinity }}
-                className="flex items-center gap-1.5 px-2 py-0.5 sm:px-3 sm:py-1 bg-green-500/20 border border-green-500/50 rounded text-xs"
               >
-                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-green-500 font-bold hidden sm:inline">SCANNING</span>
+                <Badge variant="default" className="flex items-center gap-1.5 border-primary/50 bg-primary/20">
+                  <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></div>
+                  <span className="font-bold hidden sm:inline">SCANNING</span>
+                </Badge>
               </motion.div>
             ) : (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 sm:px-3 sm:py-1 bg-blue-500/20 border border-blue-500/50 rounded text-[10px] sm:text-xs">
-                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                <span className="text-blue-500/70">{getTimeAgo(scanStatus.lastScan)}</span>
-              </div>
+              <Badge variant="secondary" className="flex items-center gap-1.5 text-[10px] sm:text-xs">
+                <div className="w-1.5 h-1.5 bg-primary rounded-full"></div>
+                <span>{getTimeAgo(scanStatus.lastScan)}</span>
+              </Badge>
             )}
           </motion.div>
 
@@ -143,19 +146,24 @@ export default function Header({ activeView, setActiveView }: HeaderProps) {
               { id: 'live' as const, label: 'LIVE' },
               { id: 'models' as const, label: 'AGENTS' },
             ].map((item) => (
-              <motion.button
+              <motion.div
                 key={item.id}
-                onClick={() => setActiveView(item.id)}
-                className={`px-3 sm:px-6 py-2 border transition-all text-xs sm:text-base ${
-                  activeView === item.id
-                    ? 'border-green-400 bg-green-400/10 text-green-400'
-                    : 'border-green-400/30 text-green-400/60 hover:border-green-400/60'
-                }`}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                {item.label}
-              </motion.button>
+                <Button
+                  onClick={() => setActiveView(item.id)}
+                  variant={activeView === item.id ? "default" : "outline"}
+                  size="default"
+                  className={`text-xs sm:text-base ${
+                    activeView === item.id
+                      ? 'border-primary bg-primary/10'
+                      : 'border-primary/30 text-primary/60 hover:border-primary/60'
+                  }`}
+                >
+                  {item.label}
+                </Button>
+              </motion.div>
             ))}
           </nav>
         </div>

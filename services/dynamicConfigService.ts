@@ -8,7 +8,12 @@ import { logger } from '@/lib/logger';
 import { asterConfig } from '@/lib/configService';
 import { rlParameterOptimizer, ParameterState, TradingParameters } from './rlParameterOptimizer';
 import { realBalanceService } from './realBalanceService';
-import { db } from '@/lib/db';
+
+// Dynamic import to prevent Next.js from analyzing pg during build
+async function getDb() {
+  const { db } = await import('@/lib/db');
+  return db;
+}
 
 export interface DynamicConfig {
   confidenceThreshold: number;
@@ -122,6 +127,7 @@ export class DynamicConfigService {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - 30);
       
+      const db = await getDb();
       const result = await db.execute(`
         SELECT COUNT(*) as count
         FROM trades

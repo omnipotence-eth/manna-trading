@@ -829,9 +829,9 @@ class AsterDexService {
             askDepth: asks.length
           };
           
-          // Cache for 30 seconds (prevents rate limit abuse)
-          // OPTIMIZED: Increased from 2s to 30s to reduce 429 errors
-          apiCache.set(cacheKey, orderBookData, 30000);
+          // Cache for 60 seconds (prevents IP rate limit abuse)
+          // OPTIMIZED: Increased to 60s - order book is IP-rate-limited, not per API key!
+          apiCache.set(cacheKey, orderBookData, apiCache.getTTL('ORDER_BOOK'));
           
           return orderBookData;
         } catch (fetchError) {
@@ -1189,10 +1189,10 @@ class AsterDexService {
               closeTime: k[6],
             }));
             
-            // CRITICAL FIX: Increase cache time to prevent 429 errors
-            // Klines data doesn't need to be super fresh - 60-120 seconds is fine for trading decisions
-            const cacheTTL = interval === '1m' ? 60 : (['3m', '5m'].includes(interval) ? 90 : 120);
-            apiCache.set(cacheKey, klines, cacheTTL * 1000); // Convert to milliseconds
+            // CRITICAL FIX: Use timeframe-specific cache TTLs
+            // Higher timeframes (1h, 4h) can be cached longer since they change less
+            // This allows MTF analysis without hammering the API
+            apiCache.set(cacheKey, klines, apiCache.getKlinesTTL(interval));
             
             return klines;
           } catch (fetchError) {
@@ -1854,8 +1854,8 @@ class AsterDexService {
             timezone: data.timezone
           };
           
-          // Cache for 5 minutes (exchange info doesn't change often)
-          apiCache.set(cacheKey, result, 300000);
+          // Cache for 1 hour (exchange info rarely changes - reduces IP rate limit usage)
+          apiCache.set(cacheKey, result, apiCache.getTTL('EXCHANGE_INFO'));
           
           // CRITICAL FIX: Initialize symbol validation cache from exchange info
           // This prevents additional API calls during symbol validation

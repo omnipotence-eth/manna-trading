@@ -6,10 +6,15 @@
 
 import { logger } from '@/lib/logger';
 import { asterDexService } from './asterDexService';
-import { db } from '@/lib/db';
 import { TRADING_THRESHOLDS } from '@/constants/tradingConstants';
 import { realBalanceService } from './realBalanceService';
 import { Mutex } from 'async-mutex';
+
+// Dynamic import to prevent Next.js from analyzing pg during build
+async function getDb() {
+  const { db } = await import('@/lib/db');
+  return db;
+}
 
 export interface OpenPosition {
   id: string;
@@ -511,7 +516,7 @@ class PositionMonitorService {
       return {
         action: 'TIMEOUT',
         reason: `Position timeout: held for ${((Date.now() - openedAt) / 1000 / 60 / 60).toFixed(1)} hours`,
-        exitPrice: currentPrice,
+        exitPrice: price,
         pnl: position.unrealizedPnL,
         pnlPercent: position.unrealizedPnLPercent
       };
@@ -769,6 +774,7 @@ class PositionMonitorService {
    */
   private async loadOpenPositions(): Promise<void> {
     try {
+      const db = await getDb();
       const result = await db.execute(`
         SELECT * FROM open_positions WHERE status = 'OPEN'
       `);
@@ -819,6 +825,7 @@ class PositionMonitorService {
 
   private async savePositionToDb(position: OpenPosition): Promise<void> {
     try {
+      const db = await getDb();
       await db.execute(`
         INSERT INTO open_positions (
           id, symbol, side, entry_price, current_price, size, leverage,
@@ -842,6 +849,7 @@ class PositionMonitorService {
 
   private async updatePositionInDb(position: OpenPosition): Promise<void> {
     try {
+      const db = await getDb();
       await db.execute(`
         UPDATE open_positions SET
           current_price = $2, highest_price = $3, lowest_price = $4,
@@ -863,6 +871,7 @@ class PositionMonitorService {
 
   private async closePositionInDb(position: OpenPosition, update: PositionUpdate): Promise<void> {
     try {
+      const db = await getDb();
       // Move to closed_positions table
       await db.execute(`
         INSERT INTO closed_positions (
@@ -1024,8 +1033,8 @@ class PositionMonitorService {
       
       if (!ticker) return false;
       
-      const currentVolume = parseFloat(ticker.volume || '0');
-      const avgVolume = parseFloat(ticker.avgVolume || ticker.quoteVolume || '0');
+      const currentVolume = parseFloat(String(ticker.volume || '0'));
+      const avgVolume = parseFloat(String(ticker.averageVolume || ticker.quoteVolume || '0'));
       
       // Track volume history
       if (!this.volumeHistory.has(symbol)) {

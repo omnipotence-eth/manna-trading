@@ -209,7 +209,7 @@ class LoggingConfigService {
       HealthMonitor: 'error',
       MarketScanner: 'warn',
       DataIngestion: 'error',
-      AgentCoordinator: 'warn',
+      AgentCoordinator: 'info',  // CRITICAL: Show trade decisions and workflow progress
       AsterDEX: 'error',
       DeepSeek: 'error'
     };

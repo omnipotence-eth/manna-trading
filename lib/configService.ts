@@ -135,11 +135,17 @@ export const aiConfig = {
  * Database Configuration
  */
 export const dbConfig = {
-  connectionString: getEnvVar('DATABASE_URL', 'postgresql://localhost:5432/manna_dev', false),
-  ssl: getBooleanEnvVar('DATABASE_SSL', true), // Default to true for Neon
+  connectionString: getEnvVar('DATABASE_URL', '') || getEnvVar('POSTGRES_URL', ''),
+  // FIXED: Default to false for local development - set DATABASE_SSL=true for cloud DBs (Neon, Supabase)
+  ssl: getBooleanEnvVar('DATABASE_SSL', false),
   maxConnections: getNumberEnvVar('DATABASE_MAX_CONNECTIONS', 30), // CRITICAL FIX: Increased from 10 to 30 for parallel operations
   idleTimeout: getNumberEnvVar('DATABASE_IDLE_TIMEOUT', 30000),
   connectionTimeout: getNumberEnvVar('DATABASE_CONNECTION_TIMEOUT', 10000), // Increased timeout for Neon
+  // Helper to check if database is configured
+  get isConfigured(): boolean {
+    const connString = this.connectionString;
+    return !!(connString && connString !== 'your_postgres_connection_string_here');
+  }
 };
 
 /**

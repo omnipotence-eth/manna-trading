@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
       }));
     
     // If no opportunities, analyze top symbols by volume instead
-    let analyzedSymbols = [];
+    let analyzedSymbols: Array<{ symbol: string; score: number; confidence: number; recommendation: string }> = [];
     if (allOpportunities.length === 0 && topByVolume.length > 0) {
       analyzedSymbols = topByVolume.slice(0, 20).map(opp => ({
         symbol: opp.symbol,
@@ -83,7 +83,8 @@ export async function GET(request: NextRequest) {
         
         // Recalculate distribution
         Object.keys(confidenceDistribution).forEach(key => {
-          confidenceDistribution[key] = topConfidences.filter(c => {
+          const typedKey = key as keyof typeof confidenceDistribution;
+          confidenceDistribution[typedKey] = topConfidences.filter(c => {
             const range = key.replace('%', '').split('-');
             if (key === '<40%') return c < 0.4;
             if (key.includes('-')) {

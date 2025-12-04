@@ -10,6 +10,7 @@ import { positionMonitorService } from '@/services/positionMonitorService';
 import { healthMonitorService } from '@/services/healthMonitorService';
 import { criticalServiceMonitor } from '@/services/criticalServiceMonitor';
 import { asterConfig } from '@/lib/configService';
+import { wsMarketService } from '@/services/websocketMarketService';
 
 class StartupService {
   private initialized = false;
@@ -64,23 +65,70 @@ class StartupService {
     }
 
     try {
+      // Step 0.5: Initialize WebSocket Market Service (connects in background)
+      logger.info('[0.5/7] Starting WebSocket Market Service...', { context: 'Startup' });
+      try {
+        // Start connection (don't await - it may take a few seconds to establish)
+        wsMarketService.connect().then(() => {
+          const wsStatus = wsMarketService.getStatus();
+          if (wsStatus.connected) {
+            logger.info('[WebSocket] ✅ Connected! Real-time market data active', {
+              context: 'Startup',
+              data: { cachedSymbols: wsStatus.cachedSymbols }
+            });
+          }
+        }).catch(err => {
+          logger.warn('[WebSocket] Connection failed, using REST API fallback', {
+            context: 'Startup',
+            error: err instanceof Error ? err.message : String(err)
+          });
+        });
+        
+        // Give WebSocket 2 seconds to connect before continuing
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const wsStatus = wsMarketService.getStatus();
+        logger.info('[0.5/7] WebSocket initialization complete', {
+          context: 'Startup',
+          data: { connected: wsStatus.connected, cachedSymbols: wsStatus.cachedSymbols }
+        });
+      } catch (wsError) {
+        logger.warn('[0.5/7] ⚠️ WebSocket init error (non-critical)', {
+          context: 'Startup',
+          error: wsError instanceof Error ? wsError.message : String(wsError)
+        });
+      }
+
+      // Step 0.8: Initialize Database (creates tables if needed)
+      logger.info('[0.8/7] Initializing database...', { context: 'Startup' });
+      try {
+        const { initializeDatabase } = await import('@/lib/db');
+        await initializeDatabase();
+        logger.info('[0.8/7] ✅ Database initialized successfully!', { context: 'Startup' });
+      } catch (dbError) {
+        logger.warn('[0.8/7] ⚠️ Database initialization failed (non-critical)', {
+          context: 'Startup',
+          error: dbError instanceof Error ? dbError.message : String(dbError),
+          note: 'System will run without persistent storage'
+        });
+      }
+
       // Step 1: Initialize Real Balance Service (non-blocking - starts in background)
-      logger.info('[1/4] Starting Real Balance Service...', { context: 'Startup' });
+      logger.info('[1/6] Starting Real Balance Service...', { context: 'Startup' });
       realBalanceService.start(); // Don't await - let it fetch in background
-      logger.info('[1/4] Real Balance Service started (fetching balance in background)', { context: 'Startup' });
+      logger.info('[1/6] Real Balance Service started (fetching balance in background)', { context: 'Startup' });
 
       // Step 2: Clean up old positions BEFORE starting monitor
-      logger.info('[2/4] Checking for old positions...', { context: 'Startup' });
+      logger.info('[2/7] Checking for old positions...', { context: 'Startup' });
       try {
         // CRITICAL FIX: Clear from memory FIRST
         const openPositions = positionMonitorService.getOpenPositions();
         if (openPositions.length > 0) {
-          logger.warn(`[2/4] Found ${openPositions.length} positions in memory - clearing...`, {
+          logger.warn(`[2/7] Found ${openPositions.length} positions in memory - clearing...`, {
             context: 'Startup',
             positions: openPositions.map(p => p.symbol)
           });
           positionMonitorService.clearAllPositions();
-          logger.info('[2/4] Old positions cleared from memory', { context: 'Startup' });
+          logger.info('[2/7] Old positions cleared from memory', { context: 'Startup' });
         }
         
         // CRITICAL FIX: Delete from database SECOND to prevent reload when monitor starts
@@ -89,12 +137,12 @@ class StartupService {
           const deleteResult = await db.execute(`DELETE FROM open_positions WHERE status = 'OPEN'`, []);
           const deletedCount = deleteResult.rowCount || 0;
           if (deletedCount > 0) {
-            logger.info(`[2/4] Deleted ${deletedCount} old positions from database`, { context: 'Startup' });
+            logger.info(`[2/7] Deleted ${deletedCount} old positions from database`, { context: 'Startup' });
           } else {
-            logger.info('[2/4] No old positions found in database', { context: 'Startup' });
+            logger.info('[2/7] No old positions found in database', { context: 'Startup' });
           }
         } catch (dbError) {
-          logger.warn('[2/4] Failed to delete positions from database (non-critical)', {
+          logger.warn('[2/7] Failed to delete positions from database (non-critical)', {
             context: 'Startup',
             error: dbError instanceof Error ? dbError.message : String(dbError)
           });
@@ -108,13 +156,13 @@ class StartupService {
       }
 
       // Step 3: Initialize Position Monitor Service
-      logger.info('[3/5] Starting Position Monitor Service...', { context: 'Startup' });
+      logger.info('[3/7] Starting Position Monitor Service...', { context: 'Startup' });
       await positionMonitorService.start();
-      logger.info('[3/5] Position Monitor Service started', { context: 'Startup' });
+      logger.info('[3/7] Position Monitor Service started', { context: 'Startup' });
 
       // Step 4: Initialize 24/7 Agent Runner
       if (asterConfig.trading.enable24_7Agents) {
-        logger.info('[4/5] Starting 24/7 Agent Runner (this may take 10-20 seconds)...', { context: 'Startup' });
+        logger.info('[4/7] Starting 24/7 Agent Runner (this may take 10-20 seconds)...', { context: 'Startup' });
         
         // CRITICAL FIX: Don't use Promise.race with timeout - it can interrupt start() before isRunning is set
         // start() already handles its own 20-second timeout for symbol fetch and uses fallback symbols
@@ -128,7 +176,7 @@ class StartupService {
           // CRITICAL FIX: Verify Agent Runner actually started (not just that promise resolved)
           const runnerStatus = agentRunnerService.getStatus();
           if (runnerStatus.isRunning) {
-            logger.info('[4/5] Agent Runner started successfully and verified running', { 
+            logger.info('[4/7] Agent Runner started successfully and verified running', { 
               context: 'Startup',
               data: {
                 isRunning: true,
@@ -137,7 +185,7 @@ class StartupService {
               }
             });
           } else {
-            logger.error('[4/5] Agent Runner start() completed but isRunning=false', {
+            logger.error('[4/7] Agent Runner start() completed but isRunning=false', {
               context: 'Startup',
               data: { status: runnerStatus }
             });
@@ -150,13 +198,13 @@ class StartupService {
           // This handles cases where start() throws but isRunning was set before the throw
           const runnerStatus = agentRunnerService.getStatus();
           if (runnerStatus.isRunning) {
-            logger.warn('[4/5] Agent Runner reported error but is actually running - continuing', {
+            logger.warn('[4/7] Agent Runner reported error but is actually running - continuing', {
               context: 'Startup',
               data: { error: errorMsg, isRunning: true, symbols: runnerStatus.config.symbols.length }
             });
             // Continue - Agent Runner is running despite error
           } else {
-            logger.error('[4/5] Agent Runner startup failed', error as Error, { 
+            logger.error('[4/7] Agent Runner startup failed', error as Error, { 
               context: 'Startup',
               data: {
                 error: errorMsg,
@@ -169,11 +217,11 @@ class StartupService {
           }
         }
       } else {
-        logger.info('[4/5] 24/7 Agent Runner disabled in config', { context: 'Startup' });
+        logger.info('[4/7] 24/7 Agent Runner disabled in config', { context: 'Startup' });
       }
 
       // Step 5: Verify DeepSeek R1 is still responding (final check)
-      logger.info('[5/6] Final DeepSeek R1 verification...', { context: 'Startup' });
+      logger.info('[5/7] Final DeepSeek R1 verification...', { context: 'Startup' });
       try {
         const { deepseekService } = await import('@/services/deepseekService');
         
@@ -187,7 +235,7 @@ class StartupService {
           timeoutPromise
         ]) as string;
         
-        logger.info('[5/6] DeepSeek R1 verified and ready for trading!', {
+        logger.info('[5/7] DeepSeek R1 verified and ready for trading!', {
           context: 'Startup',
           data: {
             aiStatus: 'operational',
@@ -197,7 +245,7 @@ class StartupService {
           }
         });
       } catch (verifyError) {
-        logger.warn('[5/6] DeepSeek R1 verification failed', {
+        logger.warn('[5/7] DeepSeek R1 verification failed', {
           context: 'Startup',
           error: verifyError instanceof Error ? verifyError.message : String(verifyError),
           impact: 'Workflows may fail - ensure Ollama is running'

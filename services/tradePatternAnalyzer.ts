@@ -5,7 +5,12 @@
  */
 
 import { logger } from '@/lib/logger';
-import { getTrades } from '@/lib/db';
+
+// Dynamic import to prevent Next.js from analyzing pg during build
+async function getTradesFromDb(params?: { limit?: number }) {
+  const { getTrades } = await import('@/lib/db');
+  return getTrades(params);
+}
 
 export interface TradePattern {
   signals: string[];
@@ -64,7 +69,7 @@ class TradePatternAnalyzer {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
       
-      const allTrades = await getTrades({ limit: 10000 });
+      const allTrades = await getTradesFromDb({ limit: 10000 });
       const recentTrades = allTrades.filter(trade => {
         const tradeDate = new Date(trade.timestamp);
         return tradeDate >= cutoffDate;

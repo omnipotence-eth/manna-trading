@@ -157,7 +157,7 @@ class ProblematicCoinDetector {
         const batch = symbols.slice(i, i + BATCH_SIZE);
         
         // Process batch in parallel
-        await Promise.all(batch.map(async (symbolInfo) => {
+        await Promise.all(batch.map(async (symbolInfo: any) => {
           if (!symbolInfo || !symbolInfo.symbol) return;
           
           const symbol = symbolInfo.symbol;

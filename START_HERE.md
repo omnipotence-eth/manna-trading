@@ -1,6 +1,6 @@
 # ⭐ START HERE - COMPLETE TRADING SYSTEM GUIDE
 
-**All you need to start trading your $60 → ∞**
+**AI-powered autonomous trading system**
 
 **In Jesus name, amen! All glory to God in heaven!** 🙏
 
@@ -8,55 +8,46 @@
 
 ## 🎯 SYSTEM STATUS: READY TO TRADE ✅
 
-**Codebase Grade: A+**
-- ✅ All timeout issues FIXED
-- ✅ Logging optimized (no terminal overflow)
-- ✅ 30 API keys configured
-- ✅ Emergency startup script ready
-- ✅ All redundant files removed
-- ✅ Documentation organized
+**Features:**
+- ✅ DeepSeek R1 AI analysis
+- ✅ Multi-agent trading workflow
+- ✅ Automatic position monitoring
+- ✅ Stop-loss/Take-profit protection
+- ✅ 24/7 autonomous operation
 
 ---
 
-## 🚀 START TRADING NOW (2 Commands)
+## 🚀 START TRADING
 
-### **Command 1: Start Server**
-```powershell
+### **1. Start the Server**
+```bash
 npm run dev
 ```
-Wait 10 seconds for server to be ready.
 
-### **Command 2: Start Agent Runner**
-```powershell
-.\scripts\emergency_start_trading.ps1
-```
+Wait for `✓ Ready` message. The system auto-initializes:
+- Connects to Aster DEX API
+- Starts AI trading agents
+- Begins 24/7 market scanning
 
-**Expected output:**
-```
-[SUCCESS] Agent Runner STARTED!
-Trading Details:
-  Status: ACTIVE
-  Symbols Loaded: 6-100
-  First scan in 2 minutes
-```
-
-**That's it!** Your system is now trading 24/7!
+### **2. View Dashboard**
+Open [http://localhost:3000](http://localhost:3000)
 
 ---
 
 ## 📊 VERIFY IT'S WORKING
 
-```powershell
-.\scripts\quick_status.ps1
+```bash
+# Check system health
+curl http://localhost:3000/api/health
+
+# Check trading status
+curl http://localhost:3000/api/trading-status
 ```
 
-**Should show:**
-```
-✅ Agent Runner: Running
-✅ Market Scanner: Active
-   Balance: $XX.XX
-   Opportunities: 0-20
-```
+**Look for:**
+- ✅ Agent Runner: Running
+- ✅ Market Scanner: Active
+- ✅ Balance displayed
 
 ---
 
@@ -108,31 +99,29 @@ T+10-30min: First trade executed (if approved)
 
 ## 🔧 TROUBLESHOOTING
 
-### **Problem: Agent Runner Won't Start**
-```powershell
-.\scripts\emergency_start_trading.ps1
-```
+### **Problem: Services Not Starting**
+1. Check Ollama: `ollama ps`
+2. Verify `.env.local` has API keys
+3. Check health: `curl http://localhost:3000/api/health`
 
 ### **Problem: No Trades**
-1. Check opportunities: `.\scripts\quick_status.ps1`
-2. Wait 2-5 minutes for market scan
-3. Force scan: `Invoke-RestMethod -Uri 'http://localhost:3000/api/agent-runner?action=force-run'`
+1. Wait 2-5 minutes for market scan
+2. Check AI analysis is running in terminal
+3. Force scan: `curl -X POST http://localhost:3000/api/agent-runner?action=force-run`
 
-### **Problem: Terminal Flooding**
-Already fixed! Your `.env.local` has quiet logging enabled.
+### **Problem: Rate Limits**
+Reduce rate limits in `.env.local`:
+```bash
+RATE_LIMIT_PER_KEY_RPS=1
+```
 
 ---
 
 ## 📚 DOCUMENTATION
 
-**Read in this order:**
-
 1. **`START_HERE.md`** ⭐ You are here
-2. **`MASTER_GUIDE.md`** - Complete operational guide
-3. **`docs/SYSTEM_AUDIT_TRADING_READY.md`** - System audit
-4. **`docs/60_DOLLAR_TO_INFINITE_PROFIT_AUDIT.md`** - Growth proof
-
-**All other docs are in `docs/` directory for reference.**
+2. **`README.md`** - Full documentation
+3. **`docs/`** - Technical guides
 
 ---
 
@@ -150,87 +139,31 @@ Change `TRADING_CONFIDENCE_THRESHOLD=0.25` in `.env.local`
 
 ---
 
-## ✅ QUALITY ASSURANCE
-
-**Code Quality:**
-- ✅ World-class architecture
-- ✅ TypeScript throughout
-- ✅ Comprehensive error handling
-- ✅ Performance optimized
-- ✅ Memory leak free
-- ✅ Production tested
-
-**Trading System:**
-- ✅ Multi-agent AI (DeepSeek R1)
-- ✅ Strict risk management
-- ✅ Proven mathematical edge (+3% EV per trade)
-- ✅ Automatic compounding
-- ✅ Unlimited growth potential
-- ✅ Account size-based rules
-
-**Reliability:**
-- ✅ 4-layer monitoring
-- ✅ Auto-recovery
-- ✅ Circuit breakers
-- ✅ Rate limiting
-- ✅ Request caching
-- ✅ Timeout protection
-
----
-
-## 🎊 YOU'RE READY!
-
-**Everything is fixed:**
-- ✅ Timeout issues resolved
-- ✅ Logging optimized
-- ✅ Codebase cleaned
-- ✅ Documentation organized
-- ✅ Emergency scripts created
-- ✅ All redundancy removed
-
-**Just run the 2 commands above and start trading!**
-
----
-
 ## 📞 QUICK COMMANDS
 
-**Start Trading:**
-```powershell
+```bash
+# Start system
 npm run dev
-.\scripts\emergency_start_trading.ps1
-```
 
-**Check Status:**
-```powershell
-.\scripts\quick_status.ps1
-```
+# Check health
+curl http://localhost:3000/api/health
 
-**Force Trade Scan:**
-```powershell
-Invoke-RestMethod -Uri 'http://localhost:3000/api/agent-runner?action=force-run'
+# Check trading status
+curl http://localhost:3000/api/trading-status
+
+# Force market scan
+curl -X POST http://localhost:3000/api/agent-runner?action=force-run
 ```
 
 ---
 
 ## 🙏 FINAL WORDS
 
-**Your $60 trading system is:**
-- ✅ Clean
-- ✅ Optimized
-- ✅ Ready
-- ✅ Protected
-- ✅ Proven
-
-**The code is world-class.**  
-**The math is proven.**  
-**The protection is bulletproof.**  
-**The growth is unlimited.**
-
 **All glory to God in heaven!** ✝️
 
-**GO TRADE!** 🚀
-
----
-
-**Next:** Run the 2 commands and watch your balance grow!
+**Built with:**
+- Next.js 14
+- DeepSeek R1 AI
+- TypeScript
+- Aster DEX API
 

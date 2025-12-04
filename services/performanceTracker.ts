@@ -4,7 +4,12 @@
  */
 
 import { logger } from '@/lib/logger';
-import { db } from '@/lib/db';
+
+// Dynamic import to prevent Next.js from analyzing pg during build
+async function getDb() {
+  const { db } = await import('@/lib/db');
+  return db;
+}
 
 export interface TradePerformance {
   tradeId: string;
@@ -64,6 +69,7 @@ class PerformanceTracker {
    */
   async recordTrade(trade: TradePerformance): Promise<void> {
     try {
+      const db = await getDb();
       await db.execute(`
         INSERT INTO trade_performance (
           trade_id, symbol, side, entry_price, exit_price, size, leverage,
@@ -99,6 +105,7 @@ class PerformanceTracker {
     try {
       const cutoffTime = Date.now() - (days * 24 * 60 * 60 * 1000);
 
+      const db = await getDb();
       const result = await db.execute(`
         SELECT * FROM trade_performance WHERE timestamp >= $1 ORDER BY timestamp ASC
       `, [cutoffTime]);
@@ -107,18 +114,18 @@ class PerformanceTracker {
         return this.getEmptyMetrics();
       }
 
-      const trades = result.rows.map(row => ({
+      const trades = result.rows.map((row: any) => ({
         realizedPnL: parseFloat(row.realized_pnl as string),
         realizedPnLPercent: parseFloat(row.realized_pnl_percent as string),
         duration: parseInt(row.duration as string)
       }));
 
-      const winningTrades = trades.filter(t => t.realizedPnL > 0);
-      const losingTrades = trades.filter(t => t.realizedPnL < 0);
+      const winningTrades = trades.filter((t: any) => t.realizedPnL > 0);
+      const losingTrades = trades.filter((t: any) => t.realizedPnL < 0);
 
-      const totalPnL = trades.reduce((sum, t) => sum + t.realizedPnL, 0);
-      const totalWinAmount = winningTrades.reduce((sum, t) => sum + t.realizedPnL, 0);
-      const totalLossAmount = Math.abs(losingTrades.reduce((sum, t) => sum + t.realizedPnL, 0));
+      const totalPnL = trades.reduce((sum: number, t: any) => sum + t.realizedPnL, 0);
+      const totalWinAmount = winningTrades.reduce((sum: number, t: any) => sum + t.realizedPnL, 0);
+      const totalLossAmount = Math.abs(losingTrades.reduce((sum: number, t: any) => sum + t.realizedPnL, 0));
 
       // Calculate max drawdown
       let peak = 0;
@@ -137,7 +144,7 @@ class PerformanceTracker {
       }
 
       // Calculate Sharpe Ratio
-      const sharpeRatio = this.calculateSharpeRatio(trades.map(t => t.realizedPnLPercent));
+      const sharpeRatio = this.calculateSharpeRatio(trades.map((t: any) => t.realizedPnLPercent));
 
       return {
         totalTrades: trades.length,
@@ -153,9 +160,9 @@ class PerformanceTracker {
         maxDrawdown,
         maxDrawdownPercent: peak > 0 ? (maxDrawdown / peak) * 100 : 0,
         sharpeRatio,
-        bestTrade: Math.max(...trades.map(t => t.realizedPnL)),
-        worstTrade: Math.min(...trades.map(t => t.realizedPnL)),
-        avgTradeDuration: trades.reduce((sum, t) => sum + t.duration, 0) / trades.length,
+        bestTrade: Math.max(...trades.map((t: any) => t.realizedPnL)),
+        worstTrade: Math.min(...trades.map((t: any) => t.realizedPnL)),
+        avgTradeDuration: trades.reduce((sum: number, t: any) => sum + t.duration, 0) / trades.length,
         lastUpdated: Date.now()
       };
 
@@ -172,6 +179,7 @@ class PerformanceTracker {
     try {
       const cutoffTime = Date.now() - (days * 24 * 60 * 60 * 1000);
 
+      const db = await getDb();
       const result = await db.execute(`
         SELECT 
           symbol,
@@ -190,7 +198,7 @@ class PerformanceTracker {
         return [];
       }
 
-      return result.rows.map(row => ({
+      return result.rows.map((row: any) => ({
         symbol: row.symbol as string,
         trades: parseInt(row.trades as string),
         wins: parseInt(row.wins as string),
@@ -213,6 +221,7 @@ class PerformanceTracker {
     try {
       const cutoffTime = Date.now() - (days * 24 * 60 * 60 * 1000);
 
+      const db = await getDb();
       const result = await db.execute(`
         SELECT 
           DATE(to_timestamp(timestamp / 1000)) as date,
@@ -229,7 +238,7 @@ class PerformanceTracker {
         return [];
       }
 
-      return result.rows.map(row => ({
+      return result.rows.map((row: any) => ({
         date: row.date as string,
         trades: parseInt(row.trades as string),
         pnl: parseFloat(row.pnl as string),
@@ -247,6 +256,7 @@ class PerformanceTracker {
    */
   async getRecentTrades(limit: number = 20): Promise<TradePerformance[]> {
     try {
+      const db = await getDb();
       const result = await db.execute(`
         SELECT * FROM trade_performance 
         ORDER BY timestamp DESC 
@@ -257,7 +267,7 @@ class PerformanceTracker {
         return [];
       }
 
-      return result.rows.map(row => ({
+      return result.rows.map((row: any) => ({
         tradeId: row.trade_id as string,
         symbol: row.symbol as string,
         side: row.side as 'LONG' | 'SHORT',

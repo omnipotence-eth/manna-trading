@@ -6,70 +6,53 @@
 
 ## ⚡ Quick Start
 
-### **Unified Startup (Recommended)**
+### **Prerequisites**
 
-**One command does everything:**
-```powershell
-npm run startup:ps1
-```
+1. **Node.js 18+** - [Download](https://nodejs.org)
+2. **Ollama** - [Download](https://ollama.ai)
+3. **DeepSeek R1 Model** - Run: `ollama pull deepseek-r1:14b`
+4. **Aster DEX API Keys** - [Get from Aster DEX](https://asterdex.com)
 
-Or use the cross-platform script:
+### **Installation**
+
 ```bash
-npm run startup
+# Clone the repository
+git clone https://github.com/YOUR_USERNAME/manna-trading.git
+cd manna-trading
+
+# Install dependencies
+npm install
+
+# Copy environment template and configure
+cp .env.example .env.local
+# Edit .env.local with your API keys
 ```
 
-**What it does:**
-1. ✅ Checks Ollama is running
-2. ✅ Starts Next.js server (or waits if already running)
-3. ✅ Waits for server to be ready
-4. ✅ Initializes all trading services (5-10 minutes)
-5. ✅ Verifies system status
-6. ✅ Runs diagnostics automatically
+### **Starting the System**
 
-**That's it!** The system will:
-- ✅ Initialize all services
-- ✅ Start trading agents
-- ✅ Enable health monitoring
-- ✅ Begin 24/7 trading
-
-### **Simplest: Emergency Start (RECOMMENDED)**
-
-**Start server, then run emergency script:**
-```powershell
-# Terminal 1: Start server
+```bash
+# Start the development server
 npm run dev
-
-# Terminal 2: Start Agent Runner (after 10 seconds)
-.\scripts\emergency_start_trading.ps1
 ```
 
-**This bypasses automatic initialization** and starts Agent Runner directly!
-
-**Timeline:** ~10 seconds until trading starts
-
-### **Alternative: Manual Steps** (Only if auto-start fails)
-
-If auto-initialization fails, you can manually initialize:
-
-1. **Start the Server** (if not running)
-   ```powershell
-   npm run dev
-   ```
-   Wait for `✓ Ready` message
-
-2. **Manually Initialize** (only if needed)
-   ```powershell
-   Invoke-RestMethod -Uri "http://localhost:3000/api/startup?action=initialize"
-   ```
-
-3. **Check System Health**
-   ```powershell
-   npm run startup:diagnose
-   ```
+The system **auto-initializes** on startup:
+- ✅ Connects to Aster DEX API
+- ✅ Initializes AI trading agents
+- ✅ Starts 24/7 market scanning
+- ✅ Enables position monitoring
 
 ### **View Dashboard**
-```
-http://localhost:3000
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### **Manual Initialization** (if needed)
+
+```bash
+# Check system status
+curl http://localhost:3000/api/startup?action=status
+
+# Force initialize
+curl http://localhost:3000/api/startup?action=initialize
 ```
 
 ---
@@ -154,14 +137,12 @@ Manna/
 │   ├── apiKeyManager.ts             # 30-key pool management
 │   ├── circuitBreaker.ts            # API failure protection
 │   └── logger.ts                    # Logging system
-├── scripts/                   # Operational scripts
-│   ├── emergency_start_trading.ps1  # ⭐ Start Agent Runner
-│   ├── quick_status.ps1              # System status check
-│   ├── start.ps1                     # Full startup (PowerShell)
-│   └── start.js                      # Full startup (Cross-platform)
+├── types/                 # TypeScript type definitions
+│   ├── aster.ts               # Aster DEX types
+│   └── trading.ts             # Trading types
 └── docs/                      # 📚 Documentation
     ├── PRODUCTION_DEPLOYMENT.md     # Deployment guide
-    ├── QUICK_COMMANDS.md            # Command reference
+    ├── SYSTEM_ARCHITECTURE.md       # Architecture overview
     └── AI_MODELS_REFERENCE.md       # AI model details
 ```
 
@@ -202,14 +183,13 @@ Manna/
 ### **Services Not Initializing**
 
 1. Check Ollama is running:
-```powershell
-Get-Process -Name ollama
+```bash
 ollama ps  # Should show deepseek-r1:14b
 ```
 
 2. Check server logs for errors
 3. Verify `.env.local` configuration
-4. Run diagnostic: `.\scripts\diagnose_trading.ps1`
+4. Check API: `curl http://localhost:3000/api/health`
 
 ### **429 Rate Limit Errors**
 
@@ -253,12 +233,15 @@ To see more trades (once stable):
 - Performance metrics
 
 ### **Health Status**
-```powershell
-# Quick diagnostic
-.\scripts\diagnose_trading.ps1
+```bash
+# Check system health
+curl http://localhost:3000/api/health
 
-# Check specific service
-Invoke-RestMethod http://localhost:3000/api/startup?action=status
+# Check trading status
+curl http://localhost:3000/api/trading-status
+
+# Detailed health check
+curl http://localhost:3000/api/health/detailed
 ```
 
 ### **Logs**
@@ -306,4 +289,4 @@ For issues or questions:
 
 ---
 
-**Status**: ✅ Production Ready | **Version**: 1.0.0 | **License**: MIT
+**Status**: ✅ Production Ready | **Version**: 7.0.0 | **License**: MIT

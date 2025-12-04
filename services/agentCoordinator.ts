@@ -6,7 +6,7 @@
 
 import { logger } from '@/lib/logger';
 import { deepseekService } from '@/services/deepseekService';
-import { AGENT_PROMPTS, MarketData, SentimentData, OnChainData, AnalystReports, FinalDecision, Portfolio, RiskApprovedTrade } from '@/lib/agentPrompts';
+import { AGENT_PROMPTS, MarketData, AnalystReports, FinalDecision, Portfolio, RiskApprovedTrade } from '@/lib/agentPrompts';
 import { DEEPSEEK_OPTIMIZED_PROMPTS } from '@/lib/agentPromptsOptimized';
 import { realBalanceService } from '@/services/realBalanceService';
 import { TRADING_THRESHOLDS } from '@/constants/tradingConstants';
@@ -419,71 +419,59 @@ export class AgentCoordinator {
         
         // If no step was executed and we still have pending steps, there's a dependency issue
         if (!stepExecuted) {
-          const pendingSteps = workflow.steps.filter(s => s.status === 'pending');
-          if (pendingSteps.length > 0) {
+          const pendingStepsCheck = workflow.steps.filter(s => s.status === 'pending');
+          if (pendingStepsCheck.length > 0) {
             logger.error('Workflow stuck - pending steps with unmet dependencies', null, {
               context: 'AgentCoordinator',
               workflowId,
-              pendingSteps: pendingSteps.map(s => s.id)
+              pendingSteps: pendingStepsCheck.map(s => s.id)
             });
             break;
           }
         }
-      }
-
-      // Check if workflow is complete
-      const completedSteps = workflow.steps.filter(s => s.status === 'completed').length;
-      const failedSteps = workflow.steps.filter(s => s.status === 'failed').length;
-      
-      if (completedSteps === workflow.steps.length) {
-        workflow.status = 'completed';
-        workflow.completedAt = Date.now();
         
-        const duration = workflow.completedAt - workflow.startedAt;
+        // Check if workflow is complete (INSIDE the while loop)
+        const completedSteps = workflow.steps.filter(s => s.status === 'completed').length;
+        const failedSteps = workflow.steps.filter(s => s.status === 'failed').length;
         
-        // WORLD-CLASS: Track workflow performance metrics
-        this.trackWorkflowPerformance(workflow.symbol, duration, true, completedSteps);
-        
-        logger.info('Workflow completed successfully', {
-          context: 'AgentCoordinator',
-          workflowId,
-          duration: `${(duration / 1000).toFixed(1)}s`,
-          completedSteps,
-          totalSteps: workflow.steps.length,
-          symbol: workflow.symbol
-        });
-      } else if (failedSteps > 0) {
-        workflow.status = 'failed';
-        workflow.completedAt = Date.now();
-        
-        const duration = workflow.completedAt - workflow.startedAt;
-        
-        // WORLD-CLASS: Track workflow performance metrics
-        this.trackWorkflowPerformance(workflow.symbol, duration, false, completedSteps);
-        
-        logger.error('Workflow failed with errors', null, {
-          context: 'AgentCoordinator',
-          workflowId,
-          failedSteps,
-          completedSteps,
-          symbol: workflow.symbol
-        });
-      } else {
-        workflow.status = 'failed';
-        workflow.completedAt = Date.now();
-        
-        const duration = workflow.completedAt - workflow.startedAt;
-        
-        // WORLD-CLASS: Track workflow performance metrics
-        this.trackWorkflowPerformance(workflow.symbol, duration, false, completedSteps);
-        
-        logger.warn('Workflow partially completed', {
-          context: 'AgentCoordinator',
-          workflowId,
-          completedSteps,
-          totalSteps: workflow.steps.length,
-          symbol: workflow.symbol
-        });
+        if (completedSteps === workflow.steps.length) {
+          workflow.status = 'completed';
+          workflow.completedAt = Date.now();
+          
+          const duration = workflow.completedAt - workflow.startedAt;
+          
+          // WORLD-CLASS: Track workflow performance metrics
+          this.trackWorkflowPerformance(workflow.symbol, duration, true, completedSteps);
+          
+          logger.info('Workflow completed successfully', {
+            context: 'AgentCoordinator',
+            workflowId,
+            duration: `${(duration / 1000).toFixed(1)}s`,
+            completedSteps,
+            totalSteps: workflow.steps.length,
+            symbol: workflow.symbol
+          });
+          break; // Exit while loop - workflow done
+        } else if (failedSteps > 0) {
+          workflow.status = 'failed';
+          workflow.completedAt = Date.now();
+          
+          const duration = workflow.completedAt - workflow.startedAt;
+          
+          // WORLD-CLASS: Track workflow performance metrics
+          this.trackWorkflowPerformance(workflow.symbol, duration, false, completedSteps);
+          
+          logger.error('Workflow failed with errors', null, {
+            context: 'AgentCoordinator',
+            workflowId,
+            failedSteps,
+            completedSteps,
+            symbol: workflow.symbol
+          });
+          break; // Exit while loop - workflow failed
+        }
+        // CRITICAL FIX: If not all steps completed and none failed, continue the while loop!
+        // The loop will find and execute the next pending step
       }
     } catch (error) {
       workflow.status = 'failed';
@@ -980,6 +968,53 @@ export class AgentCoordinator {
       if (!decision.action || !decision.confidence) {
         throw new Error('Chief Analyst response missing required fields');
       }
+      
+      // CRITICAL FIX: Normalize confidence if AI returns percentage (40) instead of decimal (0.40)
+      if (typeof decision.confidence === 'number' && decision.confidence > 1 && decision.confidence <= 100) {
+        logger.debug('Normalizing Chief Analyst confidence from percentage', {
+          context: 'AgentCoordinator',
+          data: { original: decision.confidence, normalized: decision.confidence / 100 }
+        });
+        decision.confidence = decision.confidence / 100;
+      }
+
+      // CRITICAL FIX: Override HOLD if Technical Analyst has high confidence
+      // This prevents paralysis by analysis - we need to trade to learn
+      if (decision.action === 'HOLD' && technicalAnalysis.action && technicalAnalysis.action !== 'HOLD') {
+        const techConfidence = typeof technicalAnalysis.confidence === 'number' 
+          ? (technicalAnalysis.confidence > 1 ? technicalAnalysis.confidence / 100 : technicalAnalysis.confidence)
+          : 0;
+        
+        // If Technical Analyst has 50%+ confidence with clear direction, override HOLD
+        if (techConfidence >= 0.50) {
+          logger.warn('🔄 HOLD OVERRIDE: Technical Analyst has strong signal - converting to trade', {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              originalAction: 'HOLD',
+              newAction: technicalAnalysis.action,
+              techConfidence: (techConfidence * 100).toFixed(1) + '%',
+              chiefConfidence: (decision.confidence * 100).toFixed(1) + '%',
+              reason: 'Technical Analyst override - system must trade to learn'
+            }
+          });
+          
+          // Override with Technical Analyst's recommendation
+          decision.action = technicalAnalysis.action;
+          decision.confidence = techConfidence * 0.9; // Slightly reduce confidence for override
+          decision.reasoning = `OVERRIDE: Chief said HOLD but Technical Analyst shows ${technicalAnalysis.action} with ${(techConfidence * 100).toFixed(0)}% confidence. Trading to learn. ${decision.reasoning || ''}`;
+          decision.wasHoldOverride = true;
+        } else {
+          logger.debug('HOLD maintained - Technical Analyst confidence too low for override', {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              techConfidence: (techConfidence * 100).toFixed(1) + '%',
+              minRequiredForOverride: '50%'
+            }
+          });
+        }
+      }
 
       logger.info('Chief Analyst Decision (DeepSeek R1)', {
         context: 'AgentCoordinator',
@@ -987,6 +1022,7 @@ export class AgentCoordinator {
           symbol: workflow.symbol,
           action: decision.action,
           confidence: decision.confidence,
+          wasHoldOverride: decision.wasHoldOverride || false,
           reasoning: decision.reasoning?.substring(0, 100)
         }
       });
@@ -1053,6 +1089,18 @@ export class AgentCoordinator {
       if (typeof finalDecision.action !== 'string' || !['BUY', 'SELL', 'HOLD'].includes(finalDecision.action)) {
         throw new Error(`Invalid final decision action: ${finalDecision.action}`);
       }
+      
+      // CRITICAL FIX: Normalize confidence if AI returns percentage (40) instead of decimal (0.40)
+      let normalizedConfidence = finalDecision.confidence;
+      if (typeof normalizedConfidence === 'number' && normalizedConfidence > 1 && normalizedConfidence <= 100) {
+        normalizedConfidence = normalizedConfidence / 100;
+        finalDecision.confidence = normalizedConfidence;
+        logger.debug('Normalized confidence from percentage to decimal', {
+          context: 'AgentCoordinator',
+          data: { original: finalDecision.confidence * 100, normalized: normalizedConfidence }
+        });
+      }
+      
       if (typeof finalDecision.confidence !== 'number' || finalDecision.confidence < 0 || finalDecision.confidence > 1) {
         throw new Error(`Invalid final decision confidence: ${finalDecision.confidence}`);
       }
@@ -1231,6 +1279,38 @@ export class AgentCoordinator {
         } else {
           throw new Error(`Unexpected result type: ${typeof result}`);
         }
+        
+        // CRITICAL FIX: Handle nested response structure from DeepSeek
+        // AI sometimes wraps response in { riskAssessment: { ... } } instead of returning flat object
+        if (riskAssessment.riskAssessment && typeof riskAssessment.riskAssessment === 'object') {
+          logger.debug('Unwrapping nested riskAssessment object', {
+            context: 'AgentCoordinator',
+            data: { wasNested: true }
+          });
+          const nested = riskAssessment.riskAssessment;
+          
+          // Extract approval status from nested structure
+          // AI returns finalDecision: 'REJECT'/'APPROVE' instead of approved: boolean
+          if (nested.finalDecision) {
+            riskAssessment.approved = nested.finalDecision === 'APPROVE' || nested.finalDecision === 'APPROVED';
+            riskAssessment.action = riskAssessment.approved ? 'BUY' : 'HOLD';
+            riskAssessment.reasoning = nested.reasoning || 'Derived from nested response';
+            
+            // Extract position sizing if available
+            if (nested.positionSizing) {
+              riskAssessment.positionSize = nested.positionSizing.sizeUSD || nested.positionSizing.size || 0;
+            }
+            if (nested.leverage) {
+              riskAssessment.leverage = nested.leverage.recommended || nested.leverage.value || 15;
+            }
+            if (nested.stopLoss) {
+              riskAssessment.stopLoss = nested.stopLoss.percent || nested.stopLoss.percentage || 3.0;
+            }
+            if (nested.takeProfit) {
+              riskAssessment.takeProfit = nested.takeProfit.percent || nested.takeProfit.percentage || 6.0;
+            }
+          }
+        }
       } catch (parseError) {
         logger.error('Failed to parse Risk Manager response', parseError as Error, {
           context: 'AgentCoordinator',
@@ -1263,11 +1343,26 @@ export class AgentCoordinator {
       if (typeof riskAssessment.approved !== 'boolean') {
         missingFields.push(`approved (got ${typeof riskAssessment.approved}: ${riskAssessment.approved})`);
       }
-      if (!riskAssessment.action) {
-        missingFields.push(`action (got ${typeof riskAssessment.action}: ${riskAssessment.action})`);
+      
+      // CRITICAL FIX: When trade is rejected (approved: false), action and positionSize can be empty/zero
+      // Only require these fields when the trade is approved
+      if (riskAssessment.approved === true) {
+        if (!riskAssessment.action) {
+          missingFields.push(`action (got ${typeof riskAssessment.action}: ${riskAssessment.action})`);
+        }
+        if (typeof riskAssessment.positionSize !== 'number' || riskAssessment.positionSize <= 0) {
+          missingFields.push(`positionSize (got ${typeof riskAssessment.positionSize}: ${riskAssessment.positionSize})`);
+        }
       }
-      if (typeof riskAssessment.positionSize !== 'number') {
-        missingFields.push(`positionSize (got ${typeof riskAssessment.positionSize}: ${riskAssessment.positionSize})`);
+      
+      // For rejected trades, ensure we have at least a reasoning
+      if (riskAssessment.approved === false && !riskAssessment.action) {
+        // Set default action to HOLD for rejected trades
+        riskAssessment.action = 'HOLD';
+        logger.debug('Risk Manager rejected trade - setting default action to HOLD', {
+          context: 'AgentCoordinator',
+          data: { reasoning: riskAssessment.reasoning?.substring(0, 100) }
+        });
       }
       
       if (missingFields.length > 0) {
@@ -1552,6 +1647,51 @@ export class AgentCoordinator {
         }
       }
 
+      // FORCE APPROVAL MECHANISM: If Chief Analyst recommends BUY/SELL with good confidence
+      // but Risk Manager rejected for non-critical reasons, force approval with safe defaults
+      if (!riskAssessment.approved && finalDecision.action !== 'HOLD' && finalDecision.confidence >= 0.50) {
+        const reasoning = riskAssessment.reasoning?.toLowerCase() || '';
+        const isCriticalRejection = 
+          reasoning.includes('insufficient balance') ||
+          reasoning.includes('max concurrent') ||
+          reasoning.includes('portfolio risk') ||
+          reasoning.includes('problematic coin');
+        
+        if (!isCriticalRejection) {
+          logger.warn('🔄 FORCE APPROVAL: Chief Analyst has strong signal, overriding Risk Manager rejection', {
+            context: 'AgentCoordinator',
+            data: {
+              symbol: workflow.symbol,
+              chiefAction: finalDecision.action,
+              chiefConfidence: (finalDecision.confidence * 100).toFixed(0) + '%',
+              originalReason: riskAssessment.reasoning,
+              atrLevels: atrBasedLevels ? {
+                stopLoss: atrBasedLevels.recommendedStopLoss,
+                takeProfit: atrBasedLevels.recommendedTakeProfit
+              } : 'Using defaults'
+            }
+          });
+          
+          // Use ATR-based levels if available, otherwise use safe defaults
+          const stopLossPrice = atrBasedLevels?.recommendedStopLoss || (currentPrice * (finalDecision.action === 'BUY' ? 0.96 : 1.04));
+          const takeProfitPrice = atrBasedLevels?.recommendedTakeProfit || (currentPrice * (finalDecision.action === 'BUY' ? 1.08 : 0.92));
+          
+          // Calculate safe position size (2% of balance risk)
+          const riskPercent = 0.02;
+          const stopDistance = Math.abs(currentPrice - stopLossPrice) / currentPrice;
+          const safePositionSize = (balance * riskPercent) / (stopDistance * currentPrice);
+          
+          riskAssessment.approved = true;
+          riskAssessment.action = finalDecision.action;
+          riskAssessment.positionSize = Math.max(0.001, safePositionSize);
+          riskAssessment.stopLoss = stopLossPrice;
+          riskAssessment.takeProfit = takeProfitPrice;
+          riskAssessment.leverage = 15; // Safe default
+          riskAssessment.reasoning = `FORCE APPROVED: Chief Analyst ${finalDecision.action} with ${(finalDecision.confidence * 100).toFixed(0)}% confidence. Using safe defaults: 2% risk, 15x leverage. Original rejection: ${riskAssessment.reasoning}`;
+          riskAssessment.wasForceApproved = true;
+        }
+      }
+
       logger.info(`Risk Manager Decision: ${riskAssessment.approved ? 'APPROVED' : 'REJECTED'}`, {
         context: 'AgentCoordinator',
         data: {
@@ -1561,6 +1701,7 @@ export class AgentCoordinator {
           positionSize: riskAssessment.positionSize,
           leverage: riskAssessment.leverage,
           riskRewardRatio: riskAssessment.riskRewardRatio,
+          wasForceApproved: riskAssessment.wasForceApproved || false,
           reasoning: riskAssessment.reasoning
         }
       });
@@ -1786,31 +1927,22 @@ Respond in JSON:
       const finalDecision = workflow.context.finalDecision;
 
       if (!executionPlan?.readyToExecute || !riskAssessment?.approved) {
-        // CRITICAL: Enhanced logging to diagnose why trades aren't executing
-        logger.warn('🚨 TRADE BLOCKED - Not ready for execution', {
+        // IMPORTANT: This is expected behavior - AI decided not to trade
+        // Reasons include: unfavorable conditions, high risk, low confidence
+        const reasoningText = Array.isArray(riskAssessment?.reasoning) 
+          ? riskAssessment.reasoning.join('; ').substring(0, 100)
+          : (typeof riskAssessment?.reasoning === 'string' ? riskAssessment.reasoning.substring(0, 100) : 'No reason given');
+        const reason = !riskAssessment?.approved 
+          ? `Risk Manager rejected: ${reasoningText}`
+          : `Execution plan not ready: ${executionPlan?.reason || 'Unknown'}`;
+        
+        logger.info(`⏸️ Trade skipped for ${workflow.symbol} - ${reason}`, {
           context: 'AgentCoordinator',
-          symbol: workflow.symbol,
-          readyToExecute: executionPlan?.readyToExecute,
-          approved: riskAssessment?.approved,
-          executionPlanExists: !!executionPlan,
-          riskAssessmentExists: !!riskAssessment,
-          executionPlanDetails: executionPlan ? {
-            readyToExecute: executionPlan.readyToExecute,
-            reason: executionPlan.reason,
-            action: executionPlan.action
-          } : null,
-          riskAssessmentDetails: riskAssessment ? {
-            approved: riskAssessment.approved,
-            action: riskAssessment.action,
-            reasoning: riskAssessment.reasoning?.substring(0, 200),
-            positionSize: riskAssessment.positionSize,
-            leverage: riskAssessment.leverage
-          } : null,
-          workflowContext: {
-            hasFinalDecision: !!workflow.context.finalDecision,
-            finalDecisionConfidence: workflow.context.finalDecision?.confidence,
-            hasTechnicalAnalysis: !!workflow.context.technicalAnalysis,
-            hasMarketData: !!workflow.context.marketData
+          data: {
+            symbol: workflow.symbol,
+            approved: riskAssessment?.approved,
+            readyToExecute: executionPlan?.readyToExecute,
+            note: 'This is normal - AI found conditions unfavorable'
           }
         });
         

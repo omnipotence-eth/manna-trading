@@ -21,6 +21,12 @@ async function initializePool() {
     return pool;
   }
   
+  // Check if database is configured
+  if (!dbConfig.isConfigured) {
+    logger.warn('Database not configured - running without persistent storage', { context: 'Database' });
+    return null;
+  }
+  
   // Only import pg on server-side and at runtime (not during build)
   if (typeof window === 'undefined') {
     try {
@@ -61,6 +67,12 @@ async function sql(query: string, params: any[] = []) {
   try {
     // CRITICAL: Initialize pool if not already initialized (lazy loading)
     const dbPool = await initializePool();
+    
+    // If no database configured, return empty result
+    if (!dbPool) {
+      logger.debug('Database not configured, returning empty result', { context: 'Database' });
+      return { rows: [], rowCount: 0 };
+    }
     
     return await circuitBreakers.database.execute(async () => {
       const client = await dbPool.connect();
@@ -155,6 +167,53 @@ export async function initializeDatabase() {
       );
     `);
 
+    // Create open_positions table for active position monitoring
+    await sql(`
+      CREATE TABLE IF NOT EXISTS open_positions (
+        id VARCHAR(255) PRIMARY KEY,
+        symbol VARCHAR(20) NOT NULL,
+        side VARCHAR(10) NOT NULL,
+        entry_price DECIMAL(20, 8) NOT NULL,
+        current_price DECIMAL(20, 8) NOT NULL,
+        size DECIMAL(20, 8) NOT NULL,
+        leverage INTEGER NOT NULL,
+        stop_loss DECIMAL(20, 8) NOT NULL,
+        take_profit DECIMAL(20, 8) NOT NULL,
+        trailing_stop_percent DECIMAL(5, 2) DEFAULT 0,
+        highest_price DECIMAL(20, 8) NOT NULL,
+        lowest_price DECIMAL(20, 8) NOT NULL,
+        unrealized_pnl DECIMAL(20, 8) NOT NULL,
+        unrealized_pnl_percent DECIMAL(10, 4) NOT NULL,
+        opened_at BIGINT NOT NULL,
+        last_checked BIGINT NOT NULL,
+        order_id VARCHAR(255),
+        status VARCHAR(20) DEFAULT 'OPEN',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create closed_positions table for trade history
+    await sql(`
+      CREATE TABLE IF NOT EXISTS closed_positions (
+        id VARCHAR(255) PRIMARY KEY,
+        symbol VARCHAR(20) NOT NULL,
+        side VARCHAR(10) NOT NULL,
+        entry_price DECIMAL(20, 8) NOT NULL,
+        exit_price DECIMAL(20, 8) NOT NULL,
+        size DECIMAL(20, 8) NOT NULL,
+        leverage INTEGER NOT NULL,
+        stop_loss DECIMAL(20, 8),
+        take_profit DECIMAL(20, 8),
+        realized_pnl DECIMAL(20, 8) NOT NULL,
+        realized_pnl_percent DECIMAL(10, 4) NOT NULL,
+        opened_at BIGINT NOT NULL,
+        closed_at BIGINT NOT NULL,
+        exit_reason VARCHAR(50) NOT NULL,
+        order_id VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // Create indexes for faster queries
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp DESC);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);`);
@@ -174,6 +233,16 @@ export async function initializeDatabase() {
     
     await sql(`CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON model_messages(timestamp DESC);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_messages_model ON model_messages(model);`);
+
+    // Indexes for open_positions table
+    await sql(`CREATE INDEX IF NOT EXISTS idx_open_positions_symbol ON open_positions(symbol);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_open_positions_status ON open_positions(status);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_open_positions_opened_at ON open_positions(opened_at DESC);`);
+
+    // Indexes for closed_positions table
+    await sql(`CREATE INDEX IF NOT EXISTS idx_closed_positions_symbol ON closed_positions(symbol);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_closed_positions_closed_at ON closed_positions(closed_at DESC);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_closed_positions_pnl ON closed_positions(realized_pnl);`);
 
     logger.info('Database initialized successfully', { context: 'Database' });
     dbInitialized = true; // Mark as initialized
