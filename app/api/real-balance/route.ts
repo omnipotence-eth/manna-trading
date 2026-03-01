@@ -9,6 +9,9 @@ import { PerformanceMonitor } from '@/lib/performanceMonitor';
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   const timer = PerformanceMonitor.startTimer('BalanceChartDataAPI');
 
@@ -49,7 +52,7 @@ async function getChartData(timeRange: string, request: NextRequest) {
     });
 
     // Fetch account equity directly from asterDexService
-    const { asterDexService } = await import('@/services/asterDexService');
+    const { asterDexService } = await import('@/services/exchange/asterDexService');
     const balance = await asterDexService.getBalance();
     
     if (!balance || balance === 0) {
@@ -132,7 +135,7 @@ async function getChartData(timeRange: string, request: NextRequest) {
     // CRITICAL OPTIMIZATION: Get unrealized P&L directly from service instead of internal fetch
     let unrealizedPnL = 0;
     try {
-      const { asterDexService } = await import('@/services/asterDexService');
+      const { asterDexService } = await import('@/services/exchange/asterDexService');
       // Get positions to calculate unrealized P&L
       const positions = await asterDexService.getPositions();
       unrealizedPnL = positions.reduce((sum, pos) => sum + (pos.unrealizedPnl || 0), 0);
@@ -208,7 +211,7 @@ async function getCurrentBalance(request: NextRequest) {
   try {
     // CRITICAL OPTIMIZATION: Call asterDexService directly instead of internal fetch
     // This avoids HTTP overhead, rate limiting on internal requests, and circular dependencies
-    const { asterDexService } = await import('@/services/asterDexService');
+    const { asterDexService } = await import('@/services/exchange/asterDexService');
     
     // Get balance directly from service (uses 30-key system, caching, etc.)
     const balance = await asterDexService.getBalance();
@@ -267,12 +270,20 @@ async function getBalanceHistory(timeRange: string) {
       [new Date(startTime)]
     );
 
-    const formattedHistory = history.rows.map((row: any) => ({
+    interface HistoryRow {
+      timestamp: Date | string;
+      balance: string;
+      unrealized_pnl?: string;
+      realized_pnl?: string;
+      total_pnl?: string;
+    }
+
+    const formattedHistory = history.rows.map((row: HistoryRow) => ({
       timestamp: new Date(row.timestamp).getTime(),
       balance: parseFloat(row.balance),
-      unrealizedPnl: parseFloat(row.unrealized_pnl || 0),
-      realizedPnl: parseFloat(row.realized_pnl || 0),
-      totalPnL: parseFloat(row.total_pnl || 0)
+      unrealizedPnl: parseFloat(row.unrealized_pnl != null ? String(row.unrealized_pnl) : '0'),
+      realizedPnl: parseFloat(row.realized_pnl != null ? String(row.realized_pnl) : '0'),
+      totalPnL: parseFloat(row.total_pnl != null ? String(row.total_pnl) : '0')
     }));
 
     return createSuccessResponse({

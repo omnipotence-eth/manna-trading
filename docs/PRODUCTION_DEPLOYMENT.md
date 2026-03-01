@@ -8,7 +8,7 @@ Before deploying to production:
 - [ ] PostgreSQL database (Neon.tech recommended)
 - [ ] Server with Ollama + DeepSeek R1 model
 - [ ] Node.js 18+ installed
-- [ ] Minimum 16GB RAM (for DeepSeek R1:14b)
+- [ ] Minimum 8GB RAM (for DeepSeek R1:8b)
 
 ---
 
@@ -50,7 +50,7 @@ Before deploying to production:
 
 **Recommended Specs:**
 - CPU: 8+ cores
-- RAM: 32GB (for DeepSeek R1:14b)
+- RAM: 16GB (for DeepSeek R1:8b)
 - Storage: 100GB SSD
 - OS: Ubuntu 22.04 LTS
 
@@ -83,7 +83,7 @@ ASTER_KEY_POOL={"keys":[{"id":"key-1","api":"...","secret":"..."},...]}
 DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=require
 
 # AI Model
-DEEPSEEK_MODEL=deepseek-r1:14b
+DEEPSEEK_MODEL=deepseek-r1:8b
 OLLAMA_BASE_URL=http://localhost:11434
 
 # Trading Configuration
@@ -119,7 +119,7 @@ sudo apt install -y nodejs
 curl -fsSL https://ollama.com/install.sh | sh
 
 # Pull DeepSeek R1 model
-ollama pull deepseek-r1:14b
+ollama pull deepseek-r1:8b
 
 # Install PM2 (process manager)
 sudo npm install -g pm2
@@ -158,7 +158,7 @@ nano prewarm.sh
 
 # Add content:
 #!/bin/bash
-ollama run deepseek-r1:14b ""
+ollama run deepseek-r1:8b ""
 
 # Make executable
 chmod +x prewarm.sh
@@ -468,14 +468,14 @@ upstream manna {
 ### Vertical Scaling
 
 **Upgrade server specs:**
-- More RAM for larger DeepSeek model (14B → 32B)
+- More RAM for larger DeepSeek model (8B → 14B or 32B)
 - Faster CPU for quicker AI inference
 - SSD storage for faster I/O
 
 **Optimize DeepSeek:**
 ```bash
 # Use larger model if resources allow
-DEEPSEEK_MODEL=deepseek-r1:14b
+DEEPSEEK_MODEL=deepseek-r1:8b
 
 # Increase concurrent workflows
 MAX_CONCURRENT_WORKFLOWS=5
@@ -548,6 +548,4 @@ DATABASE_MAX_CONNECTIONS=20
 - [ ] SSL certificate active (if using domain)
 
 ---
-
-All glory to God for successful deployment! 🙏
 

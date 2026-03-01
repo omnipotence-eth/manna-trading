@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { asterDexService } from '@/services/asterDexService';
+import { asterDexService } from '@/services/exchange/asterDexService';
 import { handleApiError, createSuccessResponse } from '@/lib/errorHandler';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
 import { circuitBreakers } from '@/lib/circuitBreaker';
@@ -24,3 +24,4 @@ export async function GET(request: NextRequest) {
     timer.end();
   }
 }
+

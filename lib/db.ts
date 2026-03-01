@@ -115,6 +115,147 @@ export interface Trade {
   createdAt?: Date;
 }
 
+export interface TradeRejection {
+  id: string;
+  timestamp: number;
+  symbol: string;
+  reason: string;
+  confidence?: number;
+  expectedValue?: number;
+  spreadPct?: number;
+  depth?: number;
+  style?: string;
+}
+
+function genId(prefix: string) {
+  // Simple UUID fallback without crypto to remain edge/SSR compatible
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Record trade entry rationale
+ */
+export async function recordTradeEntry(entry: {
+  id: string;
+  timestamp: number;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  size: number;
+  entryPrice: number;
+  leverage: number;
+  entryReason?: string;
+  entryConfidence?: number;
+  entrySignals?: any;
+  entryMarketRegime?: string;
+  entryScore?: number;
+  takeProfit?: number;
+  stopLoss?: number;
+  style?: string;
+}) {
+  if (!dbConfig.isConfigured) return;
+  await initializeDatabase();
+  await sql(
+    `
+    INSERT INTO trades (
+      id, timestamp, model, symbol, side, size, entry_price, leverage,
+      entry_reason, entry_confidence, entry_signals, entry_market_regime, entry_score
+    ) VALUES ($1, to_timestamp($2/1000.0), 'auto', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    ON CONFLICT (id) DO NOTHING;
+    `,
+    [
+      entry.id,
+      entry.timestamp,
+      entry.symbol,
+      entry.side,
+      entry.size,
+      entry.entryPrice,
+      entry.leverage,
+      entry.entryReason || null,
+      entry.entryConfidence ?? null,
+      entry.entrySignals ? JSON.stringify(entry.entrySignals) : null,
+      entry.entryMarketRegime || null,
+      entry.entryScore || null
+    ]
+  );
+}
+
+/**
+ * Record trade rejection for audit
+ */
+export async function recordTradeRejection(rej: {
+  symbol: string;
+  reason: string;
+  confidence?: number;
+  expectedValue?: number;
+  spreadPct?: number;
+  depth?: number;
+  style?: string;
+}) {
+  if (!dbConfig.isConfigured) return;
+  await initializeDatabase();
+  const id = genId('rej');
+  const ts = Date.now();
+  await sql(
+    `
+    INSERT INTO trade_rejections (
+      id, timestamp, symbol, reason, confidence, expected_value, spread_pct, depth, style
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+    `,
+    [
+      id,
+      ts,
+      rej.symbol,
+      rej.reason,
+      rej.confidence ?? null,
+      rej.expectedValue ?? null,
+      rej.spreadPct ?? null,
+      rej.depth ?? null,
+      rej.style || null
+    ]
+  );
+}
+
+/**
+ * Record trade exit details back to trades table
+ */
+export async function recordTradeExit(exit: {
+  id: string;
+  symbol: string;
+  exitPrice: number;
+  pnl: number;
+  pnlPercent: number;
+  exitReason: string;
+  exitTimestamp: number;
+  durationMs?: number;
+}) {
+  if (!dbConfig.isConfigured) return;
+  await initializeDatabase();
+  await sql(
+    `
+    UPDATE trades
+    SET exit_price = $2,
+        pnl = $3,
+        pnl_percent = $4,
+        exit_reason = $5,
+        exit_timestamp = to_timestamp($6/1000.0),
+        duration = COALESCE($7, duration)
+    WHERE id = $1;
+    `,
+    [
+      exit.id,
+      exit.exitPrice,
+      exit.pnl,
+      exit.pnlPercent,
+      exit.exitReason,
+      exit.exitTimestamp,
+      exit.durationMs ? Math.floor(exit.durationMs / 1000) : null
+    ]
+  );
+  
+  // OPTIMIZED: Invalidate trade stats cache when trade is closed
+  invalidateTradeStatsCache();
+}
+
 // Cache for database initialization status
 let dbInitialized = false;
 
@@ -130,6 +271,7 @@ export async function initializeDatabase() {
 
   try {
     // Create trades table
+    // CRITICAL FIX: exit_price, exit_timestamp, duration are nullable for OPEN trades
     await sql(`
       CREATE TABLE IF NOT EXISTS trades (
         id VARCHAR(255) PRIMARY KEY,
@@ -139,9 +281,9 @@ export async function initializeDatabase() {
         side VARCHAR(10) NOT NULL,
         size DECIMAL(20, 8) NOT NULL,
         entry_price DECIMAL(20, 2) NOT NULL,
-        exit_price DECIMAL(20, 2) NOT NULL,
-        pnl DECIMAL(20, 2) NOT NULL,
-        pnl_percent DECIMAL(10, 2) NOT NULL,
+        exit_price DECIMAL(20, 2),
+        pnl DECIMAL(20, 2) DEFAULT 0,
+        pnl_percent DECIMAL(10, 2) DEFAULT 0,
         leverage INTEGER NOT NULL,
         entry_reason TEXT,
         entry_confidence DECIMAL(5, 2),
@@ -149,11 +291,22 @@ export async function initializeDatabase() {
         entry_market_regime VARCHAR(50),
         entry_score VARCHAR(20),
         exit_reason TEXT,
-        exit_timestamp TIMESTAMP NOT NULL,
-        duration INTEGER NOT NULL,
+        exit_timestamp TIMESTAMP,
+        duration INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    
+    // Alter existing table to allow NULL for exit fields (for open trades)
+    try {
+      await sql(`ALTER TABLE trades ALTER COLUMN exit_price DROP NOT NULL;`);
+      await sql(`ALTER TABLE trades ALTER COLUMN exit_timestamp DROP NOT NULL;`);
+      await sql(`ALTER TABLE trades ALTER COLUMN duration DROP NOT NULL;`);
+      await sql(`ALTER TABLE trades ALTER COLUMN pnl DROP NOT NULL;`);
+      await sql(`ALTER TABLE trades ALTER COLUMN pnl_percent DROP NOT NULL;`);
+    } catch {
+      // Columns may already be nullable, ignore error
+    }
 
     // Create model_messages table for chat/analysis messages
     await sql(`
@@ -163,6 +316,22 @@ export async function initializeDatabase() {
         message TEXT NOT NULL,
         timestamp TIMESTAMP NOT NULL,
         type VARCHAR(50) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Create trade_rejections table for audit
+    await sql(`
+      CREATE TABLE IF NOT EXISTS trade_rejections (
+        id VARCHAR(255) PRIMARY KEY,
+        timestamp BIGINT NOT NULL,
+        symbol VARCHAR(20) NOT NULL,
+        reason TEXT,
+        confidence DECIMAL(6,4),
+        expected_value DECIMAL(10,4),
+        spread_pct DECIMAL(10,4),
+        depth DECIMAL(20,4),
+        style VARCHAR(10),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -214,10 +383,44 @@ export async function initializeDatabase() {
       );
     `);
 
+    // Create trade_outcomes table for ML training data
+    await sql(`
+      CREATE TABLE IF NOT EXISTS trade_outcomes (
+        trade_id VARCHAR(255) PRIMARY KEY,
+        symbol VARCHAR(20) NOT NULL,
+        side VARCHAR(10) NOT NULL,
+        entry_price DECIMAL(20, 8) NOT NULL,
+        exit_price DECIMAL(20, 8) NOT NULL,
+        entry_time TIMESTAMP NOT NULL,
+        exit_time TIMESTAMP NOT NULL,
+        exit_reason VARCHAR(50) NOT NULL,
+        realized_pnl DECIMAL(20, 8) NOT NULL,
+        realized_pnl_percent DECIMAL(10, 4) NOT NULL,
+        leverage INTEGER NOT NULL,
+        max_favorable_excursion DECIMAL(20, 8),
+        max_adverse_excursion DECIMAL(20, 8),
+        exit_efficiency DECIMAL(5, 4),
+        hold_duration_minutes INTEGER,
+        entry_hour_utc INTEGER,
+        entry_day_of_week INTEGER,
+        technical_confidence DECIMAL(5, 4),
+        chief_confidence DECIMAL(5, 4),
+        was_force_approved BOOLEAN DEFAULT FALSE,
+        market_regime VARCHAR(20),
+        btc_price_at_entry DECIMAL(20, 8),
+        outcome VARCHAR(20),
+        learning_notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     // Create indexes for faster queries
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp DESC);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);`);
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_model ON trades(model);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_outcomes_symbol ON trade_outcomes(symbol);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_outcomes_outcome ON trade_outcomes(outcome);`);
+    await sql(`CREATE INDEX IF NOT EXISTS idx_outcomes_regime ON trade_outcomes(market_regime);`);
     
     // OPTIMIZED: Add composite index for common query patterns (symbol + model + timestamp)
     await sql(`CREATE INDEX IF NOT EXISTS idx_trades_symbol_model_timestamp ON trades(symbol, model, timestamp DESC);`);
@@ -255,8 +458,12 @@ export async function initializeDatabase() {
 
 /**
  * Add a trade to the database
+ * OPTIMIZED: Invalidates trade stats cache when new trade is added
  */
 export async function addTrade(trade: Trade): Promise<boolean> {
+  // OPTIMIZED: Invalidate trade stats cache when new trade is added
+  invalidateTradeStatsCache();
+  
   try {
     logger.info('Attempting to insert trade', {
       context: 'Database',
@@ -380,10 +587,21 @@ export async function getTrades(filters?: {
   }
 }
 
+// OPTIMIZED: Cache for trade stats to reduce database load
+let tradeStatsCache: { data: any; expires: number } | null = null;
+const TRADE_STATS_CACHE_TTL = 30000; // 30 seconds
+
 /**
  * Get trade statistics
+ * OPTIMIZED: Cached for 30 seconds to reduce database queries
  */
 export async function getTradeStats() {
+  // Check cache first
+  if (tradeStatsCache && tradeStatsCache.expires > Date.now()) {
+    logger.debug('Returning cached trade stats', { context: 'Database' });
+    return tradeStatsCache.data;
+  }
+  
   try {
     const result = await sql(`
       SELECT 
@@ -404,7 +622,7 @@ export async function getTradeStats() {
     const losses = parseInt(row.losses) || 0;
     const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
 
-    return {
+    const stats = {
       totalTrades,
       wins,
       losses,
@@ -415,6 +633,14 @@ export async function getTradeStats() {
       bestTrade: parseFloat(row.best_trade) || 0,
       worstTrade: parseFloat(row.worst_trade) || 0,
     };
+    
+    // Cache the result
+    tradeStatsCache = {
+      data: stats,
+      expires: Date.now() + TRADE_STATS_CACHE_TTL
+    };
+    
+    return stats;
   } catch (error) {
     logger.error('Failed to fetch trade stats', error, { context: 'Database' });
     return {
@@ -428,6 +654,33 @@ export async function getTradeStats() {
       bestTrade: 0,
       worstTrade: 0,
     };
+  }
+}
+
+/**
+ * Invalidate trade stats cache (call after adding/closing trades)
+ */
+export function invalidateTradeStatsCache(): void {
+  tradeStatsCache = null;
+  logger.debug('Trade stats cache invalidated', { context: 'Database' });
+}
+
+/**
+ * Sum of realized P&L for trades closed today (for circuit breaker)
+ */
+export async function getTodayRealizedPnL(): Promise<number> {
+  if (!dbConfig.isConfigured) return 0;
+  try {
+    const result = await sql(`
+      SELECT COALESCE(SUM(pnl), 0) as total
+      FROM trades
+      WHERE exit_timestamp IS NOT NULL
+        AND (exit_timestamp AT TIME ZONE 'UTC')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+    `);
+    const total = result.rows[0]?.total;
+    return typeof total === 'number' ? total : parseFloat(total as string) || 0;
+  } catch {
+    return 0;
   }
 }
 

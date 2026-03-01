@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: false, // Disable strict mode to avoid double mounting
+  // Prevent build from running API routes / long work during static generation
+  staticPageGenerationTimeout: 300,
   images: {
     domains: [],
   },
@@ -23,7 +25,20 @@ const nextConfig = {
     config.resolve.alias = {
       ...config.resolve.alias,
       'pg-native': false,
+      // CRITICAL: Make ioredis optional - it's only used if REDIS_URL is set
+      'ioredis': false,
     };
+    
+    // CRITICAL: Initialize plugins array if it doesn't exist
+    config.plugins = config.plugins || [];
+    
+    // Use IgnorePlugin to ignore ioredis during bundling (it's optional)
+    // Add it to the beginning of plugins array to catch it early
+    config.plugins.unshift(
+      new webpack.IgnorePlugin({
+        resourceRegExp: /^ioredis$/,
+      })
+    );
     
     // CRITICAL FIX: Mark pg packages as external for BOTH server and client builds
     // This prevents Next.js from trying to bundle pg during build analysis

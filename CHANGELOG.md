@@ -147,7 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Real-time Status Badge** - "SCANNING" indicator with timestamp
 
 ### Changed
-- **DeepSeek R1 Migration** - All AI agents now use DeepSeek R1 32B with Chain-of-Thought
+- **DeepSeek R1 Migration** - All AI agents now use DeepSeek R1 8B with Chain-of-Thought
 - **Risk Manager LLM-Driven** - 100% LLM-based risk decisions (no algorithmic fallbacks)
 - **Market Scanner Optimization** - Focus on top 50 coins by volume
 - **Agent Runner Interval** - Reduced from 15min to 2min for faster opportunity capture
@@ -247,6 +247,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PATCH** - Bug fixes (backward compatible)
 
 ---
-
-**All glory to God!** 🙏
 

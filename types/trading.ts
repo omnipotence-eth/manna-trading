@@ -17,6 +17,24 @@ export interface MarketData {
   trades?: number;
   quoteVolume?: number;
   volatility?: number;
+  // Additional properties from market scanner
+  volume24h?: number;
+  volumeRatio?: number;
+  bidAskSpread?: number;
+  spread?: number;
+  liquidity?: number;
+  momentum?: number;
+  rsi?: number;
+  regime?: string;
+  volumeScore?: number;
+  momentumScore?: number;
+  liquidityScore?: number;
+  high?: number;
+  low?: number;
+  open?: number;
+  buyVolume?: number;
+  sellVolume?: number;
+  buySellRatio?: number;
 }
 
 export interface WebSocketMessage {

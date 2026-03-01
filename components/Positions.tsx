@@ -1,98 +1,187 @@
 'use client';
 
-import { memo } from 'react';
+/**
+ * POSITIONS COMPONENT
+ * Bloomberg Terminal-style position display with real-time data
+ * Industry-standard formatting and professional design
+ */
+
+import { memo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
-import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 
-// OPTIMIZED: Memoize Positions component to prevent unnecessary re-renders
+interface PositionData {
+  id: string;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  size: number;
+  entryPrice: number;
+  currentPrice: number;
+  pnl: number;
+  pnlPercent: number;
+  leverage: number;
+  notional: number;
+  timestamp: number;
+}
+
 const Positions = memo(function Positions() {
-  // Get real positions from store (populated by Aster DEX API)
   const positions = useStore((state) => state.positions);
+  const [positionData, setPositionData] = useState<PositionData[]>([]);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+
+  // Transform store positions to enriched position data
+  useEffect(() => {
+    const enriched = positions.map((p) => {
+      const size = Number(p.size) || 0;
+      const entryPrice = Number(p.entryPrice) || 0;
+      const currentPrice = Number(p.currentPrice) || entryPrice;
+      const leverage = Number(p.leverage) || 1;
+      const notional = size * currentPrice * leverage;
+      
+      return {
+        id: p.id,
+        symbol: p.symbol,
+        side: p.side as 'LONG' | 'SHORT',
+        size,
+        entryPrice,
+        currentPrice,
+        pnl: Number(p.pnl) || 0,
+        pnlPercent: Number(p.pnlPercent) || 0,
+        leverage,
+        notional,
+        timestamp: Date.now(),
+      };
+    });
+    
+    setPositionData(enriched);
+    setLastUpdate(new Date());
+  }, [positions]);
+
+  // Calculate portfolio metrics
+  const totalPnL = positionData.reduce((sum, p) => sum + p.pnl, 0);
+  const totalNotional = positionData.reduce((sum, p) => sum + p.notional, 0);
+  const avgLeverage = positionData.length > 0
+    ? positionData.reduce((sum, p) => sum + p.leverage, 0) / positionData.length
+    : 0;
+
+  if (positionData.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center py-16">
+        <div className="w-10 h-10 rounded border border-white/[0.08] bg-[#0a0a0a] flex items-center justify-center mb-3">
+          <div className="w-2 h-2 bg-[#00ff88] rounded-full animate-pulse" />
+        </div>
+        <p className="text-[11px] text-[#666] font-mono uppercase tracking-wider">No Open Positions</p>
+        <p className="text-[10px] text-[#444] mt-1 font-mono">
+          System Active
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      {positions.length === 0 ? (
-        <div className="text-center py-12 text-green-500/60 px-4">
-          <div className="text-4xl mb-3">📊</div>
-          <div className="font-semibold mb-3 text-base">No Open Positions</div>
-          <div className="text-xs opacity-75 space-y-2 max-w-md mx-auto">
-            <div>✓ System scanning every 2 minutes</div>
-            <div>✓ Waiting for high-confidence setup (≥45%)</div>
-            <div>✓ Agents will auto-execute when conditions met</div>
-            <div className="text-yellow-500/80 mt-3">⚠️ Add funds to start trading</div>
-            <div className="text-green-500/60 text-[10px]">Recommended: $20+ for optimal trading</div>
+    <div className="h-full flex flex-col">
+      {/* Bloomberg-style Header */}
+      <div className="border-b border-white/[0.05] px-3 py-2 bg-[#0a0a0a]">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] text-[#555] font-mono uppercase tracking-wider">Portfolio</span>
+          {lastUpdate && (
+            <span className="text-[9px] text-[#444] font-mono">
+              {lastUpdate.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <div className="text-[9px] text-[#555] font-mono mb-0.5">Positions</div>
+            <div className="text-[12px] text-white font-mono tabular-nums">{positionData.length}</div>
+          </div>
+          <div>
+            <div className="text-[9px] text-[#555] font-mono mb-0.5">Total P&L</div>
+            <div className={`text-[12px] font-mono tabular-nums ${totalPnL >= 0 ? 'text-[#00ff88]' : 'text-[#ff4444]'}`}>
+              {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[9px] text-[#555] font-mono mb-0.5">Notional</div>
+            <div className="text-[12px] text-white font-mono tabular-nums">
+              ${totalNotional.toFixed(0)}
+            </div>
           </div>
         </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs text-primary/60 font-semibold uppercase tracking-wider">SYMBOL</TableHead>
-              <TableHead className="text-center text-xs text-primary/60 font-semibold uppercase tracking-wider">SIDE</TableHead>
-              <TableHead className="text-right text-xs text-primary/60 font-semibold uppercase tracking-wider">SIZE</TableHead>
-              <TableHead className="text-right text-xs text-primary/60 font-semibold uppercase tracking-wider">ENTRY</TableHead>
-              <TableHead className="text-right text-xs text-primary/60 font-semibold uppercase tracking-wider">CURRENT</TableHead>
-              <TableHead className="text-right text-xs text-primary/60 font-semibold uppercase tracking-wider">PNL</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {positions.map((position, index) => {
-              // Safe number parsing with fallback to 0
-              const size = isNaN(position.size) ? 0 : position.size;
-              const entryPrice = isNaN(position.entryPrice) ? 0 : position.entryPrice;
-              const currentPrice = isNaN(position.currentPrice) ? 0 : position.currentPrice;
-              const pnl = isNaN(position.pnl) ? 0 : position.pnl;
-              const pnlPercent = isNaN(position.pnlPercent) ? 0 : position.pnlPercent;
-              
-              return (
-                <motion.tr
-                  key={position.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className="border-b border-border/20 hover:bg-accent/5 transition-colors"
-                >
-                  <TableCell className="font-bold">{position.symbol}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge 
-                      variant={position.side === 'LONG' ? "default" : "destructive"}
-                      className="font-bold"
-                    >
+      </div>
+
+      {/* Position List */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="px-3 py-2 space-y-1">
+          {positionData.map((position, index) => {
+            const priceChange = position.currentPrice - position.entryPrice;
+            const priceChangePercent = (priceChange / position.entryPrice) * 100;
+            
+            return (
+              <motion.div
+                key={position.id}
+                initial={{ opacity: 0, y: 2 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.02 }}
+                className="border border-white/[0.05] bg-[#0a0a0a] hover:bg-[#0f0f0f] hover:border-white/[0.08] transition-all p-2.5 rounded"
+              >
+                {/* Symbol & Side */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] font-mono font-semibold text-white">{position.symbol}</span>
+                    <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                      position.side === 'LONG' 
+                        ? 'bg-[#00ff88]/10 text-[#00ff88] border border-[#00ff88]/20' 
+                        : 'bg-[#ff4444]/10 text-[#ff4444] border border-[#ff4444]/20'
+                    }`}>
                       {position.side}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-xs">{size.toFixed(4)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs">${entryPrice.toFixed(2)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs">${currentPrice.toFixed(2)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className={`font-bold tabular-nums ${pnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
-                      <div className="text-sm">{pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}</div>
-                      <Badge 
-                        variant={pnl >= 0 ? "default" : "destructive"}
-                        className="text-xs mt-0.5"
-                      >
-                        {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
-                      </Badge>
+                    </span>
+                    <span className="text-[9px] text-[#555] font-mono">{position.leverage}x</span>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-[13px] font-mono font-semibold tabular-nums ${position.pnl >= 0 ? 'text-[#00ff88]' : 'text-[#ff4444]'}`}>
+                      {position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)}
                     </div>
-                  </TableCell>
-                </motion.tr>
-              );
-            })}
-          </TableBody>
-        </Table>
-      )}
+                    <div className={`text-[10px] font-mono tabular-nums ${position.pnlPercent >= 0 ? 'text-[#00ff88]/70' : 'text-[#ff4444]/70'}`}>
+                      {position.pnlPercent >= 0 ? '+' : ''}{position.pnlPercent.toFixed(2)}%
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Bloomberg-style Grid */}
+                <div className="grid grid-cols-4 gap-2 pt-2 border-t border-white/[0.03]">
+                  <div>
+                    <div className="text-[8px] text-[#555] font-mono mb-0.5">Entry</div>
+                    <div className="text-[10px] text-[#888] font-mono tabular-nums">
+                      ${position.entryPrice.toFixed(4)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] text-[#555] font-mono mb-0.5">Mark</div>
+                    <div className={`text-[10px] font-mono tabular-nums ${priceChange >= 0 ? 'text-[#00ff88]' : 'text-[#ff4444]'}`}>
+                      ${position.currentPrice.toFixed(4)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] text-[#555] font-mono mb-0.5">Size</div>
+                    <div className="text-[10px] text-[#888] font-mono tabular-nums">
+                      {position.size > 0 ? (position.size < 0.001 ? position.size.toExponential(2) : position.size.toFixed(4)) : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] text-[#555] font-mono mb-0.5">Notional</div>
+                    <div className="text-[10px] text-[#888] font-mono tabular-nums">
+                      ${position.notional.toFixed(0)}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 });
 
 export default Positions;
-

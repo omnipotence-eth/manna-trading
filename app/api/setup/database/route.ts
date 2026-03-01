@@ -131,7 +131,7 @@ export async function POST() {
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol)`);
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_trades_pnl ON trades(pnl)`);
 
-    logger.info('✅ Database tables created successfully', { context: 'DatabaseSetup' });
+    logger.info('[OK] Database tables created successfully', { context: 'DatabaseSetup' });
 
     return NextResponse.json({
       success: true,

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { problematicCoinDetector } from '@/services/problematicCoinDetector';
+import { problematicCoinDetector } from '@/services/trading/problematicCoinDetector';
 import { logger } from '@/lib/logger';
 
 /**
@@ -30,13 +30,13 @@ export async function GET() {
 
 export async function POST() {
   try {
-    logger.info('🔍 Starting problematic coin scan...', {
+    logger.info('[SCAN] Starting problematic coin scan...', {
       context: 'ProblematicCoinsAPI'
     });
 
     const problematicCoins = await problematicCoinDetector.scanAllSymbols();
     
-    logger.info(`✅ Problematic coin scan complete: Found ${problematicCoins.length} problematic coins`, {
+    logger.info(`[OK] Problematic coin scan complete: Found ${problematicCoins.length} problematic coins`, {
       context: 'ProblematicCoinsAPI',
       data: {
         count: problematicCoins.length,
@@ -61,4 +61,5 @@ export async function POST() {
     );
   }
 }
+
 

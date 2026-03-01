@@ -3,7 +3,7 @@
  * Centralized types for trading workflows
  */
 
-import { MarketData } from '@/services/dataIngestionService';
+import { MarketData } from '@/services/data/dataIngestionService';
 
 export interface AnalystReports {
   technical?: TechnicalAnalysisReport;
@@ -82,10 +82,29 @@ export interface TradeResult {
   error?: string;
 }
 
+export interface SentimentData {
+  score: number;
+  sources: {
+    news?: number;
+    social?: number;
+    onchain?: number;
+  };
+  timestamp?: number;
+}
+
+export interface OnChainData {
+  whaleActivity?: number;
+  smartMoneyFlow?: 'inflow' | 'outflow' | 'neutral';
+  liquidityHealth?: 'healthy' | 'warning' | 'critical';
+  addressCount?: number;
+  transactionVolume?: number;
+  timestamp?: number;
+}
+
 export interface WorkflowContext {
   marketData?: MarketData;
-  sentimentData?: any;
-  onchainData?: any;
+  sentimentData?: SentimentData;
+  onchainData?: OnChainData;
   analystReports?: AnalystReports;
   finalDecision?: FinalDecision;
   portfolio?: Portfolio;
@@ -96,4 +115,5 @@ export interface WorkflowContext {
   sentimentAnalysis?: SentimentAnalysisReport;
   onchainAnalysis?: OnChainAnalysisReport;
 }
+
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
-import { asterDexService } from '@/services/asterDexService';
+import { asterDexService } from '@/services/exchange/asterDexService';
 
 /**
  * GET /api/prices
@@ -104,4 +104,5 @@ export async function GET() {
     );
   }
 }
+
 

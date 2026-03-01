@@ -1,17 +1,13 @@
 {
   "crons": [
     {
-      "path": "/api/cron/trading",
-      "schedule": "* * * * *"
+      "path": "/api/cron/trading-cycle",
+      "schedule": "0 12 * * *"
     }
   ],
   "functions": {
     "app/api/**/*.ts": {
       "maxDuration": 60
     }
-  },
-  "env": {
-    "NODE_ENV": "production"
   }
 }
-

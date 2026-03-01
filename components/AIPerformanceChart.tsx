@@ -129,6 +129,15 @@ export default function AIPerformanceChart() {
     return buildRealEquityCurve(trades, accountValue, timeRange);
   }, [trades, accountValue, timeRange]);
 
+  // REAL-TIME: Force update every 5 seconds to keep chart moving
+  const [, setForceUpdate] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setForceUpdate(prev => prev + 1);
+    }, 5000); // Update every 5 seconds for real-time feel
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     // Update with real trading data from store
     setIsLoading(true);
@@ -398,11 +407,18 @@ export default function AIPerformanceChart() {
               );
             })}
 
-            {/* X-axis with date/time labels */}
+            {/* X-axis with date/time labels - STANDARDIZED FORMAT */}
             {allTimestamps.length > 0 && [0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
               const timestamp = minTime + timeRange_ms * ratio;
               const x = padding.left + (ratio * innerWidth);
               const date = new Date(timestamp);
+              
+              // Standardized format: MM/DD for date, HH:MM for time (24h)
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const day = String(date.getDate()).padStart(2, '0');
+              const hours = String(date.getHours()).padStart(2, '0');
+              const minutes = String(date.getMinutes()).padStart(2, '0');
+              
               return (
                 <g key={i}>
                   <line
@@ -421,7 +437,7 @@ export default function AIPerformanceChart() {
                     textAnchor="middle"
                     opacity="0.6"
                   >
-                    {date.toLocaleDateString()}
+                    {`${month}/${day}`}
                   </text>
                   <text
                     x={x}
@@ -431,7 +447,7 @@ export default function AIPerformanceChart() {
                     textAnchor="middle"
                     opacity="0.5"
                   >
-                    {date.toLocaleTimeString()}
+                    {`${hours}:${minutes}`}
                   </text>
                 </g>
               );
@@ -467,16 +483,29 @@ export default function AIPerformanceChart() {
                   animate={{ pathLength: 1, opacity: 1 }}
                   transition={{ duration: 1, delay: idx * 0.2 }}
                 />
-                {/* End point marker */}
+                {/* End point marker - PULSING for real-time feel */}
                 {model.data.length > 0 && (
-                  <circle
-                    cx={getX(model.data[model.data.length - 1].timestamp)}
-                    cy={getY(model.data[model.data.length - 1].value)}
-                    r="5"
-                    fill={model.color}
-                    stroke="black"
-                    strokeWidth="2"
-                  />
+                  <>
+                    {/* Outer pulsing glow */}
+                    <motion.circle
+                      cx={getX(model.data[model.data.length - 1].timestamp)}
+                      cy={getY(model.data[model.data.length - 1].value)}
+                      r="12"
+                      fill={model.color}
+                      opacity="0.3"
+                      animate={{ r: [12, 18, 12], opacity: [0.3, 0.1, 0.3] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                    />
+                    {/* Inner point */}
+                    <circle
+                      cx={getX(model.data[model.data.length - 1].timestamp)}
+                      cy={getY(model.data[model.data.length - 1].value)}
+                      r="5"
+                      fill={model.color}
+                      stroke="black"
+                      strokeWidth="2"
+                    />
+                  </>
                 )}
               </g>
             ))}
@@ -555,7 +584,10 @@ export default function AIPerformanceChart() {
                   textAnchor="middle"
                   opacity="0.8"
                 >
-                  {new Date(hoveredPoint.timestamp).toLocaleDateString()}
+                  {(() => {
+                    const d = new Date(hoveredPoint.timestamp);
+                    return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+                  })()}
                 </text>
                 <text
                   x={hoveredPoint.x}
@@ -565,7 +597,10 @@ export default function AIPerformanceChart() {
                   textAnchor="middle"
                   opacity="0.7"
                 >
-                  {new Date(hoveredPoint.timestamp).toLocaleTimeString()}
+                  {(() => {
+                    const d = new Date(hoveredPoint.timestamp);
+                    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                  })()}
                 </text>
               </g>
             )}

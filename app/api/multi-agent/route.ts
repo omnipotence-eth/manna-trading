@@ -4,12 +4,15 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { agentCoordinator } from '@/services/agentCoordinator';
-import { deepseekService } from '@/services/deepseekService';
+import { agentCoordinator } from '@/services/ai/agentCoordinator';
+import { deepseekService } from '@/services/ai/deepseekService';
 import { handleApiError, createSuccessResponse } from '@/lib/errorHandler';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
 import { circuitBreakers } from '@/lib/circuitBreaker';
 import { logger } from '@/lib/logger';
+
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const timer = PerformanceMonitor.startTimer('MultiAgentAPI');
@@ -26,6 +29,8 @@ export async function GET(request: NextRequest) {
         return await testDeepSeekConnection();
       case 'models':
         return await getAvailableModels();
+      case 'ensure-model':
+        return await ensureModelReady(request);
       case 'start':
         return await startTradingWorkflow(symbol);
       case 'agents':
@@ -41,6 +46,7 @@ export async function GET(request: NextRequest) {
             'GET /api/multi-agent?action=status',
             'GET /api/multi-agent?action=test-deepseek',
             'GET /api/multi-agent?action=models',
+            'GET /api/multi-agent?action=ensure-model',
             'GET /api/multi-agent?action=start&symbol=BTC/USDT',
             'GET /api/multi-agent?action=agents',
             'GET /api/multi-agent?action=workflows',
@@ -236,7 +242,7 @@ async function testDeepSeekConnection() {
     return createSuccessResponse({
       message: 'DeepSeek R1 Connection Test',
       connected: isConnected,
-      error: isConnected ? undefined : 'DeepSeek R1 is not available. Check if Ollama is running and model is loaded. First request may take 60-120 seconds to load model (18.9GB model).',
+      error: isConnected ? undefined : 'DeepSeek R1 is not available. Check if Ollama is running and model is loaded. First request may take 30-60 seconds to load model (4.7GB model).',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -262,6 +268,38 @@ async function getAvailableModels() {
   });
 }
 
+async function ensureModelReady(request: NextRequest) {
+  try {
+    const { deepseekService } = await import('@/services/ai/deepseekService');
+    logger.info('Ensuring DeepSeek R1 14B model is downloaded and preloaded...', { context: 'API:MultiAgent' });
+    
+    const success = await deepseekService.ensureModelReady();
+    
+    if (success) {
+      return NextResponse.json({
+        success: true,
+        message: 'DeepSeek R1 14B model is downloaded and preloaded in RAM',
+        model: 'deepseek-r1:14b',
+        ready: true
+      });
+    } else {
+      return NextResponse.json({
+        success: false,
+        message: 'Failed to ensure model is ready. Check logs for details.',
+        model: 'deepseek-r1:14b',
+        ready: false
+      }, { status: 500 });
+    }
+  } catch (error) {
+    logger.error('Failed to ensure model is ready', error as Error, { context: 'API:MultiAgent' });
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      message: 'Failed to ensure model is ready'
+    }, { status: 500 });
+  }
+}
+
 async function testAnalysis(request: NextRequest) {
   const body = await request.json();
   const { prompt, model = 'deepseek-r1:14b' } = body;
@@ -284,3 +322,4 @@ async function testAnalysis(request: NextRequest) {
     timestamp: new Date().toISOString()
   });
 }
+

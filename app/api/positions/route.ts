@@ -4,8 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { positionMonitorService } from '@/services/positionMonitorService';
+import { positionMonitorService } from '@/services/trading/positionMonitorService';
 import { logger } from '@/lib/logger';
+
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/positions
@@ -164,6 +167,28 @@ export async function POST(request: NextRequest) {
           data: { positionId, closedPercent: 100 }
         });
 
+      case 'remove':
+        // Remove from monitor only (doesn't close on exchange)
+        const removed = positionMonitorService.removePosition(positionId);
+        
+        if (!removed) {
+          return NextResponse.json({
+            success: false,
+            error: 'Failed to remove position from monitor'
+          }, { status: 500 });
+        }
+
+        logger.info('Position removed from monitor', {
+          context: 'PositionsAPI',
+          data: { positionId, action: 'remove' }
+        });
+
+        return NextResponse.json({
+          success: true,
+          message: 'Position removed from monitor (not closed on exchange)',
+          data: { positionId }
+        });
+
       default:
         return NextResponse.json({
           success: false,
@@ -181,4 +206,5 @@ export async function POST(request: NextRequest) {
     }, { status: 500 });
   }
 }
+
 

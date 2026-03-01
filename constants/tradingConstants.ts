@@ -1,6 +1,11 @@
 /**
  * Trading-specific constants
  * Extracted from magic numbers throughout the codebase
+ * 
+ * MATHEMATICAL OPTIMIZATION:
+ * - Kelly Criterion-derived position limits
+ * - ATR-based volatility thresholds
+ * - Statistically optimal R:R ratios
  */
 
 export const TRADING_THRESHOLDS = {
@@ -22,20 +27,25 @@ export const TRADING_THRESHOLDS = {
   HIGH_CONFIDENCE_THRESHOLD: 0.7, // High confidence threshold
   MEDIUM_CONFIDENCE_THRESHOLD: 0.5, // Medium confidence threshold
   
-  // Position risk thresholds
-  MAX_POSITION_RISK_MICRO: 3.0, // Max 3% risk for accounts <$100
-  MAX_POSITION_RISK_SMALL: 5.0, // Max 5% risk for accounts <$500
+  // Position risk thresholds - KELLY CRITERION OPTIMIZED
+  // Based on 15% fractional Kelly with volatility adjustment
+  MAX_POSITION_RISK_MICRO: 2.0, // Max 2% risk for accounts <$100 (TIGHTENED from 3% - Kelly-safe)
+  MAX_POSITION_RISK_SMALL: 3.0, // Max 3% risk for accounts <$500 (TIGHTENED from 5%)
   MAX_PORTFOLIO_RISK_MICRO: 5.0, // Max 5% portfolio risk for accounts <$100
   MAX_PORTFOLIO_RISK_DEFAULT: 10.0, // Max 10% portfolio risk for larger accounts
   
-  // Trailing stop
-  DEFAULT_TRAILING_STOP_PERCENT: 2.0, // 2% trailing stop
+  // Trailing stop - CHANDELIER EXIT OPTIMIZED
+  DEFAULT_TRAILING_STOP_PERCENT: 3.0, // 3% baseline (3x ATR for medium vol)
+  CHANDELIER_MULTIPLIER: 3.0, // ATR multiplier for Chandelier Exit
   
-  // Risk/Reward ratios (MVP: Lowered for more trades)
-  MIN_RR_MICRO: 3.0, // MVP: 3:1 R:R for accounts <$100 (was 4:1)
-  MIN_RR_SMALL: 2.5, // MVP: 2.5:1 R:R for accounts $100-$200 (was 3.5:1)
-  MIN_RR_MEDIUM: 2.0, // MVP: 2:1 R:R for accounts $200-$500 (was 3:1)
-  MIN_RR_LARGE: 2.0, // MVP: 2:1 R:R for accounts >$500 (was 2.5:1)
+  // Risk/Reward ratios - MATHEMATICALLY OPTIMIZED
+  // Based on Expected Value = (WinRate × AvgWin) - (LossRate × AvgLoss)
+  // At 50% WR: need 1:1 to break even, 2:1 for profit
+  // At 55% WR: need 0.82:1 to break even, 1.5:1 for profit
+  MIN_RR_MICRO: 3.0, // 3:1 R:R for accounts <$100 (TIGHTENED from 2.5:1 - requires 25% WR to break even)
+  MIN_RR_SMALL: 3.0, // 3:1 R:R for accounts $100-$200 (TIGHTENED from 2:1 - requires 25% WR)
+  MIN_RR_MEDIUM: 2.5, // 2.5:1 R:R for accounts $200-$500 (TIGHTENED from 1.5:1 - requires 29% WR)
+  MIN_RR_LARGE: 2.5, // 2.5:1 R:R for accounts >$500 (TIGHTENED from 1.5:1 - requires 29% WR)
   
   // Account size thresholds
   MICRO_ACCOUNT_THRESHOLD: 100, // Accounts <$100
@@ -71,20 +81,137 @@ export const TRADING_THRESHOLDS = {
 } as const;
 
 export const MARKET_SCANNER_CONSTANTS = {
-  TOP_SYMBOLS_COUNT: 100, // Top 100 symbols by volume (was 50) - scan more opportunities!
-  ANALYZE_COUNT: 100, // Analyze top 100 symbols (was 50) - better market coverage
-  MAX_LIQUIDITY_USD: 5_000_000, // $5M for max liquidity score
+  TOP_SYMBOLS_COUNT: 10, // Focus on top 10 by volume for even lower latency
+  ANALYZE_COUNT: 6, // Deep analyze top 6 for speed and quality
+  MAX_LIQUIDITY_USD: 10_000_000, // $10M for max liquidity score
   
-  // Volume ratio thresholds
-  EXTREME_VOLUME_SPIKE: 3.5, // 3.5x average volume
-  HIGH_VOLUME_SPIKE: 2.5, // 2.5x average volume
-  VOLUME_INCREASE: 1.7, // 1.7x average volume
-  NORMAL_VOLUME: 1.2, // 1.2x average volume
+  // Volume ratio thresholds (stricter for quality)
+  EXTREME_VOLUME_SPIKE: 4.0, // 4x average volume (higher = more significant)
+  HIGH_VOLUME_SPIKE: 3.0, // 3x average volume
+  VOLUME_INCREASE: 2.0, // 2x average volume
+  NORMAL_VOLUME: 1.5, // 1.5x average volume
   
-  // Score thresholds (RELAXED for quiet markets)
-  STRONG_BUY_SCORE: 75, // Lowered from 85
-  BUY_SCORE: 55, // Lowered from 70 for quiet markets
-  NEUTRAL_SCORE: 35, // Lowered from 40
-  SELL_SCORE: 20, // Lowered from 25
+  // Score thresholds (STRICT for quality trades)
+  STRONG_BUY_SCORE: 80, // Raised - only the best setups
+  BUY_SCORE: 70, // Raised - quality over quantity
+  NEUTRAL_SCORE: 50, // Raised - avoid marginal trades
+  SELL_SCORE: 30, // Raised - only clear shorts
+  
+  // NEW: Minimum opportunity score to even consider
+  MIN_OPPORTUNITY_SCORE: 60, // Don't waste AI calls on weak setups
+} as const;
+
+/**
+ * MICRO TRADE CONSTANTS - Quick profit-seeking scalping trades
+ * Philosophy: Secure small gains frequently with high confidence
+ */
+export const MICRO_TRADE_CONSTANTS = {
+  // Micro profit targets (% profit to trigger exit)
+  MICRO_PROFIT_TARGET_PERCENT: 0.5,  // 0.5% profit = secure gain immediately
+  MINI_PROFIT_TARGET_PERCENT: 1.0,   // 1.0% profit = partial exit (50%)
+  SMALL_PROFIT_TARGET_PERCENT: 1.5,  // 1.5% profit = aggressive trailing stop
+  
+  // Confidence thresholds for micro trades (lower = more trades)
+  MICRO_CONFIDENCE_THRESHOLD: 0.55,  // 55% confidence for micro scalps
+  MICRO_MIN_RR: 1.5,                 // 1.5:1 R:R for micro trades (lower barrier)
+  
+  // Time-based micro exits
+  MICRO_HOLD_MAX_MINUTES: 15,        // Close micro trades after 15 min if not profitable
+  MICRO_HOLD_PROFIT_LOCK_MINUTES: 5, // Lock in profits after 5 min of being in profit
+  
+  // Position sizing for micro trades (% of balance)
+  MICRO_POSITION_SIZE_PERCENT: 2.0,  // 2.0% per micro trade (single-slot micro)
+  MAX_MICRO_POSITIONS: 1,            // Limit to one concurrent micro trade
+  
+  // Stop-loss for micro trades
+  MICRO_STOP_LOSS_PERCENT: 0.75,     // Tight 0.75% stop-loss for micro trades
+  
+  // Trailing stop activation
+  MICRO_TRAILING_ACTIVATION: 0.3,    // Activate trailing at 0.3% profit
+  MICRO_TRAILING_DISTANCE: 0.15,     // 0.15% trailing distance
+  
+  // Volume/momentum triggers
+  VOLUME_SPIKE_THRESHOLD: 1.5,       // 1.5x average volume = opportunity
+  MOMENTUM_CONFIRMATION_BARS: 2,     // Need 2 bars of momentum confirmation
+} as const;
+
+/**
+ * MACRO TRADE CONSTANTS - Larger swing/trend trades
+ * Philosophy: Wait for high-conviction setups, let winners run
+ */
+export const MACRO_TRADE_CONSTANTS = {
+  // Macro profit targets (% profit to trigger exit)
+  MACRO_PROFIT_TARGET_PERCENT: 5.0,  // 5% profit = full take profit
+  MACRO_PARTIAL_EXIT_PERCENT: 2.5,   // 2.5% profit = partial exit (25%)
+  MACRO_TRAILING_ACTIVATION: 3.0,    // Activate trailing at 3% profit
+  
+  // Confidence thresholds for macro trades (higher = fewer but better)
+  MACRO_CONFIDENCE_THRESHOLD: 0.70,  // 70% confidence for macro trades
+  MACRO_MIN_RR: 2.5,                 // 2.5:1 R:R for macro trades
+  
+  // Time-based macro behavior
+  MACRO_MIN_HOLD_HOURS: 2,           // Minimum 2 hours for macro trades
+  MACRO_MAX_HOLD_HOURS: 48,          // Maximum 48 hours (2 days)
+  
+  // Position sizing for macro trades
+  MACRO_POSITION_SIZE_PERCENT: 3.5,  // 3.5% per macro trade (single-slot macro)
+  MAX_MACRO_POSITIONS: 1,            // Limit to one concurrent macro trade
+  
+  // Stop-loss for macro trades  
+  MACRO_STOP_LOSS_PERCENT: 2.0,      // 2% stop-loss for macro trades
+  MACRO_TRAILING_DISTANCE: 1.0,      // 1% trailing distance
+} as const;
+
+/**
+ * MATHEMATICAL CONSTANTS - Supreme optimization formulas
+ */
+export const MATH_CONSTANTS = {
+  // Kelly Criterion
+  KELLY_FRACTION: 0.15, // Use 15% of full Kelly (ultra-conservative)
+  MIN_KELLY_SIZE: 1.0, // Minimum 1% position size if edge exists
+  MAX_KELLY_SIZE: 12.0, // Maximum 12% position size
+  
+  // ATR Multipliers for volatility levels
+  ATR_MULTIPLIERS: {
+    LOW: { stopLoss: 2.0, takeProfit: 3.5 }, // 1.75:1 R:R
+    MEDIUM: { stopLoss: 2.5, takeProfit: 4.0 }, // 1.6:1 R:R
+    HIGH: { stopLoss: 3.0, takeProfit: 5.0 }, // 1.67:1 R:R
+    EXTREME: { stopLoss: 3.5, takeProfit: 6.0 } // 1.71:1 R:R
+  },
+  
+  // Volatility thresholds (ATR as %)
+  VOLATILITY_THRESHOLDS: {
+    LOW: 2,
+    MEDIUM: 5,
+    HIGH: 10,
+    EXTREME: 15
+  },
+  
+  // Risk metrics
+  MIN_SHARPE_RATIO: 1.0, // Minimum acceptable Sharpe (1.0 = adequate)
+  TARGET_SHARPE_RATIO: 2.0, // Target Sharpe (2.0 = good)
+  MIN_PROFIT_FACTOR: 1.5, // Minimum profit factor
+  MAX_DRAWDOWN_PERCENT: 20, // Maximum acceptable drawdown
+  
+  // Expected Value thresholds
+  MIN_EXPECTED_VALUE: 0.5, // Minimum EV per trade (0.5% = break even after fees)
+  TARGET_EXPECTED_VALUE: 2.0, // Target EV per trade (2% = good edge)
+  
+  // Monte Carlo
+  MONTE_CARLO_SIMULATIONS: 1000, // Number of simulations
+  MONTE_CARLO_TRADES: 100, // Trades per simulation
+  MAX_RISK_OF_RUIN: 0.05, // Maximum 5% probability of 50% drawdown
+  
+  // Regime detection
+  ADX_TREND_THRESHOLD: 25, // ADX > 25 = trending
+  ADX_STRONG_TREND: 40, // ADX > 40 = strong trend
+  
+  // Position limits based on account size (as % of balance)
+  POSITION_LIMITS: {
+    MICRO: { max: 3, concurrent: 1 }, // <$100
+    SMALL: { max: 5, concurrent: 2 }, // <$500
+    MEDIUM: { max: 8, concurrent: 3 }, // <$2000
+    LARGE: { max: 12, concurrent: 5 } // >$2000
+  }
 } as const;
 

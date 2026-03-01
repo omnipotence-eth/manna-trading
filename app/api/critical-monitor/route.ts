@@ -5,7 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
-import { criticalServiceMonitor } from '@/services/criticalServiceMonitor';
+import { criticalServiceMonitor } from '@/services/monitoring/criticalServiceMonitor';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,4 +88,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
 

@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
         });
 
         // Import asterDexService dynamically to avoid circular dependencies
-        const { asterDexService } = await import('@/services/asterDexService');
+        const { asterDexService } = await import('@/services/exchange/asterDexService');
         
         // Use optimized service method (30-key pool, proper error handling)
         const success = await asterDexService.setLeverage(body.symbol, leverage);
@@ -86,4 +86,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
 
