@@ -8,8 +8,9 @@ import { logger } from '@/lib/logger';
 import { getCircuitBreakerHealth, getCircuitBreakerStats } from '@/lib/circuitBreaker';
 import { getCacheStats } from '@/lib/requestCache';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
-import { asterConfig } from '@/lib/configService';
+import { asterConfig, dbConfig } from '@/lib/configService';
 import { createSuccessResponse, handleApiError } from '@/lib/errorHandler';
+import { getValidationStatus } from '@/lib/envValidation';
 
 /**
  * GET /api/health
@@ -19,11 +20,45 @@ export async function GET(request: NextRequest) {
   const timer = PerformanceMonitor.startTimer('api:health:check');
   
   try {
+    // Check individual service health
+    let ollamaStatus = 'unknown';
+    let databaseStatus = 'unknown';
+    let exchangeStatus = 'unknown';
+    let websocketStatus = 'connected'; // Managed client-side
+    
+    // Check Ollama/DeepSeek
+    try {
+      const ollamaCheck = await fetch('http://localhost:11434/api/tags', { 
+        signal: AbortSignal.timeout(2000) 
+      });
+      ollamaStatus = ollamaCheck.ok ? 'available' : 'unavailable';
+    } catch {
+      ollamaStatus = 'unavailable';
+    }
+    
+    // Check Exchange (we have API keys = exchange is available)
+    exchangeStatus = asterConfig.apiKey ? 'available' : 'unavailable';
+    
+    // Check Database: mark connected when DATABASE_URL is set, otherwise skipped
+    databaseStatus = dbConfig.isConfigured ? 'connected' : 'skipped';
+    
     const health = {
       status: 'healthy',
       timestamp: new Date().toISOString(),
       version: '2.0.0',
       environment: process.env.NODE_ENV || 'development',
+      
+      // Service health status (used by frontend)
+      services: {
+        ollama: ollamaStatus,
+        ai: ollamaStatus,
+        database: databaseStatus,
+        postgres: databaseStatus,
+        asterDex: exchangeStatus,
+        exchange: exchangeStatus,
+        websocket: websocketStatus,
+        ws: websocketStatus
+      },
       
       // System health
       system: {
@@ -50,7 +85,9 @@ export async function GET(request: NextRequest) {
           positionInterval: asterConfig.monitoring.positionCheckInterval,
           tradingInterval: asterConfig.monitoring.tradingCycleInterval,
           logLevel: asterConfig.monitoring.logLevel,
-        }
+        },
+        // Environment validation status
+        envValidation: getValidationStatus(),
       },
       
       // Circuit breaker health
@@ -80,7 +117,8 @@ export async function GET(request: NextRequest) {
       health.status = 'degraded';
     }
     
-    if (!health.circuitBreakers.overall) {
+    const circuitOverall = health.circuitBreakers?.overall;
+    if (circuitOverall === false) {
       health.status = 'unhealthy';
     }
     

@@ -20,6 +20,8 @@ class Logger {
   private formatMessage(level: LogLevel, message: string, options?: LogOptions): string {
     const timestamp = new Date().toISOString();
     const context = options?.context ? `[${options.context}]` : '';
+    
+    // Plain text format - no colors for Windows PowerShell compatibility
     return `[${timestamp}] [${level.toUpperCase()}] ${context} ${message}`;
   }
 

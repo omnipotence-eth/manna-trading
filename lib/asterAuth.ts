@@ -50,12 +50,13 @@ export async function buildSignedQuery(
     params.timestamp = Date.now();
   }
 
-  // CRITICAL FIX: Use conservative recvWindow to prevent "Invalid timestamp" errors
+  // OPTIMIZED: Use balanced recvWindow for reliability
   // According to Aster DEX API docs: timestamp must be within recvWindow of server time
-  // Using 5000ms (5 seconds) as default - more conservative to prevent clock skew issues
-  // Max allowed is 60000ms (60 seconds), but smaller window = less chance of errors
+  // Using 10000ms (10 seconds) as default - balances reliability with security
+  // Max allowed is 60000ms (60 seconds), but 10s is optimal for most networks
+  // With server time sync, we can use a larger window safely
   if (!params.recvWindow) {
-    params.recvWindow = 5000; // Reduced from 60000 to 5000ms for better timestamp validation
+    params.recvWindow = 10000; // Increased from 5000ms to 10000ms for better reliability
   }
   
   // CRITICAL: Ensure recvWindow doesn't exceed API limit (60000ms max per API docs)

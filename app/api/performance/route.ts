@@ -4,8 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { performanceTracker } from '@/services/performanceTracker';
+import { performanceTracker } from '@/services/monitoring/performanceTracker';
 import { logger } from '@/lib/logger';
+
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/performance
@@ -119,4 +122,5 @@ export async function GET(request: NextRequest) {
     }, { status: 500 });
   }
 }
+
 

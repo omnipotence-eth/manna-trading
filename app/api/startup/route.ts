@@ -4,13 +4,16 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { startupService } from '@/services/startupService';
+import { startupService } from '@/services/monitoring/startupService';
 import { logger } from '@/lib/logger';
 import { handleApiError, createSuccessResponse } from '@/lib/errorHandler';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
-import { realBalanceService } from '@/services/realBalanceService';
+import { realBalanceService } from '@/services/trading/realBalanceService';
 import { asterConfig } from '@/lib/configService';
-import { agentRunnerService } from '@/services/agentRunnerService';
+import { agentRunnerService } from '@/services/ai/agentRunnerService';
+
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const timer = PerformanceMonitor.startTimer('StartupAPI');
@@ -69,7 +72,7 @@ export async function POST(request: NextRequest) {
 }
 
 async function getStartupStatus() {
-  const isInitialized = startupService.isInitialized();
+    const isInitialized = await startupService.isInitialized();
   
   // CRITICAL FIX: Include balance, confidence, and Agent Runner status
   const balanceConfig = realBalanceService.getBalanceConfig();
@@ -107,3 +110,4 @@ async function shutdownServices() {
     timestamp: new Date().toISOString()
   });
 }
+

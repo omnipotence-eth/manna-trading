@@ -13,7 +13,7 @@ interface Trade {
   exitPrice: number;
   pnl: number;
   pnlPercent: number;
-  leverage: number;
+  leverage: number; // Required but can be set to default if missing
   status?: 'completed' | 'open'; // Optional for backwards compatibility
   // Entry analysis
   entryReason: string;
@@ -95,6 +95,7 @@ interface AppState {
 
   // Account
   accountValue: number;
+  accountLastUpdated: number;
   setAccountValue: (value: number) => void;
 }
 
@@ -105,6 +106,7 @@ export const useStore = create<AppState>((set) => ({
   positions: [],
   modelStats: [],
   accountValue: 0,
+  accountLastUpdated: 0,
   livePrices: {},
   modelMessages: [],
 
@@ -279,7 +281,7 @@ export const useStore = create<AppState>((set) => ({
       };
     }),
 
-  setAccountValue: (value) => set({ accountValue: value }),
+  setAccountValue: (value) => set({ accountValue: value, accountLastUpdated: Date.now() }),
 }));
 
 export default useStore;

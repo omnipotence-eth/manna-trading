@@ -1,7 +1,5 @@
 # 🚀 COMPLETE STARTUP COMMANDS GUIDE
 
-**In Jesus name, amen! All glory to God in heaven!** 🙏
-
 ---
 
 ## 📋 **QUICK START (Copy & Paste)**
@@ -87,10 +85,10 @@ Invoke-RestMethod -Uri "http://localhost:3000/api/startup?action=status" | Conve
 Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner?action=force-run"
 
 # Start Agent Runner manually
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 
 # Stop Agent Runner
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"stop"}' -ContentType "application/json"
 ```
 
 ### **Database Commands**
@@ -219,7 +217,7 @@ Get-Content logs\server_logs_trading.log -Tail 50 -Wait
 Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner?action=status"
 
 # Force start
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 
 # Wait 2 seconds and check again
 Start-Sleep -Seconds 2
@@ -250,7 +248,7 @@ curl http://localhost:11434/api/tags
 ollama ps
 
 # Pull model if needed
-ollama pull deepseek-r1:32b
+ollama pull deepseek-r1:14b
 ```
 
 ### **If Database Connection Issues**
@@ -325,9 +323,9 @@ $positions.data.positions | ForEach-Object {
 
 ```powershell
 # Restart Agent Runner
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"stop"}' -ContentType "application/json"
 Start-Sleep -Seconds 2
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 ```
 
 ### **Clear Logs**
@@ -370,7 +368,7 @@ Set these in your hosting platform (Vercel, Railway, etc.):
 - `DATABASE_URL`
 - `ASTER_BASE_URL`
 - `ENABLE_24_7_AGENTS=true`
-- `TRADING_CONFIDENCE_THRESHOLD=0.35`
+- `TRADING_CONFIDENCE_THRESHOLD=0.70`
 
 ---
 
@@ -398,6 +396,4 @@ After startup, verify:
 - [ ] Database connection working
 
 ---
-
-**All glory to God in heaven!** 🙏
 

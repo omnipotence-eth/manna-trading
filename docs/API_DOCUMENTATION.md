@@ -1,489 +1,667 @@
-# API Documentation
+# 📚 API Documentation
 
-Complete reference for all trading system API endpoints.
+**Manna LLM Aster Crypto Trader v7.1.0**
 
-## Base URL
-
-All endpoints are prefixed with:
-- **Development**: `http://localhost:3000/api`
-- **Production**: `https://your-domain.com/api`
+Complete reference for all REST API endpoints.
 
 ---
 
-## 🔧 System Management
-
-### Startup & Initialization
-
-#### `GET /api/startup?action=status`
-Get initialization status of the trading system.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "status": {
-      "initialized": true,
-      "timestamp": "2025-11-02T04:48:26.794Z"
-    }
-  }
-}
-```
-
-#### `GET /api/startup?action=initialize`
-Manually initialize all trading services.
-
-**Timeout:** Up to 130 seconds (model loading can take 60-120 seconds)
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Services Initialized",
-    "timestamp": "2025-11-02T04:52:06.000Z"
-  }
-}
-```
-
-**Notes:**
-- Requires DeepSeek R1 to be available
-- Will fail if Ollama is not running or model not loaded
-- First request may take 60-120 seconds for model loading
-
-#### `GET /api/startup?action=shutdown`
-Shutdown all trading services gracefully.
-
----
-
-### Health Checks
-
-#### `GET /api/health`
-Quick health check of the system.
-
-**Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2025-11-02T04:39:29.017Z",
-  "hasApiKey": true
-}
-```
-
-#### `GET /api/health/detailed`
-Comprehensive health check with detailed component status.
-
----
-
-## 🤖 AI & DeepSeek R1
-
-### `GET /api/multi-agent?action=test-deepseek`
-Test DeepSeek R1 connection and availability.
-
-**Timeout:** Up to 150 seconds (first request may take 60-120 seconds)
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "message": "DeepSeek R1 Connection Test",
-    "connected": true,
-    "timestamp": "2025-11-02T04:51:09.918Z"
-  }
-}
-```
-
-**Error Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "connected": false,
-    "error": "DeepSeek R1 is not available. Check if Ollama is running and model is loaded. First request may take 60-120 seconds to load model (18.9GB model)."
-  }
-}
-```
-
-**Other Actions:**
-- `GET /api/multi-agent?action=status` - Get system status
-- `GET /api/multi-agent?action=models` - Get available models
-- `GET /api/multi-agent?action=agents` - Get agent status
-- `GET /api/multi-agent?action=workflows` - Get workflow status
-- `GET /api/multi-agent?action=metrics` - Get performance metrics
-- `GET /api/multi-agent?action=start&symbol=BTC/USDT` - Start trading workflow
-
----
-
-## 📊 Trading & Market Data
-
-### `GET /api/trading/data`
-Get current trading data including balance, positions, and total value.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "balance": 100,
-    "positions": [],
-    "totalValue": 100,
-    "unrealizedPnL": 0,
-    "timestamp": "2025-11-02T04:41:02.000Z"
-  }
-}
-```
-
-### `GET /api/optimized-data`
-Get optimized market data for trading decisions.
-
-**Query Parameters:**
-- `limit` (optional): Number of symbols to return (default: 50)
-- `minVolume` (optional): Minimum 24h volume filter
-- `maxSpread` (optional): Maximum spread filter
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "symbols": [...],
-    "topByVolume": [...],
-    "timestamp": "2025-11-02T04:41:02.000Z"
-  }
-}
-```
-
-### `POST /api/optimized-data`
-Submit optimized trading parameters.
-
-**Request Body:**
-```json
-{
-  "confidenceThreshold": 0.35,
-  "minScore": 35,
-  "maxPositionSize": 10
-}
-```
-
----
-
-## 🔄 Agent Runner (24/7 Trading)
-
-### `GET /api/agent-runner?action=status`
-Get status of the 24/7 agent runner.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Agent Runner Status",
-    "status": {
-      "isRunning": true,
-      "timestamp": "2025-11-02T04:40:55.276Z",
-      "activeWorkflowCount": 1
-    }
-  }
-}
-```
-
-**Other Actions:**
-- `GET /api/agent-runner?action=force-run` - Force immediate market scan
-- `GET /api/agent-runner?action=update-symbols` - Update trading symbols
-- `GET /api/agent-runner?action=config` - Get configuration
-
-### `POST /api/agent-runner/start`
-Start the agent runner service.
-
-### `POST /api/agent-runner/stop`
-Stop the agent runner service.
-
----
-
-## 💼 Positions & Account
-
-### `GET /api/aster/account`
-Get account information from Aster DEX.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "balance": 83.86518784,
-    "availableBalance": 83.86518784,
-    "totalEquity": 83.86518784
-  }
-}
-```
-
-### `GET /api/aster/positions`
-Get open positions from Aster DEX.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "symbol": "BTC/USDT",
-      "side": "LONG",
-      "size": 0.001,
-      "entryPrice": 45000,
-      "unrealizedPnl": 5.5
-    }
-  ]
-}
-```
-
-### `GET /api/positions`
-Get positions from database.
-
-**Query Parameters:**
-- `status` (optional): Filter by status (`OPEN`, `CLOSED`)
-- `symbol` (optional): Filter by symbol
-
-### `POST /api/positions`
-Manage positions (force close, update trailing stop).
-
-**Request Body:**
-```json
-{
-  "action": "force-close",
-  "symbol": "BTC/USDT"
-}
-```
-
----
-
-## 📈 Trading History
-
-### `GET /api/trades`
-Get trade history.
-
-**Query Parameters:**
-- `days` (optional): Number of days to look back (default: 30)
-- `limit` (optional): Maximum number of trades to return
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "trades": [...],
-    "stats": {
-      "totalTrades": 10,
-      "winRate": 0.7,
-      "totalPnL": 15.5
-    }
-  }
-}
-```
-
-### `POST /api/trades`
-Add a new trade record.
-
----
-
-## 📊 Market Analysis
-
-### `GET /api/agent-insights`
-Get AI agent insights and market opportunities.
-
-**Query Parameters:**
-- `limit` (optional): Number of insights to return (default: 10)
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "opportunities": [...],
-    "topByVolume": [...],
-    "timestamp": "2025-11-02T04:41:02.000Z"
-  }
-}
-```
-
-### `GET /api/market-confidence`
-Get market confidence analysis and statistics.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "avgConfidence": 0.65,
-    "confidenceDistribution": {...},
-    "avgScore": 45.2
-  }
-}
-```
-
-### `GET /api/prices`
-Get current prices for trading symbols.
-
-**Query Parameters:**
-- `symbols` (optional): Comma-separated list of symbols
-
----
-
-## ⚙️ Configuration & Setup
-
-### `POST /api/setup/database`
-Initialize database schema.
-
----
-
-## 🎯 Performance Metrics
-
-### `GET /api/performance`
-Get trading performance metrics.
-
-**Response:**
-```json
-{
-  "success": true,
-  "data": {
-    "winRate": 0.7,
-    "profitFactor": 1.5,
-    "sharpeRatio": 1.2,
-    "maxDrawdown": 5.0,
-    "totalPnL": 15.5
-  }
-}
-```
-
----
-
-## 🔑 Order Management
-
-### `POST /api/aster/order`
-Place an order on Aster DEX.
-
-**Request Body:**
-```json
-{
-  "symbol": "BTCUSDT",
-  "side": "BUY",
-  "type": "MARKET",
-  "quantity": 0.001
-}
-```
-
-### `DELETE /api/aster/order`
-Cancel an order.
-
-**Query Parameters:**
-- `symbol`: Trading symbol
-- `orderId`: Order ID to cancel
-
-### `POST /api/aster/leverage`
-Set leverage for a symbol.
-
-**Request Body:**
-```json
-{
-  "symbol": "BTCUSDT",
-  "leverage": 2
-}
-```
-
----
-
-## 📝 AI Chat & Messages
-
-### `GET /api/model-message`
-Get AI model messages and chat logs.
-
-**Query Parameters:**
-- `hoursAgo` (optional): How many hours back to fetch (default: 168 = 7 days)
-- `limit` (optional): Maximum messages to return
-
-### `POST /api/model-message`
-Add a new model message.
-
----
-
-## ⚠️ Error Responses
-
-All endpoints return errors in this format:
-
-```json
-{
-  "success": false,
-  "error": "Error message",
-  "type": "ERROR_TYPE",
-  "context": "Context",
-  "timestamp": "2025-11-02T04:52:06.000Z"
-}
-```
-
-**Common Error Types:**
-- `TIMEOUT_ERROR` - Request timed out
-- `EXTERNAL_API_ERROR` - External API call failed
-- `VALIDATION_ERROR` - Invalid request parameters
-- `INTERNAL_ERROR` - Internal server error
-
----
-
-## 🚀 Optimization Endpoints
-
-### Key Endpoints for Optimization:
-
-1. **`GET /api/optimized-data`** - Get optimized market data
-   - Use this to get pre-filtered, high-quality trading opportunities
-   - Includes volume, spread, and liquidity filters
-
-2. **`POST /api/optimized-data`** - Submit optimization parameters
-   - Adjust confidence thresholds
-   - Update scoring criteria
-   - Modify position sizing rules
-
-3. **`GET /api/market-confidence`** - Analyze market confidence
-   - Get confidence distribution
-   - Understand market conditions
-   - Identify optimal trading windows
-
-4. **`GET /api/performance`** - Track performance metrics
-   - Monitor win rate
-   - Track profit factor
-   - Analyze Sharpe ratio
-
-5. **`GET /api/agent-insights`** - Get AI-generated insights
-   - View AI agent recommendations
-   - See filtered opportunities
-   - Understand decision rationale
-
----
-
-## 📚 Additional Resources
-
-- **Trading Diagnostic**: See `TRADING_DIAGNOSTIC.md`
-- **Start Guide**: See `SIMPLE_START_GUIDE.md`
-- **Quick Commands**: See `QUICK_COMMANDS.md`
-- **Initialization Issues**: See `INITIALIZATION_PROBLEM_ANALYSIS.md`
+## 📋 Table of Contents
+
+- [Authentication](#authentication)
+- [Core Endpoints](#core-endpoints)
+- [Trading Endpoints](#trading-endpoints)
+- [Market Data Endpoints](#market-data-endpoints)
+- [AI/ML Endpoints](#aiml-endpoints)
+- [WebSocket Streams](#websocket-streams)
+- [Error Handling](#error-handling)
 
 ---
 
 ## 🔐 Authentication
 
-Currently, the API uses environment variables for authentication:
-- `ASTER_API_KEY` - Aster DEX API key
-- `ASTER_SECRET_KEY` - Aster DEX secret key
+All internal API endpoints are designed for server-to-server communication. Client-side requests go through Next.js API routes which handle authentication internally.
 
-These are configured in `.env` file and are server-side only.
+For Aster DEX API calls, authentication uses HMAC-SHA256 signatures:
+
+```typescript
+// Signature generation (handled by lib/asterAuth.ts)
+const signature = crypto
+  .createHmac('sha256', secretKey)
+  .update(queryString)
+  .digest('hex');
+```
 
 ---
 
-## ⏱️ Timeout Notes
+## 🎯 Core Endpoints
 
-**Important:** Some endpoints have extended timeouts due to DeepSeek R1 model loading:
+### POST /api/startup
 
-- **Initialization**: Up to 130 seconds
-- **DeepSeek Test**: Up to 150 seconds
-- **First Model Request**: 60-120 seconds (normal for 18.9GB model)
+Initialize all trading services.
 
-Subsequent requests are much faster (1-5 seconds) once the model is loaded.
+**Request:**
+```bash
+curl -X POST http://localhost:3000/api/startup
+```
 
+**Response:**
+```json
+{
+  "success": true,
+  "message": "All services started successfully",
+  "services": {
+    "agentRunner": { "status": "running", "interval": 60000 },
+    "positionMonitor": { "status": "running", "positions": 0 },
+    "websocket": { "status": "connected", "symbols": 3 },
+    "healthMonitor": { "status": "active" }
+  },
+  "timestamp": 1701648000000
+}
+```
+
+---
+
+### GET /api/trading-status
+
+Get current trading system status.
+
+**Request:**
+```bash
+curl http://localhost:3000/api/trading-status
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agentRunner": {
+      "isRunning": true,
+      "currentCycle": 42,
+      "lastCycleTime": 1701648000000,
+      "symbolsAnalyzed": 100,
+      "workflowsCompleted": 156
+    },
+    "positionMonitor": {
+      "isMonitoring": true,
+      "openPositions": 2,
+      "totalPnL": 12.45
+    },
+    "websocket": {
+      "connected": true,
+      "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+      "lastUpdate": 1701648000000
+    },
+    "account": {
+      "balance": 156.78,
+      "availableBalance": 134.56,
+      "unrealizedPnL": 4.32
+    }
+  }
+}
+```
+
+---
+
+### GET /api/health
+
+Health check endpoint.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": 1701648000000,
+  "services": {
+    "database": "connected",
+    "ollama": "available",
+    "asterDex": "connected",
+    "websocket": "connected"
+  }
+}
+```
+
+---
+
+### GET /api/health/detailed
+
+Detailed health status with metrics.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "uptime": 86400000,
+  "memory": {
+    "used": 256000000,
+    "total": 512000000,
+    "percent": 50
+  },
+  "services": {
+    "database": {
+      "status": "connected",
+      "latency": 15,
+      "connections": 5
+    },
+    "ollama": {
+      "status": "available",
+      "model": "deepseek-r1:8b",
+      "latency": 120
+    },
+    "asterDex": {
+      "status": "connected",
+      "rateLimit": {
+        "used": 450,
+        "limit": 2400
+      }
+    }
+  }
+}
+```
+
+---
+
+## 📈 Trading Endpoints
+
+### GET /api/positions
+
+Get open positions.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "positions": [
+      {
+        "id": "pos_1701648000_abc123",
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "entryPrice": 42000.50,
+        "currentPrice": 42150.00,
+        "size": 0.001,
+        "leverage": 10,
+        "stopLoss": 40320.48,
+        "takeProfit": 47040.56,
+        "unrealizedPnL": 1.49,
+        "unrealizedPnLPercent": 3.57,
+        "openedAt": 1701648000000,
+        "status": "OPEN"
+      }
+    ],
+    "totalPositions": 1,
+    "totalUnrealizedPnL": 1.49
+  }
+}
+```
+
+---
+
+### POST /api/positions
+
+Add position to monitor (manual).
+
+**Request:**
+```json
+{
+  "action": "add",
+  "symbol": "BTCUSDT",
+  "side": "LONG",
+  "entryPrice": 42000.50,
+  "size": 0.001,
+  "leverage": 10,
+  "stopLoss": 40320.48,
+  "takeProfit": 47040.56,
+  "orderId": "order_123"
+}
+```
+
+---
+
+### GET /api/trades
+
+Get trade history.
+
+**Query Parameters:**
+- `limit` (optional): Number of trades (default: 50)
+- `symbol` (optional): Filter by symbol
+- `side` (optional): Filter by LONG/SHORT
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "trades": [
+      {
+        "id": "trade_1701648000",
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "entryPrice": 42000.50,
+        "exitPrice": 42840.51,
+        "size": 0.001,
+        "leverage": 10,
+        "pnl": 8.40,
+        "pnlPercent": 20.0,
+        "entryReason": "Multi-Agent Analysis: Strong bullish momentum...",
+        "exitReason": "TAKE_PROFIT",
+        "duration": 3600000,
+        "timestamp": 1701648000000
+      }
+    ],
+    "summary": {
+      "totalTrades": 156,
+      "winRate": 58.3,
+      "totalPnL": 124.56
+    }
+  }
+}
+```
+
+---
+
+### GET /api/performance
+
+Get performance metrics.
+
+**Query Parameters:**
+- `days` (optional): Lookback period (default: 30)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "metrics": {
+      "totalTrades": 156,
+      "winningTrades": 91,
+      "losingTrades": 65,
+      "winRate": 58.33,
+      "avgWinAmount": 2.45,
+      "avgLossAmount": 1.23,
+      "avgProfitPerTrade": 0.79,
+      "profitFactor": 1.82,
+      "totalPnL": 124.56,
+      "maxDrawdown": 15.23,
+      "maxDrawdownPercent": 12.5,
+      "sharpeRatio": 2.34,
+      "sortinoRatio": 3.12,
+      "calmarRatio": 4.56,
+      "expectedValue": 0.79,
+      "bestTrade": 12.45,
+      "worstTrade": -8.23,
+      "avgTradeDuration": 7200000
+    },
+    "symbolPerformance": [
+      {
+        "symbol": "BTCUSDT",
+        "trades": 45,
+        "winRate": 62.2,
+        "totalPnL": 45.67
+      }
+    ],
+    "dailyPerformance": [
+      {
+        "date": "2024-12-01",
+        "trades": 8,
+        "pnl": 12.34,
+        "winRate": 75.0
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 📊 Market Data Endpoints
+
+### GET /api/realtime-market
+
+Get unified real-time market data.
+
+**Query Parameters:**
+- `symbols` (optional): Comma-separated symbols (default: BTCUSDT,ETHUSDT,SOLUSDT)
+- `includeML` (optional): Include ML insights (default: false)
+- `includeAPIStats` (optional): Include API key stats (default: false)
+
+**Response:**
+```json
+{
+  "success": true,
+  "timestamp": 1701648000000,
+  "connection": {
+    "connected": true,
+    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "dataPoints": 3
+  },
+  "marketData": {
+    "BTCUSDT": {
+      "symbol": "BTCUSDT",
+      "timestamp": 1701648000000,
+      "price": 42000.50,
+      "priceFormatted": "42000.50",
+      "markPrice": 42001.23,
+      "indexPrice": 42000.00,
+      "priceChange24h": 1250.50,
+      "priceChangePercent24h": 3.07,
+      "changeFormatted": "+3.07%",
+      "volume24h": 15000000000,
+      "volumeFormatted": "$15.00B",
+      "buyVolume": 8500000000,
+      "sellVolume": 6500000000,
+      "volumeRatio": 1.31,
+      "bestBid": 42000.00,
+      "bestAsk": 42001.00,
+      "spread": 1.00,
+      "spreadPercent": 0.0024,
+      "spreadFormatted": "0.0024%",
+      "bidLiquidity": 5000000,
+      "askLiquidity": 4500000,
+      "liquidityImbalance": 0.053,
+      "fundingRate": 0.0001,
+      "fundingFormatted": "0.0100%",
+      "nextFundingTime": 1701662400000,
+      "fundingSentiment": "BULLISH",
+      "liquidationPressure": "NEUTRAL",
+      "totalLiquidationValue24h": 45000000,
+      "atr": 420.05,
+      "atrPercent": 1.0,
+      "volatilityLevel": "LOW",
+      "momentum1m": 0.05,
+      "momentum5m": 0.12,
+      "momentum15m": 0.25,
+      "momentum1h": 0.45,
+      "overallScore": 72,
+      "signalStrength": "BUY",
+      "signalColor": "#00cc66"
+    }
+  },
+  "recentLiquidations": [
+    {
+      "symbol": "BTCUSDT",
+      "side": "SELL",
+      "price": 41800.00,
+      "quantity": 0.5,
+      "value": 20900,
+      "valueFormatted": "$20.90K",
+      "timestamp": 1701647900000,
+      "timeAgo": "2m ago"
+    }
+  ],
+  "marketOverview": {
+    "avgScore": 58,
+    "bullishCount": 45,
+    "bearishCount": 12,
+    "neutralCount": 43,
+    "avgVolatility": 3.2,
+    "totalLiquidations24h": 125000000
+  },
+  "mlInsights": {
+    "patterns": [
+      {
+        "pattern": "high_volume_entry",
+        "winRate": 0.67,
+        "avgPnl": 2.3,
+        "sampleSize": 45,
+        "confidence": 0.85,
+        "recommendation": "FAVORABLE - Trade aggressively when detected"
+      }
+    ],
+    "featureImportance": [
+      {
+        "feature": "volumeRatio",
+        "importance": 0.85,
+        "correlation": 0.45
+      }
+    ]
+  }
+}
+```
+
+---
+
+### GET /api/prices
+
+Get current prices for symbols.
+
+**Query Parameters:**
+- `symbols` (optional): Comma-separated symbols
+
+**Response:**
+```json
+{
+  "success": true,
+  "prices": {
+    "BTCUSDT": 42000.50,
+    "ETHUSDT": 2250.75,
+    "SOLUSDT": 65.43
+  },
+  "timestamp": 1701648000000
+}
+```
+
+---
+
+### GET /api/market-confidence
+
+Get market confidence scores.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "opportunities": [
+      {
+        "symbol": "BTCUSDT",
+        "score": 72,
+        "signal": "BUY",
+        "confidence": 0.68,
+        "volumeRatio": 1.8,
+        "momentum": 0.45,
+        "liquidityScore": 0.92
+      }
+    ],
+    "summary": {
+      "scannedSymbols": 100,
+      "opportunities": 15,
+      "avgScore": 58
+    }
+  }
+}
+```
+
+---
+
+## 🧠 AI/ML Endpoints
+
+### POST /api/agent-runner
+
+Control the agent runner.
+
+**Request:**
+```json
+{
+  "action": "start" | "stop" | "status"
+}
+```
+
+**Response (status):**
+```json
+{
+  "success": true,
+  "isRunning": true,
+  "currentCycle": 42,
+  "lastCycleTime": 1701648000000,
+  "stats": {
+    "totalCycles": 1250,
+    "tradesExecuted": 156,
+    "winRate": 58.3
+  }
+}
+```
+
+---
+
+### GET /api/agent-insights
+
+Get AI agent performance insights.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "agents": {
+      "technical": {
+        "accuracy": 0.72,
+        "avgResponseTime": 1200,
+        "totalAnalyses": 5000
+      },
+      "chief": {
+        "accuracy": 0.68,
+        "avgResponseTime": 2500,
+        "decisionsToday": 45
+      },
+      "risk": {
+        "approvalRate": 0.45,
+        "avgPositionSize": 3.2,
+        "rejectionReasons": {
+          "lowConfidence": 35,
+          "highVolatility": 12,
+          "maxPositions": 8
+        }
+      }
+    },
+    "recentDecisions": [
+      {
+        "symbol": "BTCUSDT",
+        "action": "BUY",
+        "confidence": 0.72,
+        "approved": true,
+        "timestamp": 1701648000000
+      }
+    ]
+  }
+}
+```
+
+---
+
+### POST /api/multi-agent
+
+Trigger multi-agent analysis.
+
+**Request:**
+```json
+{
+  "symbol": "BTCUSDT"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "workflowId": "workflow_1701648000_abc123",
+  "status": "running",
+  "steps": [
+    { "id": "data_gathering", "status": "completed" },
+    { "id": "technical_analysis", "status": "running" },
+    { "id": "chief_decision", "status": "pending" },
+    { "id": "risk_assessment", "status": "pending" },
+    { "id": "execution_planning", "status": "pending" },
+    { "id": "trade_execution", "status": "pending" }
+  ]
+}
+```
+
+---
+
+## 🔌 WebSocket Streams
+
+The unified data aggregator subscribes to the following Aster DEX WebSocket streams:
+
+### Stream Types
+
+| Stream | Description | Update Rate |
+|--------|-------------|-------------|
+| `{symbol}@aggTrade` | Aggregate trades | Per trade |
+| `{symbol}@markPrice@1s` | Mark price + funding | 1 second |
+| `{symbol}@kline_{interval}` | Candlestick data | Per candle close |
+| `{symbol}@miniTicker` | Mini ticker | Continuous |
+| `{symbol}@bookTicker` | Best bid/ask | Continuous |
+| `{symbol}@depth10@100ms` | Top 10 order book | 100ms |
+| `!forceOrder@arr` | All liquidations | Real-time |
+| `!ticker@arr` | All market tickers | Continuous |
+
+### Connection URL
+
+```
+wss://fstream.asterdex.com/stream?streams=btcusdt@aggTrade/btcusdt@markPrice@1s/...
+```
+
+---
+
+## ⚠️ Error Handling
+
+### Error Response Format
+
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "code": "ERROR_CODE",
+  "details": {
+    "field": "Additional context"
+  }
+}
+```
+
+### Common Error Codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `RATE_LIMITED` | 429 | Too many requests |
+| `INSUFFICIENT_BALANCE` | 400 | Not enough balance |
+| `INVALID_SYMBOL` | 400 | Symbol not found |
+| `POSITION_NOT_FOUND` | 404 | Position doesn't exist |
+| `SERVICE_UNAVAILABLE` | 503 | Service temporarily unavailable |
+| `OLLAMA_UNAVAILABLE` | 503 | DeepSeek R1 not responding |
+
+### Rate Limits
+
+- **Public endpoints**: 2400 weight/minute
+- **Authenticated endpoints**: Shared with Aster DEX limits
+- **API key pool**: Distributes load across up to 30 keys
+
+---
+
+## 📝 Example: Complete Trading Flow
+
+```typescript
+// 1. Start services
+await fetch('/api/startup', { method: 'POST' });
+
+// 2. Check status
+const status = await fetch('/api/trading-status').then(r => r.json());
+console.log('Agent Runner:', status.data.agentRunner.isRunning);
+
+// 3. Get market data
+const market = await fetch('/api/realtime-market?symbols=BTCUSDT').then(r => r.json());
+console.log('BTC Score:', market.marketData.BTCUSDT.overallScore);
+
+// 4. Monitor positions
+const positions = await fetch('/api/positions').then(r => r.json());
+console.log('Open Positions:', positions.data.positions.length);
+
+// 5. Check performance
+const perf = await fetch('/api/performance').then(r => r.json());
+console.log('Win Rate:', perf.data.metrics.winRate + '%');
+```
+
+---
+
+**Last Updated**: February 2025 | **Version**: 7.1.0

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { agentRunnerService } from '@/services/agentRunnerService';
+import { agentRunnerService } from '@/services/ai/agentRunnerService';
 import { logger } from '@/lib/logger';
 import { handleApiError, createSuccessResponse } from '@/lib/errorHandler';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
@@ -315,3 +315,4 @@ async function getConfig() {
     timestamp: new Date().toISOString()
   });
 }
+

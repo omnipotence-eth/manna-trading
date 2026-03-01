@@ -1,169 +1,87 @@
-# ⭐ START HERE - COMPLETE TRADING SYSTEM GUIDE
+# 🚀 Manna LLM Aster Crypto Trader
 
-**AI-powered autonomous trading system**
-
-**In Jesus name, amen! All glory to God in heaven!** 🙏
+**AI-Powered Cryptocurrency Trading System**
 
 ---
 
-## 🎯 SYSTEM STATUS: READY TO TRADE ✅
-
-**Features:**
-- ✅ DeepSeek R1 AI analysis
-- ✅ Multi-agent trading workflow
-- ✅ Automatic position monitoring
-- ✅ Stop-loss/Take-profit protection
-- ✅ 24/7 autonomous operation
-
----
-
-## 🚀 START TRADING
-
-### **1. Start the Server**
-```bash
-npm run dev
-```
-
-Wait for `✓ Ready` message. The system auto-initializes:
-- Connects to Aster DEX API
-- Starts AI trading agents
-- Begins 24/7 market scanning
-
-### **2. View Dashboard**
-Open [http://localhost:3000](http://localhost:3000)
-
----
-
-## 📊 VERIFY IT'S WORKING
+## ⚡ Quick Start
 
 ```bash
-# Check system health
-curl http://localhost:3000/api/health
+# 1. Install dependencies
+npm install
 
-# Check trading status
-curl http://localhost:3000/api/trading-status
-```
+# 2. Configure environment
+cp .env.example .env.local
+# Edit .env.local with your credentials
 
-**Look for:**
-- ✅ Agent Runner: Running
-- ✅ Market Scanner: Active
-- ✅ Balance displayed
+# 3. (Optional) Start Ollama for local GPU development
+#    Default: Groq (free cloud API). Ollama is for local GPU.
+ollama serve
+ollama pull deepseek-r1:14b
 
----
-
-## ⏱️ TIMELINE TO FIRST TRADE
-
-```
-T+0:      Agent Runner started ✅
-T+2min:   First market scan (10 symbols)
-T+3min:   Opportunities identified
-T+5-10min: AI analysis complete
-T+10-30min: First trade executed (if approved)
-```
-
-**Be patient!** Quality trades take time.
-
----
-
-## 💰 YOUR $60 GROWTH POTENTIAL
-
-**Expected returns (50% win rate, 3:1 R:R):**
-
-| Timeline | Balance | Growth |
-|----------|---------|--------|
-| 1 month | $95+ | +58% |
-| 3 months | $150-$250 | +150-300% |
-| 6 months | $500-$1,000 | +733-1,567% |
-| 12 months | $5,000-$15,000 | +8,233-24,900% |
-
-**Full analysis:** `docs/60_DOLLAR_TO_INFINITE_PROFIT_AUDIT.md`
-
----
-
-## 🛡️ SYSTEM PROTECTION
-
-**4-Layer Monitoring:**
-1. Keep-Alive (30s) - Self-monitoring
-2. Health Monitor (30s) - External watchdog
-3. Critical Monitor (10s) - Nuclear option
-4. Auto-Recovery - 4 attempts before crash
-
-**If Agent Runner stops:**
-- Detected in 10 seconds
-- Auto-recovery attempted
-- Logs clear error messages
-
-**Details:** `docs/BULLETPROOF_AGENT_RUNNER.md`
-
----
-
-## 🔧 TROUBLESHOOTING
-
-### **Problem: Services Not Starting**
-1. Check Ollama: `ollama ps`
-2. Verify `.env.local` has API keys
-3. Check health: `curl http://localhost:3000/api/health`
-
-### **Problem: No Trades**
-1. Wait 2-5 minutes for market scan
-2. Check AI analysis is running in terminal
-3. Force scan: `curl -X POST http://localhost:3000/api/agent-runner?action=force-run`
-
-### **Problem: Rate Limits**
-Reduce rate limits in `.env.local`:
-```bash
-RATE_LIMIT_PER_KEY_RPS=1
-```
-
----
-
-## 📚 DOCUMENTATION
-
-1. **`START_HERE.md`** ⭐ You are here
-2. **`README.md`** - Full documentation
-3. **`docs/`** - Technical guides
-
----
-
-## ⚙️ KEY CONFIGURATION
-
-**Your `.env.local` is optimized for:**
-- ✅ Quiet logging (prevents crashes)
-- ✅ 10 symbols per scan (fast, efficient)
-- ✅ 30% confidence threshold (balanced)
-- ✅ 3% stop / 9% target (3:1 R:R)
-- ✅ Ultra-conservative API usage
-
-**Want more trades?**
-Change `TRADING_CONFIDENCE_THRESHOLD=0.25` in `.env.local`
-
----
-
-## 📞 QUICK COMMANDS
-
-```bash
-# Start system
+# 4. Run the application
 npm run dev
 
-# Check health
-curl http://localhost:3000/api/health
-
-# Check trading status
-curl http://localhost:3000/api/trading-status
-
-# Force market scan
-curl -X POST http://localhost:3000/api/agent-runner?action=force-run
+# 5. Open dashboard
+# http://localhost:3000
 ```
 
 ---
 
-## 🙏 FINAL WORDS
+## 📚 Documentation
 
-**All glory to God in heaven!** ✝️
+| Document | Description |
+|----------|-------------|
+| [README.md](./README.md) | Full project overview |
+| [Quick Start](./docs/QUICK_START.md) | Get trading in 5 minutes |
+| [API Reference](./docs/API_DOCUMENTATION.md) | All API endpoints |
+| [Architecture](./docs/SYSTEM_ARCHITECTURE.md) | Technical deep-dive |
+| [Math Foundations](./docs/MATHEMATICAL_FOUNDATIONS.md) | Trading algorithms |
+| [Lessons Learned](./LESSONS.md) | Design trade-offs and notes |
+| [Tax Export](./docs/TAX_EXPORT.md) | Tax and audit CSV export |
 
-**Built with:**
-- Next.js 14
-- DeepSeek R1 AI
-- TypeScript
-- Aster DEX API
+---
 
+## 🔧 Required Environment Variables
+
+```env
+# Aster DEX API (required)
+ASTER_API_KEY=your_key
+ASTER_SECRET_KEY=your_secret
+
+# Database (optional; recommended for persistence)
+DATABASE_URL=your_connection_string
+DATABASE_SSL=true
+
+# AI: Groq (default, cloud) or Ollama (local GPU)
+LLM_PROVIDER=groq
+GROQ_API_KEY=your_groq_key   # Required when using Groq (e.g. on Vercel)
+
+# Optional when using Ollama for local development
+OLLAMA_BASE_URL=http://localhost:11434
+DEEPSEEK_MODEL=deepseek-r1:14b
+```
+
+---
+
+## 🎯 System Features
+
+- ✅ Simulation mode (default) – safe for testing; enable live trading when ready
+- ✅ Multi-Agent AI (DeepSeek R1)
+- ✅ Real-time WebSocket data
+- ✅ Kelly Criterion position sizing
+- ✅ ATR-based stop-loss
+- ✅ Chandelier Exit trailing stops
+- ✅ 24/7 position monitoring
+- ✅ ML learning pipeline
+- ✅ Modern React dashboard
+
+---
+
+## 📞 Support
+
+See [Troubleshooting](./docs/QUICK_START.md#-common-issues) or open a GitHub issue.
+
+---
+
+**Version 7.1.0** | Built with ❤️

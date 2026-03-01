@@ -7,7 +7,7 @@
  */
 
 // Re-export types from their actual locations
-export type { MarketData } from '@/services/dataIngestionService';
+export type { MarketData } from '@/services/data/dataIngestionService';
 export type { 
   AnalystReports, 
   FinalDecision, 
@@ -69,4 +69,5 @@ export const AGENT_PROMPTS = {
     executionTemplate: () => 'Use DEEPSEEK_OPTIMIZED_PROMPTS.EXECUTION_SPECIALIST instead'
   }
 } as const;
+
 

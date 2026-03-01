@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
         logger.debug('Fetching Aster positions via 30-key system', { context: 'AsterAPI' });
 
         // Import asterDexService dynamically to avoid circular dependencies
-        const { asterDexService } = await import('@/services/asterDexService');
+        const { asterDexService } = await import('@/services/exchange/asterDexService');
         
         // Use optimized service method (30-key pool, caching, deduplication)
         const positions = await asterDexService.getPositions(false);
@@ -61,4 +61,5 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
 

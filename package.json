@@ -1,6 +1,6 @@
 {
   "name": "manna-ai-arena",
-  "version": "7.0.0",
+  "version": "7.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,7 +11,9 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "startup": "node scripts/start.js",
-    "startup:ps1": "powershell -ExecutionPolicy Bypass -File scripts/start.ps1"
+    "startup:ps1": "powershell -ExecutionPolicy Bypass -File scripts/start.ps1",
+    "collect:errors": "node scripts/collectErrors.js",
+    "preload-model": "node scripts/preload-model.mjs"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -21,7 +23,8 @@
     "async-mutex": "^0.5.0",
     "class-variance-authority": "^0.7.1",
     "ethers": "^6.13.2",
-    "framer-motion": "^11.18.2",
+    "framer-motion": "^12.23.25",
+    "geist": "^1.5.1",
     "lightweight-charts": "^5.0.9",
     "lucide-react": "^0.548.0",
     "next": "^14.2.33",

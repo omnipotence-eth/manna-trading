@@ -36,7 +36,7 @@ export async function GET() {
     // Check agent runner
     let agentRunnerStatus = 'unknown';
     try {
-      const { agentRunnerService } = await import('@/services/agentRunnerService');
+      const { agentRunnerService } = await import('@/services/ai/agentRunnerService');
       const runnerStatus = agentRunnerService.getStatus();
       agentRunnerStatus = runnerStatus.isRunning ? 'running' : 'stopped';
     } catch (error) {
@@ -79,7 +79,7 @@ export async function GET() {
           // Step 2: Check if DeepSeek can actually respond (quick test with timeout)
           // CRITICAL FIX: Use shorter timeout for health check to avoid blocking
           try {
-            const { deepseekService } = await import('@/services/deepseekService');
+            const { deepseekService } = await import('@/services/ai/deepseekService');
             const controller2 = new AbortController();
             const timeoutId2 = setTimeout(() => controller2.abort(), 5000); // 5s quick test for health check
             
@@ -175,17 +175,10 @@ export async function GET() {
           multiKeyEnabled: keyStats.totalKeys > 1,
           totalKeys: keyStats.totalKeys,
           healthyKeys: keyStats.healthyKeys,
-          unhealthyKeys: keyStats.unhealthyKeys,
+          unhealthyKeys: keyStats.totalKeys - keyStats.healthyKeys,
           totalRequests: keyStats.totalRequests,
-          totalErrors: keyStats.totalErrors,
-          errorRate: keyStats.totalRequests > 0 
-            ? ((keyStats.totalErrors / keyStats.totalRequests) * 100).toFixed(2) + '%'
-            : '0%',
-          totalCapacityRPS: keyStats.totalCapacityRPS,
-          availableCapacityRPS: keyStats.availableCapacityRPS,
-          utilizationPercent: keyStats.totalCapacityRPS > 0
-            ? (((keyStats.totalCapacityRPS - keyStats.availableCapacityRPS) / keyStats.totalCapacityRPS) * 100).toFixed(1) + '%'
-            : '0%',
+          totalWeightUsed: keyStats.totalWeightUsed,
+          capacityUsed: keyStats.capacityUsed.toFixed(1) + '%',
           keyDetails: keyStats.keyDetails.slice(0, 10) // Show first 10 keys
         },
         database: {
@@ -251,4 +244,5 @@ export async function GET() {
     }, { status: 500 });
   }
 }
+
 

@@ -8,6 +8,9 @@ import { circuitBreakers } from '@/lib/circuitBreaker';
 import { PerformanceMonitor } from '@/lib/performanceMonitor';
 import { caches, cacheKeys } from '@/lib/requestCache';
 
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/aster/account
  * Fetches account information from Aster DEX (authenticated)
@@ -47,7 +50,7 @@ export async function GET(req: NextRequest) {
         logger.debug('Fetching Aster account info via 30-key system', { context: 'AsterAPI' });
 
         // Import asterDexService dynamically to avoid circular dependencies
-        const { asterDexService } = await import('@/services/asterDexService');
+        const { asterDexService } = await import('@/services/exchange/asterDexService');
         
         // CRITICAL FIX: Don't call getBalance() - it creates infinite recursion!
         // getBalance() internally calls this same /api/aster/account endpoint
@@ -116,7 +119,7 @@ export async function GET(req: NextRequest) {
           }
         });
         
-        logger.info(`💰 Account Balance: $${calculatedAccountValue.toFixed(2)} (source: ${balanceSource})`, {
+        logger.info(`[BALANCE] Account Balance: $${calculatedAccountValue.toFixed(2)} (source: ${balanceSource})`, {
           context: 'AsterAPI',
           data: { 
             balanceSource,
@@ -233,3 +236,4 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+

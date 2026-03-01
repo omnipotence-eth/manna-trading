@@ -6,9 +6,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
-import { marketScannerService } from '@/services/marketScannerService';
-import { realBalanceService } from '@/services/realBalanceService';
+import { marketScannerService } from '@/services/trading/marketScannerService';
+import { realBalanceService } from '@/services/trading/realBalanceService';
 import { asterConfig } from '@/lib/configService';
+import type { ScanResult, MarketOpportunity } from '@/services/trading/marketScannerService';
+
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
 
 export interface AgentInsight {
   id: string;
@@ -43,7 +47,7 @@ export async function GET(request: NextRequest) {
     
     if (scanResult && !isCacheStale && !forceRefresh) {
       // Return cached result immediately (fast response, no timeout)
-      logger.info('📦 Returning cached market scan result (fast response)', {
+      logger.info('[CACHE] Returning cached market scan result (fast response)', {
         context: 'AgentInsightsAPI',
         data: {
           limit,
@@ -56,7 +60,7 @@ export async function GET(request: NextRequest) {
       // CRITICAL FIX: If no cache exists, return empty response immediately and trigger background scan
       // This prevents chat tab from timing out while waiting 60+ seconds for first scan
       if (!scanResult) {
-        logger.info('📦 No cache available - returning empty response, triggering background scan', {
+        logger.info('[CACHE] No cache available - returning empty response, triggering background scan', {
           context: 'AgentInsightsAPI',
           data: { limit, firstRequest: true }
         });
@@ -65,7 +69,7 @@ export async function GET(request: NextRequest) {
         // The timeout fixes ensure it won't hang for 15+ minutes
         marketScannerService.scanMarkets()
           .then(scanResult => {
-            logger.info('✅ Background market scan completed successfully', {
+            logger.info('[OK] Background market scan completed successfully', {
               context: 'AgentInsightsAPI',
               data: {
                 opportunities: scanResult.opportunitiesCount,
@@ -74,7 +78,7 @@ export async function GET(request: NextRequest) {
             });
           })
           .catch(error => {
-            logger.error('❌ Background market scan failed', error, { 
+            logger.error('[ERROR] Background market scan failed', error, { 
               context: 'AgentInsightsAPI',
               data: { 
                 error: error instanceof Error ? error.message : String(error),
@@ -86,7 +90,7 @@ export async function GET(request: NextRequest) {
         // CRITICAL FIX: Fetch actual balance instead of hardcoding 0
         let accountBalance = 0;
         try {
-          const { asterDexService } = await import('@/services/asterDexService');
+          const { asterDexService } = await import('@/services/exchange/asterDexService');
           accountBalance = await asterDexService.getBalance();
           logger.debug('Fetched real balance for initializing response', {
             context: 'AgentInsightsAPI',
@@ -125,7 +129,7 @@ export async function GET(request: NextRequest) {
       
       // Cache is stale - perform fresh scan
       if (scanResult && isCacheStale) {
-        logger.info('🔄 Cache is stale, performing fresh market scan', {
+        logger.info('[CACHE] Cache is stale, performing fresh market scan', {
           context: 'AgentInsightsAPI',
           data: {
             limit,
@@ -140,7 +144,7 @@ export async function GET(request: NextRequest) {
       scanResult = await marketScannerService.scanMarkets();
       
       // Log fresh scan completion
-      logger.info('✅ Real market scan completed - analyzed all Aster DEX pairs', {
+      logger.info('[OK] Real market scan completed - analyzed all Aster DEX pairs', {
         context: 'AgentInsightsAPI',
         data: {
           totalSymbolsAnalyzed: scanResult.totalSymbols,
@@ -158,7 +162,7 @@ export async function GET(request: NextRequest) {
     
     const responseTime = Date.now() - startTime;
     
-    logger.info('📊 Agent insights generated from real Aster DEX data', {
+    logger.info('[DATA] Agent insights generated from real Aster DEX data', {
       context: 'AgentInsightsAPI',
       data: {
         insightsCount: insights.length,
@@ -172,7 +176,7 @@ export async function GET(request: NextRequest) {
     // CRITICAL FIX: Fetch real balance directly from Aster DEX API instead of stale cache
     let accountBalance = 0;
     try {
-      const { asterDexService } = await import('@/services/asterDexService');
+      const { asterDexService } = await import('@/services/exchange/asterDexService');
       accountBalance = await asterDexService.getBalance();
     } catch (error) {
       logger.warn('Failed to fetch balance for agent insights response', {
@@ -221,7 +225,7 @@ export async function GET(request: NextRequest) {
     return response;
 
   } catch (error) {
-    logger.error('❌ Failed to generate agent insights from Aster DEX market scan', error as Error, {
+    logger.error('[ERROR] Failed to generate agent insights from Aster DEX market scan', error as Error, {
       context: 'AgentInsightsAPI'
     });
 
@@ -242,7 +246,7 @@ export async function GET(request: NextRequest) {
  * Generate comprehensive insights from market scan
  * WORKFLOW ORDER: Market Overview → Technical → Chief → Risk → Execute
  */
-function generateComprehensiveInsights(scanResult: any, limit: number): AgentInsight[] {
+function generateComprehensiveInsights(scanResult: ScanResult, limit: number): AgentInsight[] {
   const insights: AgentInsight[] = [];
   const now = Date.now();
   
@@ -275,7 +279,19 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
     const topSignals = best.signals.slice(0, 2).join(', ');
     
     // ENHANCED: Include ATR and divergence data
-    const technicalInsight: any = {
+    const technicalInsight: AgentInsight & {
+      atrLevels?: {
+        atrPercent: number;
+        volatilityLevel: string;
+        recommendedStopLoss: number;
+        recommendedTakeProfit: number;
+      };
+      divergences?: Array<{
+        type: 'bullish' | 'bearish';
+        indicator: string;
+        strength: number;
+      }>;
+    } = {
       id: `technical-analyst-${now}`,
       timestamp: now - 30000, // 30s after scan
       agent: 'Technical Analyst',
@@ -297,9 +313,9 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
     if (best.marketData.atrPercent !== undefined) {
       technicalInsight.atrLevels = {
         atrPercent: best.marketData.atrPercent,
-        volatilityLevel: best.marketData.volatilityLevel,
-        recommendedStopLoss: best.marketData.recommendedStopLoss,
-        recommendedTakeProfit: best.marketData.recommendedTakeProfit
+        volatilityLevel: best.marketData.volatilityLevel ?? 'MEDIUM',
+        recommendedStopLoss: best.marketData.recommendedStopLoss ?? 0,
+        recommendedTakeProfit: best.marketData.recommendedTakeProfit ?? 0
       };
     }
     
@@ -336,7 +352,7 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
   
   if (topOpportunities.length > 0) {
     // Create detailed insight showing all opportunities
-    const oppList = topOpportunities.map((opp: any) => {
+    const oppList = topOpportunities.map((opp: MarketOpportunity) => {
       const conf = (opp.confidence * 100).toFixed(0);
       return `${opp.symbol} (${opp.score}/100, ${conf}% conf)`;
     }).join(', ');
@@ -347,7 +363,27 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
     const momentum = isFinite(topPair.marketData.momentum) ? topPair.marketData.momentum : 0;
     const momStr = momentum > 0 ? `+${momentum.toFixed(1)}%` : `${momentum.toFixed(1)}%`;
     
-    const chiefInsight: any = {
+    const chiefInsight: AgentInsight & {
+      opportunities?: Array<{
+        symbol: string;
+        score: number;
+        confidence: number;
+        recommendation: string;
+        price: number;
+        volume: number;
+        rsi: number;
+        volatility: number;
+        liquidity: number;
+        atrPercent?: number;
+        volatilityLevel?: string;
+      }>;
+      atrLevels?: {
+        atrPercent: number;
+        volatilityLevel: string;
+        recommendedStopLoss: number;
+        recommendedTakeProfit: number;
+      };
+    } = {
       id: `chief-analyst-${now}`,
       timestamp: now - 60000,
       agent: 'Chief Analyst',
@@ -366,7 +402,7 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
     };
     
     // ENHANCED: Include all opportunities in details
-    chiefInsight.opportunities = topOpportunities.map((opp: any) => ({
+    chiefInsight.opportunities = topOpportunities.map((opp: MarketOpportunity) => ({
       symbol: opp.symbol,
       score: opp.score,
       confidence: opp.confidence,
@@ -384,15 +420,16 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
     if (topPair.marketData.atrPercent !== undefined) {
       chiefInsight.atrLevels = {
         atrPercent: topPair.marketData.atrPercent,
-        volatilityLevel: topPair.marketData.volatilityLevel,
-        recommendedStopLoss: topPair.marketData.recommendedStopLoss,
-        recommendedTakeProfit: topPair.marketData.recommendedTakeProfit
+        volatilityLevel: topPair.marketData.volatilityLevel ?? 'MEDIUM',
+        recommendedStopLoss: topPair.marketData.recommendedStopLoss ?? 0,
+        recommendedTakeProfit: topPair.marketData.recommendedTakeProfit ?? 0
       };
     }
     
     // Add divergences if available
-    if (topPair.divergences && topPair.divergences.length > 0) {
-      chiefInsight.divergences = topPair.divergences;
+    const pairDivergences = (topPair as { divergences?: unknown[] }).divergences;
+    if (pairDivergences && pairDivergences.length > 0) {
+      (chiefInsight as { divergences?: unknown[] }).divergences = pairDivergences;
     }
     
     insights.push(chiefInsight);
@@ -510,3 +547,4 @@ function generateComprehensiveInsights(scanResult: any, limit: number): AgentIns
 
   return insights.slice(0, limit);
 }
+

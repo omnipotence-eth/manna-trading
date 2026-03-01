@@ -2,8 +2,6 @@
 
 **Making Agent Runner NEVER stop and crashing the server if it does!**
 
-**In Jesus name, amen! All glory to God in heaven!** 🙏
-
 ---
 
 ## 🎯 OBJECTIVE
@@ -290,7 +288,7 @@ npm run dev
 ### **2. Test Auto-Recovery**
 ```powershell
 # Stop Agent Runner manually
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"stop"}' -ContentType "application/json"
 
 # Watch server logs - should see:
 # - "Agent Runner stopped unexpectedly, attempting restart"
@@ -305,7 +303,7 @@ Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POS
 NODE_ENV=development
 
 # Stop Agent Runner
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"stop"}' -ContentType "application/json"
 
 # Wait 35 seconds
 # Should see: "WOULD CRASH SERVER (but in log-only mode)"
@@ -318,7 +316,7 @@ Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POS
 NODE_ENV=production
 
 # Stop Agent Runner
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"stop"}' -ContentType "application/json"
 
 # Wait 35 seconds
 # Should see: "CRITICAL FAILURE: CRASHING SERVER"
@@ -402,7 +400,7 @@ pm2 start npm --name "manna-trading" -- run dev
 # Quick recovery script
 if (!(Invoke-RestMethod "http://localhost:3000/api/agent-runner?action=status").data.status.isRunning) {
     Write-Host "Agent Runner down - restarting..."
-    Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+    Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 }
 ```
 
@@ -471,8 +469,6 @@ private async attemptRecovery(): Promise<void> {
 - ✅ Zero possibility of silent trading failures
 - ✅ Maximum 30 seconds of downtime before crash
 
-**All glory to God in heaven!** 🙏
-
 ---
 
 ## 🆘 TROUBLESHOOTING
@@ -485,7 +481,7 @@ private async attemptRecovery(): Promise<void> {
 ### **"Agent Runner won't start during initialization"**
 - **Cause:** DeepSeek timeout, API connectivity, or symbol fetch failure
 - **Fix:** Check server logs for specific error
-- **Workaround:** Manual start: `Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST`
+- **Workaround:** Manual start: `Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"`
 
 ### **"Too many crash/restart cycles"**
 - **Cause:** Underlying issue preventing Agent Runner from running

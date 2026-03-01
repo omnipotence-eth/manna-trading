@@ -17,7 +17,7 @@ Write-Host "Symbols: $($status.data.status.config.symbols.Count)"
 
 ### **2. Start Agent Runner (if not running)**
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 ```
 
 ### **3. Force Immediate Trading Cycle**
@@ -65,12 +65,12 @@ Write-Host "Initialized: $($startup.data.status.initialized)"
 
 **Check 3: Is DeepSeek R1 available?**
 - Agent Runner requires DeepSeek R1 to be running
-- Check: `ollama ps` (should show `deepseek-r1:14b`)
+- Check: `ollama ps` (should show `deepseek-r1:14b` or Groq is the default cloud provider)
 
 **Solution: Manual Start**
 ```powershell
 # Start Agent Runner manually
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 
 # Verify it started
 $status = Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner?action=status"
@@ -96,9 +96,9 @@ Write-Host "Running: $($status.data.status.isRunning)"
 **Solution: Manual Restart**
 ```powershell
 # Stop and restart
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"stop"}' -ContentType "application/json"
 Start-Sleep -Seconds 2
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 ```
 
 ---
@@ -112,7 +112,7 @@ Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method PO
 **Check 2: Check Filter Criteria**
 Opportunities need:
 - Score ≥ 35
-- Confidence ≥ 35%
+- Confidence ≥ 70%
 - Volume ≥ $50K (24h)
 - Spread < 10%
 - Symbol not blacklisted
@@ -143,7 +143,7 @@ Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner?action=force-run"
 - Execution Specialist: Ready to execute
 
 **Check 3: Check Confidence Threshold**
-- Default: 35% (0.35)
+- Default: 70% (0.70)
 - Check: `TRADING_CONFIDENCE_THRESHOLD` in `.env.local`
 
 **Check 4: Check Balance**
@@ -187,7 +187,7 @@ $startup.data.status | ConvertTo-Json -Depth 3
   "initialized": true,
   "agentRunnerRunning": true,
   "agentRunnerActiveWorkflows": 0,
-  "confidenceThreshold": 0.35
+  "confidenceThreshold": 0.70
 }
 ```
 
@@ -197,12 +197,12 @@ $startup.data.status | ConvertTo-Json -Depth 3
 
 ### **Start Agent Runner**
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
 ```
 
 ### **Stop Agent Runner**
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/stop" -Method POST
+Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"stop"}' -ContentType "application/json"
 ```
 
 ### **Force Trading Cycle**
@@ -282,7 +282,7 @@ Write-Host "   Agent Runner Running: $($startup.data.status.agentRunnerRunning)"
 # 3. Start if not running
 if (-not $runner.data.status.isRunning) {
     Write-Host "`n3. Starting Agent Runner..." -ForegroundColor Yellow
-    Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner/start" -Method POST
+    Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner" -Method POST -Body '{"action":"start"}' -ContentType "application/json"
     Start-Sleep -Seconds 2
     $runner = Invoke-RestMethod -Uri "http://localhost:3000/api/agent-runner?action=status"
     Write-Host "   Running: $($runner.data.status.isRunning)"
@@ -297,6 +297,4 @@ Write-Host "`n=== DIAGNOSTIC COMPLETE ===" -ForegroundColor Cyan
 ```
 
 ---
-
-**All glory to God!** 🙏
 

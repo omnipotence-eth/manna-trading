@@ -4,8 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { optimizedDataService } from '@/services/optimizedDataService';
+import { optimizedDataService } from '@/services/data/optimizedDataService';
 import { logger } from '@/lib/logger';
+
+// Force dynamic rendering to suppress Next.js static generation warnings
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,14 +25,21 @@ export async function GET(request: NextRequest) {
     
     const responseTime = Date.now() - startTime;
     
-    logger.info('📊 Optimized data API response', {
+    // LIVE DATA: Log every response for debugging
+    logger.info('[DATA] LIVE Optimized data API response', {
       context: 'OptimizedDataAPI',
       data: {
         responseTime: `${responseTime}ms`,
         cacheHit: accountData.cacheHit && !bypassCache,
         bypassCache,
         accountValue: accountData.accountValue,
-        positions: accountData.positions.length
+        positions: accountData.positions.length,
+        positionDetails: accountData.positions.map(p => ({ 
+          symbol: p.symbol, 
+          side: p.side, 
+          size: p.size,
+          pnl: p.pnl 
+        }))
       }
     });
     
@@ -111,3 +121,4 @@ export async function POST(request: NextRequest) {
     }, { status: 400 });
   }
 }
+

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion';
 import { frontendLogger } from '@/lib/frontendLogger';
 import { frontendPerformanceMonitor } from '@/lib/frontendPerformanceMonitor';
+import LiveStatusBadge from './LiveStatusBadge';
 
 interface ChartDataPoint {
   timestamp: number;
@@ -16,12 +17,37 @@ interface InteractiveChartProps {
   className?: string;
   initialBalance?: number;
   onBalanceUpdate?: (balance: number) => void;
+  compact?: boolean; // embed-friendly minimal view
 }
 
-// ENTERPRISE: Connection status types
+const formatCurrency = (value: number) =>
+  `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const formatPercent = (value: number) =>
+  `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+
+const formatTimestampShort = (ts: number) => {
+  const d = new Date(ts);
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${month}/${day} ${time}`;
+};
+
+const formatTimeAgoShort = (ts: number) => {
+  const delta = Math.floor((Date.now() - ts) / 1000);
+  if (delta < 10) return 'just now';
+  if (delta < 60) return `${delta}s ago`;
+  const m = Math.floor(delta / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
+};
+
+// NOTE: Connection status types
 type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 
-// ENTERPRISE: Performance metrics tracking
+// NOTE: Performance metrics tracking
 interface PerformanceMetrics {
   avgLatency: number;
   successRate: number;
@@ -33,19 +59,21 @@ interface PerformanceMetrics {
 // Only re-renders when balance data or time range actually changes
 const InteractiveChart = React.memo(function InteractiveChart({ 
   className = '', 
-  initialBalance = 42.16,
-  onBalanceUpdate
+  initialBalance = 100, // default to a visible baseline; live fetch will override
+  onBalanceUpdate,
+  compact = false
 }: InteractiveChartProps) {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [allHistoricalData, setAllHistoricalData] = useState<ChartDataPoint[]>([]); // Store full history
   const [currentBalance, setCurrentBalance] = useState(initialBalance);
+  const [smoothedPrice, setSmoothedPrice] = useState(initialBalance);
   const [timeRange, setTimeRange] = useState<'24H' | '7D' | '30D'>('24H');
   const [hoveredPoint, setHoveredPoint] = useState<ChartDataPoint | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   
-  // ENTERPRISE: Enhanced state management
+  // NOTE: Enhanced state management
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics>({
@@ -54,6 +82,14 @@ const InteractiveChart = React.memo(function InteractiveChart({
     totalRequests: 0,
     failedRequests: 0
   });
+  
+  // ANIMATION: Tick state for smooth pulse animation
+  const [animationTick, setAnimationTick] = useState(0);
+  
+  // LIVE LINE: Track the animated line endpoint separately from data points
+  const [liveLineEnd, setLiveLineEnd] = useState<{ timestamp: number; price: number } | null>(null);
+  const liveRenderRef = useRef<{ timestamp: number; price: number } | null>(null);
+  const smoothRafRef = useRef<number | null>(null);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isFetchingRef = useRef(false);
@@ -64,6 +100,8 @@ const InteractiveChart = React.memo(function InteractiveChart({
   // NOF1.AI STYLE: Chart initialization refs
   const chartStartTimeRef = useRef<number | null>(null);
   const initialBalanceRef = useRef<number | null>(null);
+  // LIVE ANIMATION: Last known balance for smooth animation
+  const lastKnownBalanceRef = useRef<number>(0);
 
   // OPTIMIZED: Memoize time ago calculation function
   const getTimeAgo = useCallback((timestamp: number): string => {
@@ -111,7 +149,10 @@ const InteractiveChart = React.memo(function InteractiveChart({
     return data;
   }, []);
 
-  // ENTERPRISE: Enhanced balance fetching with circuit breaker pattern
+  // NOTE: Enhanced balance fetching with circuit breaker pattern
+  // OPTIMIZED: Uses WebSocket user data stream cache for real-time updates
+  // Per Aster DEX API docs, ACCOUNT_UPDATE events provide instant balance changes
+  // The /api/real-balance endpoint checks WebSocket cache first, then falls back to REST API
   const fetchRealBalance = useCallback(async () => {
     // Circuit breaker: Stop fetching if too many consecutive errors
     const MAX_CONSECUTIVE_ERRORS = 5;
@@ -219,28 +260,63 @@ const InteractiveChart = React.memo(function InteractiveChart({
       // Some accounts might legitimately have 0 balance
       if (balance !== null && !isNaN(balance)) {
         
-        // ENTERPRISE: Strict validation
+        // NOTE: Strict validation
         if (!Number.isFinite(balance)) {
           throw new Error(`Invalid balance value: ${balance}`);
         }
         
-        // NOF1.AI STYLE: Initialize chart start point on first successful fetch
+        // CRITICAL: Initialize chart start point on first successful fetch with real portfolio value
+        // Allow balance to be 0 (some accounts may have 0 balance)
         if (chartStartTimeRef.current === null || initialBalanceRef.current === null) {
           chartStartTimeRef.current = Date.now();
           initialBalanceRef.current = balance;
+          lastKnownBalanceRef.current = balance;
           
-          // Initialize chart with starting point
-          setChartData([{
+          // Initialize chart with actual portfolio value - create minimal segment for smooth wave start
+          // Use balance even if it's 0 - we need to show the chart
+          const initPoint: ChartDataPoint = {
             timestamp: chartStartTimeRef.current,
             price: balance,
             change: 0,
             changePercent: 0
-          }]);
+          };
           
+          // Create a small segment (1 second back) so the line can flow smoothly
+          const historicalPoints: ChartDataPoint[] = [
+            { timestamp: chartStartTimeRef.current - 1000, price: balance, change: 0, changePercent: 0 },
+            initPoint
+          ];
+          
+          setAllHistoricalData(historicalPoints);
+          setCurrentBalance(balance);
+          setSmoothedPrice(balance);
+          setLiveLineEnd({ timestamp: chartStartTimeRef.current, price: balance });
           setIsLoading(false);
           isInitialLoadRef.current = false;
           
-          frontendLogger.info('Chart initialized from current balance', {
+          // Start animation loop once we have data (even if balance is 0)
+          if (smoothRafRef.current === null) {
+            const animateLiveLine = () => {
+              const now = Date.now();
+              const target = lastKnownBalanceRef.current !== null ? lastKnownBalanceRef.current : balance;
+              // Allow animation even if target is 0
+              setSmoothedPrice(prev => {
+                const current = prev !== null ? prev : target;
+                // FIXED: Smoother easing (0.08) for graceful wave movement
+                const easingFactor = 0.08;
+                const next = current + (target - current) * easingFactor;
+                const safeNext = Number.isFinite(next) ? next : current;
+                // Update live line endpoint every frame for smooth tick-by-tick tracking
+                setLiveLineEnd({ timestamp: now, price: safeNext });
+                return safeNext;
+              });
+              setAnimationTick(t => t + 1);
+              smoothRafRef.current = requestAnimationFrame(animateLiveLine);
+            };
+            smoothRafRef.current = requestAnimationFrame(animateLiveLine);
+          }
+          
+          frontendLogger.info('Chart initialized from portfolio value', {
             component: 'InteractiveChart',
             data: {
               startBalance: balance.toFixed(2),
@@ -249,7 +325,7 @@ const InteractiveChart = React.memo(function InteractiveChart({
           });
         }
         
-        // ENTERPRISE: Log every balance update for debugging
+        // NOTE: Log every balance update for debugging
             frontendLogger.debug('Balance fetched successfully', {
               component: 'InteractiveChart',
               data: {
@@ -284,62 +360,40 @@ const InteractiveChart = React.memo(function InteractiveChart({
         
         setConnectionStatus('connected');
         setCurrentBalance(balance);
+        lastKnownBalanceRef.current = balance; // Update for live animation
         
-        // ENTERPRISE: Sync balance with parent component (dashboard)
-        if (onBalanceUpdate && Math.abs(balance - prevBalance) >= 0.01) {
+        // LIVE: Sync balance with parent component (every cent)
+        if (onBalanceUpdate && Math.abs(balance - prevBalance) >= 0.001) {
           onBalanceUpdate(balance);
         }
         
         // TICK-BY-TICK: Add live data point to historical data, then filter by time range
         setAllHistoricalData(prevAllData => {
-          // Ensure we have a starting point if no historical data loaded yet
-          if (prevAllData.length === 0 && chartStartTimeRef.current && initialBalanceRef.current) {
-            const initialPoint: ChartDataPoint = {
-              timestamp: chartStartTimeRef.current,
-              price: initialBalanceRef.current,
-              change: 0,
-              changePercent: 0
-            };
-            // Add initial point to historical data
-            return [initialPoint];
-          }
-          
-          // CRITICAL FIX: Calculate change from the LAST point in historical data, not from start
-          // This ensures accurate progression showing actual balance changes
-          const lastPoint = prevAllData.length > 0 ? prevAllData[prevAllData.length - 1] : null;
-          const startBalance = initialBalanceRef.current || (prevAllData.length > 0 ? prevAllData[0].price : balance);
-          
-          // Calculate change from start balance (for overall % calculation)
+          const baseData = prevAllData.length > 0 ? prevAllData : (() => {
+            if (chartStartTimeRef.current && initialBalanceRef.current) {
+              return [
+                { timestamp: chartStartTimeRef.current, price: initialBalanceRef.current, change: 0, changePercent: 0 },
+                { timestamp: now, price: balance, change: 0, changePercent: 0 }
+              ];
+            }
+            return [];
+          })();
+
+          const startBalance = initialBalanceRef.current || (baseData.length > 0 ? baseData[0].price : balance);
           const totalChange = balance - startBalance;
-          const totalChangePercent = startBalance > 0 
-            ? (totalChange / startBalance) * 100 
-            : 0;
-          
-          // Calculate change from last point (for incremental tracking)
-          const incrementalChange = lastPoint ? balance - lastPoint.price : 0;
-          
+          const totalChangePercent = startBalance > 0 ? (totalChange / startBalance) * 100 : 0;
+
           const newPoint: ChartDataPoint = {
             timestamp: now,
-            price: balance, // Use actual account balance from API
-            change: totalChange, // Total change from start
-            changePercent: totalChangePercent // Total % change from start
+            price: balance,
+            change: totalChange,
+            changePercent: totalChangePercent
           };
-          
-          // TICK-BY-TICK: Merge with historical data, remove duplicates by timestamp
-          // Remove any existing point at the same timestamp (or very close - within 1 second)
-          const filteredData = prevAllData.filter(p => {
-            const timeDiff = Math.abs(p.timestamp - now);
-            return timeDiff >= 1000; // Keep points at least 1 second apart
-          });
-          
-          // Add new point at the end
-          const merged = [...filteredData, newPoint];
-          
-          // Sort by timestamp to maintain chronological order
-          merged.sort((a, b) => a.timestamp - b.timestamp);
-          
-          // Keep all data points (no limit for full history) but cap at 5000 for performance
-          // Filtering happens automatically via useMemo when allHistoricalData updates
+
+          const merged = [...baseData, newPoint]
+            // Keep points spaced to avoid overdraw; allow 1s granularity for smooth tick-by-tick tracking
+            .filter((p, idx, arr) => idx === 0 || (p.timestamp - arr[idx - 1].timestamp) >= 1000);
+
           return merged.slice(-5000);
         });
         
@@ -421,147 +475,107 @@ const InteractiveChart = React.memo(function InteractiveChart({
         
         return newConsecutiveErrors;
       });
+    } finally {
+      // CRITICAL: Always reset fetch flag to allow next fetch
+      isFetchingRef.current = false;
     }
   }, []); // CRITICAL FIX: Empty deps - use functional state updates
 
-  // CRITICAL FIX: Load full historical balance from account beginning
-  const loadHistoricalBalance = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      frontendLogger.info('Loading full historical balance from account beginning', {
-        component: 'InteractiveChart'
-      });
-      
-      const response = await fetch('/api/real-balance?action=chart-data&timeRange=ALL', {
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      
-      // CRITICAL FIX: Handle nested response structure
-      // Response: { success: true, data: { message: "...", data: [...] } }
-      // OR: { success: true, data: [...] }
-      const chartDataArray = result.data?.data || result.data;
-      
-      if (result.success && chartDataArray && Array.isArray(chartDataArray) && chartDataArray.length > 0) {
-        // CRITICAL FIX: Convert API response to chart data points
-        // API returns: { timestamp, balance, unrealizedPnl, realizedPnl, totalPnL }
-        const historicalPoints: ChartDataPoint[] = chartDataArray.map((point: any) => {
-          const timestamp = typeof point.timestamp === 'number' 
-            ? point.timestamp 
-            : new Date(point.timestamp).getTime();
-          
-          const balance = parseFloat(point.balance || point.price || 0);
-          const firstBalance = chartDataArray[0]?.balance ? parseFloat(chartDataArray[0].balance) : balance;
-          const change = balance - firstBalance;
-          const changePercent = firstBalance > 0 ? (change / firstBalance) * 100 : 0;
-          
-          return {
-            timestamp,
-            price: balance, // Use balance as price for chart
-            change,
-            changePercent
-          };
-        });
-        
-        // Sort by timestamp (oldest first)
-        historicalPoints.sort((a, b) => a.timestamp - b.timestamp);
-        
-        if (historicalPoints.length > 0) {
-          // Set initial balance from first historical point
-          const firstPoint = historicalPoints[0];
-          if (chartStartTimeRef.current === null && initialBalanceRef.current === null) {
-            chartStartTimeRef.current = firstPoint.timestamp;
-            initialBalanceRef.current = firstPoint.price;
-          }
-          
-          // Set current balance from last historical point
-          const lastPoint = historicalPoints[historicalPoints.length - 1];
-          setCurrentBalance(lastPoint.price);
-          
-          // Store full historical data (filtering happens via useMemo)
-          setAllHistoricalData(historicalPoints);
-          setIsLoading(false);
-          isInitialLoadRef.current = false;
-          
-          frontendLogger.info('Historical balance loaded successfully', {
-            component: 'InteractiveChart',
-            data: {
-              points: historicalPoints.length,
-              startTime: new Date(firstPoint.timestamp).toISOString(),
-              endTime: new Date(lastPoint.timestamp).toISOString(),
-              startBalance: firstPoint.price.toFixed(2),
-              currentBalance: lastPoint.price.toFixed(2)
-            }
-          });
-        } else {
-          setIsLoading(false);
-        }
-      } else {
-        setIsLoading(false);
-      }
-    } catch (err) {
-      frontendLogger.error('Failed to load historical balance', err as Error, {
-        component: 'InteractiveChart'
-      });
-      setIsLoading(false);
-      // Don't throw - allow live updates to continue
+  // LIVE CHART: Initialize chart structure (will be populated with real data)
+  const initializeChart = useCallback(() => {
+    // Initialize chart structure immediately so it can render
+    // Real balance will be populated from API fetch
+    const now = Date.now();
+    
+    // Only set start time if not already set (preserve on re-renders)
+    if (chartStartTimeRef.current === null) {
+      chartStartTimeRef.current = now;
     }
-  }, []);
+    
+    // If we have initialBalance prop, use it as a temporary baseline
+    // This allows chart to render while waiting for API data
+    if (initialBalanceRef.current === null) {
+      const startBalance = initialBalance > 0 ? initialBalance : 0;
+      
+      // Set refs even if balance is 0 - we need structure for rendering
+      initialBalanceRef.current = startBalance;
+      lastKnownBalanceRef.current = startBalance;
+      setCurrentBalance(startBalance);
+      setSmoothedPrice(startBalance);
+      setLiveLineEnd({ timestamp: now, price: startBalance });
+
+      // Seed with a minimal segment so chart can render
+      const historicalPoints: ChartDataPoint[] = [
+        { timestamp: now - 1000, price: startBalance, change: 0, changePercent: 0 },
+        { timestamp: now, price: startBalance, change: 0, changePercent: 0 }
+      ];
+
+      setAllHistoricalData(historicalPoints);
+      setIsLoading(false);
+      isInitialLoadRef.current = false;
+
+      frontendLogger.info('Chart initialized with baseline', {
+        component: 'InteractiveChart',
+        data: {
+          startBalance: startBalance.toFixed(2),
+          dataPoints: historicalPoints.length,
+          willUpdateFromAPI: true
+        }
+      });
+    }
+  }, [initialBalance]);
 
   // CRITICAL FIX: Single source of truth - memoize filtered chart data based on time range
-  // This is the ONLY place where filtering happens - ensures consistency
+  // Downsample to 4h buckets and use only real balance history
   const filteredChartData = useMemo(() => {
-    // If no historical data yet, return empty array (will show loading state)
-    if (allHistoricalData.length === 0) {
-      return [];
-    }
-    
+    if (allHistoricalData.length === 0) return [];
+
     const now = Date.now();
     let cutoffTime: number;
-    
+    let bucketMs: number;
     switch (timeRange) {
       case '24H':
-        cutoffTime = now - (24 * 60 * 60 * 1000);
+        cutoffTime = now - 24 * 60 * 60 * 1000;
+        bucketMs = 60 * 60 * 1000; // 1h buckets for 24H
         break;
       case '7D':
-        cutoffTime = now - (7 * 24 * 60 * 60 * 1000);
+        cutoffTime = now - 7 * 24 * 60 * 60 * 1000;
+        bucketMs = 4 * 60 * 60 * 1000; // 4h buckets for 7D
         break;
       case '30D':
-        cutoffTime = now - (30 * 24 * 60 * 60 * 1000);
+        cutoffTime = now - 30 * 24 * 60 * 60 * 1000;
+        bucketMs = 6 * 60 * 60 * 1000; // 6h buckets for 30D
         break;
       default:
-        cutoffTime = now - (24 * 60 * 60 * 1000);
+        cutoffTime = now - 24 * 60 * 60 * 1000;
+        bucketMs = 60 * 60 * 1000;
     }
-    
-    // Filter data points within the time range
-    const filtered = allHistoricalData.filter(point => point.timestamp >= cutoffTime);
-    
-    // Include the point just before the range to show continuity
-    if (filtered.length > 0 && allHistoricalData.length > 0) {
-      const firstFilteredIndex = allHistoricalData.findIndex(p => p.timestamp >= cutoffTime);
-      if (firstFilteredIndex > 0) {
-        filtered.unshift(allHistoricalData[firstFilteredIndex - 1]);
-      } else if (firstFilteredIndex === 0 && allHistoricalData[0].timestamp < cutoffTime) {
-        // If all data is before cutoff, include first point for reference
-        filtered.unshift(allHistoricalData[0]);
+
+    const inRange = allHistoricalData.filter(p => p.timestamp >= cutoffTime);
+
+    // Include continuity point before range if exists
+    const firstIdx = allHistoricalData.findIndex(p => p.timestamp >= cutoffTime);
+    if (firstIdx > 0) {
+      inRange.unshift(allHistoricalData[firstIdx - 1]);
+    }
+
+    // Downsample into buckets, keeping latest point per bucket
+    const bucketMap = new Map<number, ChartDataPoint>();
+    for (const p of inRange) {
+      const bucket = Math.floor(p.timestamp / bucketMs);
+      const existing = bucketMap.get(bucket);
+      if (!existing || p.timestamp > existing.timestamp) {
+        bucketMap.set(bucket, p);
       }
     }
-    
-    // Sort filtered data by timestamp to ensure proper rendering
-    filtered.sort((a, b) => a.timestamp - b.timestamp);
-    
-    frontendLogger.debug('Filtered chart data by time range', {
+
+    const filtered = Array.from(bucketMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+    frontendLogger.debug('Filtered chart data by time range (bucketed)', {
       component: 'InteractiveChart',
       data: {
         range: timeRange,
+        bucketMs,
         totalPoints: allHistoricalData.length,
         filteredPoints: filtered.length,
         cutoffTime: new Date(cutoffTime).toISOString(),
@@ -569,31 +583,122 @@ const InteractiveChart = React.memo(function InteractiveChart({
         newestPoint: filtered.length > 0 ? new Date(filtered[filtered.length - 1].timestamp).toISOString() : 'none'
       }
     });
-    
+
     return filtered;
   }, [allHistoricalData, timeRange]);
 
-  // NOF1.AI STYLE: Initialize chart from historical data, then track live tick-by-tick
+  // LIVE CHART: Initialize and track balance in real-time
   useEffect(() => {
-    // Load full historical balance from account beginning
-    loadHistoricalBalance();
+    // CRITICAL FIX: Fetch real portfolio value FIRST before initializing chart
+    // This ensures chart starts at actual portfolio value, not $100 default
+    const initializeWithRealBalance = async () => {
+      try {
+        // Fetch real balance immediately and wait for it
+        await fetchRealBalance();
+        
+        // Only initialize chart structure if we don't have real data yet
+        // fetchRealBalance will have initialized it with real portfolio value
+        if (initialBalanceRef.current === null && chartStartTimeRef.current === null) {
+          // Fallback: If fetch failed, use initialBalance prop (but prefer API value)
+          initializeChart();
+        }
+      } catch (error) {
+        // If fetch fails, initialize with prop value as fallback
+        frontendLogger.warn('Failed to fetch initial balance, using prop value', {
+          component: 'InteractiveChart',
+          data: { errorMessage: error instanceof Error ? error.message : String(error) }
+        });
+        if (initialBalanceRef.current === null) {
+          initializeChart();
+        }
+      }
+    };
     
-    // If initialBalance prop is provided, use it as fallback start point
-    if (initialBalance > 0 && chartStartTimeRef.current === null && initialBalanceRef.current === null) {
-      initialBalanceRef.current = initialBalance;
-      setCurrentBalance(initialBalance);
+    initializeWithRealBalance();
+    
+    // CRITICAL: Timeout loading state after 10 seconds to prevent infinite loading
+    const loadingTimeout = setTimeout(() => {
+      if (isLoading && isInitialLoadRef.current) {
+        setIsLoading(false);
+        isInitialLoadRef.current = false;
+        frontendLogger.warn('Chart loading timeout - showing available data', {
+          component: 'InteractiveChart'
+        });
+      }
+    }, 10000); // 10s timeout
+    
+    // OPTIMIZED: Adaptive polling based on activity
+    // Poll faster when balance is changing, slower when stable
+    let lastBalanceRef = { value: currentBalance };
+    let balanceChangeCountRef = { value: 0 };
+    let currentInterval = 2000; // Start with default 2s
+    
+    // LIVE: Update balance with adaptive interval
+    const balanceInterval = setInterval(() => {
+      const prevBalance = lastBalanceRef.value;
+      fetchRealBalance().then(() => {
+        // Track if balance changed (using ref to access latest value)
+        const newBalance = lastKnownBalanceRef.current || prevBalance;
+        if (Math.abs(newBalance - prevBalance) > 0.01) {
+          balanceChangeCountRef.value = 3; // Keep fast polling for 3 cycles
+          lastBalanceRef.value = newBalance;
+          // Dynamically adjust interval
+          if (currentInterval > 1000) {
+            currentInterval = 1000; // Fast polling when balance changing
+            frontendLogger.debug('Adaptive polling: switched to fast mode (1s)', {
+              component: 'InteractiveChart'
+            });
+          }
+        } else if (balanceChangeCountRef.value > 0) {
+          balanceChangeCountRef.value--;
+          if (balanceChangeCountRef.value === 0 && currentInterval < 2000) {
+            currentInterval = 2000; // Back to normal polling
+            frontendLogger.debug('Adaptive polling: switched to normal mode (2s)', {
+              component: 'InteractiveChart'
+            });
+          }
+        }
+        lastBalanceRef.value = newBalance;
+      });
+    }, currentInterval);
+    
+    // LIVE LINE ANIMATION: Create smooth wave-like motion (60 FPS)
+    // Use requestAnimationFrame for buttery smooth rendering
+    const animateLiveLine = () => {
+      const now = Date.now();
+      const target = lastKnownBalanceRef.current || smoothedPrice || 0;
+
+      // Animate if we have a target (allow 0 balance)
+      if (target !== null && target !== undefined && initialBalanceRef.current !== null) {
+        setSmoothedPrice(prev => {
+          const current = prev !== null && prev !== undefined ? prev : target;
+          // FIXED: Smoother easing (0.08 instead of 0.06) for more graceful wave movement
+          // This creates a smoother, more wave-like animation as balance changes
+          const easingFactor = 0.08;
+          const next = current + (target - current) * easingFactor;
+          const safeNext = Number.isFinite(next) ? next : current;
+          // Update live endpoint every frame for smooth tick-by-tick tracking
+          setLiveLineEnd({ timestamp: now, price: safeNext });
+          return safeNext;
+        });
+
+        setAnimationTick(t => t + 1);
+      }
+      
+      smoothRafRef.current = requestAnimationFrame(animateLiveLine);
+    };
+    
+    // Start animation loop once we have initialized
+    if (initialBalanceRef.current !== null || initialBalance >= 0) {
+      smoothRafRef.current = requestAnimationFrame(animateLiveLine);
     }
-    
-    // Start fetching live balance updates (will append to historical data)
-    fetchRealBalance();
-    
-    // TICK-BY-TICK: Update balance every 2 seconds for real-time feel
-    const interval = setInterval(() => {
-      fetchRealBalance();
-    }, 2000); // 2 second polling for tick-by-tick updates
 
     return () => {
-      clearInterval(interval);
+      clearInterval(balanceInterval);
+      if (smoothRafRef.current !== null) {
+        cancelAnimationFrame(smoothRafRef.current);
+        smoothRafRef.current = null;
+      }
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = null;
@@ -605,6 +710,14 @@ const InteractiveChart = React.memo(function InteractiveChart({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Empty deps - only run on mount
+
+  // SMOOTHING: ease currentBalance into smoothedPrice for calmer visuals
+  useEffect(() => {
+    setSmoothedPrice((prev) => {
+      const next = prev + (currentBalance - prev) * 0.5; // faster easing toward live value
+      return Number.isFinite(next) ? next : currentBalance;
+    });
+  }, [currentBalance]);
 
   // Draw chart on canvas - redraw whenever filteredChartData changes (live updates)
   useEffect(() => {
@@ -628,7 +741,7 @@ const InteractiveChart = React.memo(function InteractiveChart({
       return;
     }
     
-    // ENTERPRISE: Safety check - need at least 2 points for a line
+    // NOTE: Safety check - need at least 2 points for a line
     if (filteredChartData.length < 2) {
       frontendLogger.debug('Not enough data points to draw chart', {
         component: 'InteractiveChart',
@@ -643,7 +756,7 @@ const InteractiveChart = React.memo(function InteractiveChart({
       return;
     }
 
-    // ENTERPRISE FIX: Wait for canvas to be properly sized
+    // NOTE FIX: Wait for canvas to be properly sized
     const rect = canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       frontendLogger.debug('Canvas not yet sized, skipping render', {
@@ -657,11 +770,8 @@ const InteractiveChart = React.memo(function InteractiveChart({
     canvas.height = rect.height * window.devicePixelRatio;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
-    // Clear canvas with gradient background
-    const gradient = ctx.createLinearGradient(0, 0, 0, rect.height);
-    gradient.addColorStop(0, 'rgba(0, 20, 0, 0.3)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.1)');
-    ctx.fillStyle = gradient;
+    // Clear canvas with clean dark background
+    ctx.fillStyle = 'rgba(9, 9, 11, 0.95)';
     ctx.fillRect(0, 0, rect.width, rect.height);
 
     // Chart dimensions
@@ -669,7 +779,7 @@ const InteractiveChart = React.memo(function InteractiveChart({
     const chartWidth = rect.width - (padding * 2);
     const chartHeight = rect.height - (padding * 2);
 
-    // ENTERPRISE: Validate chart dimensions
+    // NOTE: Validate chart dimensions
     if (chartWidth <= 0 || chartHeight <= 0) {
       frontendLogger.warn('Invalid chart dimensions', {
         component: 'InteractiveChart',
@@ -678,8 +788,28 @@ const InteractiveChart = React.memo(function InteractiveChart({
       return;
     }
 
-    // Find min/max values with safety checks
+    // Find min/max values with safety checks - INCLUDE live price!
     const prices = filteredChartData.map(d => d.price).filter(p => Number.isFinite(p));
+    
+    // CRITICAL: Include smoothed live endpoint in range calculation
+    // Use the live endpoint directly (already eased by animation loop)
+    let renderLive: { timestamp: number; price: number } | null = null;
+    if (liveLineEnd && liveLineEnd.price !== null && liveLineEnd.price !== undefined && Number.isFinite(liveLineEnd.price)) {
+      // Live endpoint is already smoothed by the animation loop, use it directly
+      // Allow price to be 0 (some accounts may have 0 balance)
+      renderLive = { timestamp: liveLineEnd.timestamp, price: liveLineEnd.price };
+      liveRenderRef.current = renderLive;
+      prices.push(liveLineEnd.price);
+    } else if (smoothedPrice !== null && smoothedPrice !== undefined && Number.isFinite(smoothedPrice)) {
+      // Fallback to smoothedPrice if liveLineEnd is not available
+      const now = Date.now();
+      renderLive = { timestamp: now, price: smoothedPrice };
+      liveRenderRef.current = renderLive;
+      prices.push(smoothedPrice);
+    } else {
+      liveRenderRef.current = null;
+    }
+    
     if (prices.length === 0) {
       frontendLogger.warn('No valid prices to display', {
         component: 'InteractiveChart'
@@ -698,7 +828,7 @@ const InteractiveChart = React.memo(function InteractiveChart({
     const displayMax = maxPrice + pricePadding;
     const displayRange = displayMax - displayMin;
     
-    // ENTERPRISE: Validate price range
+    // NOTE: Validate price range
     if (!Number.isFinite(displayRange) || displayRange <= 0) {
       frontendLogger.warn('Invalid price range', {
         component: 'InteractiveChart',
@@ -707,236 +837,327 @@ const InteractiveChart = React.memo(function InteractiveChart({
       return;
     }
 
-    // Draw enhanced grid with glow effect
-    ctx.strokeStyle = 'rgba(74, 222, 128, 0.12)';
+    // NOTE: Ultra-minimal grid - barely visible, just guides the eye
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
     ctx.lineWidth = 1;
-    ctx.shadowColor = 'rgba(74, 222, 128, 0.25)';
-    ctx.shadowBlur = 2;
+    ctx.shadowBlur = 0;
     
-    // Horizontal grid lines (price levels)
-    for (let i = 0; i <= 10; i++) {
-      const y = padding + (chartHeight / 10) * i;
+    // Horizontal grid lines (only 4 lines for ultra-clean look)
+    for (let i = 1; i < 4; i++) {
+      const y = padding + (chartHeight / 4) * i;
       ctx.beginPath();
       ctx.moveTo(padding, y);
       ctx.lineTo(padding + chartWidth, y);
       ctx.stroke();
     }
 
-    // Vertical grid lines (time)
-    for (let i = 0; i <= 12; i++) {
-      const x = padding + (chartWidth / 12) * i;
+    // Vertical grid lines - dotted pattern for enterprise feel
+    ctx.setLineDash([2, 8]);
+    for (let i = 1; i < 6; i++) {
+      const x = padding + (chartWidth / 6) * i;
       ctx.beginPath();
       ctx.moveTo(x, padding);
       ctx.lineTo(x, padding + chartHeight);
       ctx.stroke();
     }
-
-    // Reset shadow
+    ctx.setLineDash([]);
+    
+    // NOTE: Axis lines (slightly more visible)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.beginPath();
+    ctx.moveTo(padding, padding + chartHeight);
+    ctx.lineTo(padding + chartWidth, padding + chartHeight);
+    ctx.stroke();
+    
     ctx.shadowBlur = 0;
 
-    // ENTERPRISE FIX: Time-based positioning for smooth line movement
+    // NOTE FIX: Time-based positioning for smooth line movement
     // Calculate time range for proper x-axis scaling
     // CRITICAL FIX: Sort data by timestamp to ensure proper rendering
-    const sortedData = [...filteredChartData].sort((a, b) => a.timestamp - b.timestamp);
+    let sortedData = [...filteredChartData].sort((a, b) => a.timestamp - b.timestamp);
+
+    // If we have no or a single point, but we do have a live point, synthesize a line segment
+    if (sortedData.length < 2 && renderLive && initialBalanceRef.current) {
+      const baseTs = renderLive.timestamp - 1000; // 1s earlier for a minimal segment
+      const basePrice = initialBalanceRef.current;
+      sortedData = [
+        { timestamp: baseTs, price: basePrice, change: 0, changePercent: 0 },
+        { timestamp: renderLive.timestamp, price: renderLive.price, change: renderLive.price - basePrice, changePercent: basePrice ? ((renderLive.price - basePrice) / basePrice) * 100 : 0 }
+      ];
+    }
+    
+    // LIVE LINE: Add the eased live endpoint to extend the line in real-time
+    // Always use the latest smoothed live endpoint for tick-by-tick smoothness
+    // Allow price to be 0 (some accounts may have 0 balance)
+    if (renderLive && renderLive.timestamp > 0 && renderLive.price !== undefined && renderLive.price !== null && Number.isFinite(renderLive.price)) {
+      const lastDataPoint = sortedData[sortedData.length - 1];
+      // Always include live endpoint if it's newer or if we need it for smooth rendering
+      // FIXED: Ensure live endpoint is always added for continuous line rendering
+      if (!lastDataPoint || renderLive.timestamp >= lastDataPoint.timestamp - 50) {
+        // Remove old live endpoint if exists and add new one
+        const withoutOldLive = sortedData.filter((p, idx) => 
+          idx < sortedData.length - 1 || p.timestamp < renderLive!.timestamp - 500
+        );
+        // FIXED: Always add live endpoint to ensure line continues smoothly
+        sortedData = [...withoutOldLive, {
+          timestamp: renderLive.timestamp,
+          price: renderLive.price,
+          change: renderLive.price - (initialBalanceRef.current || renderLive.price),
+          changePercent: initialBalanceRef.current ? ((renderLive.price - initialBalanceRef.current) / initialBalanceRef.current) * 100 : 0
+        }];
+        // Re-sort after adding live endpoint to ensure proper line order
+        sortedData.sort((a, b) => a.timestamp - b.timestamp);
+      }
+    }
+    
+    // NOTE: Validate we have data to render
+    if (sortedData.length === 0) {
+      frontendLogger.warn('No chart data to render', {
+        component: 'InteractiveChart',
+        data: { filteredChartDataLength: filteredChartData.length, allHistoricalDataLength: allHistoricalData.length }
+      });
+      // Don't return - let it render empty state
+      return;
+    }
+    
     const timeMin = sortedData[0].timestamp;
     const timeMax = sortedData[sortedData.length - 1].timestamp;
-    const timeRange = Math.max(timeMax - timeMin, 1000); // At least 1 second range for stability
+    const chartTimeRange = Math.max(timeMax - timeMin, 1000); // At least 1 second range for stability
     
-    // ENTERPRISE: Validate time range
-    if (!Number.isFinite(timeRange) || timeRange <= 0) {
-      frontendLogger.warn('Invalid time range', {
+    // NOTE: Validate time range
+    if (!Number.isFinite(chartTimeRange) || chartTimeRange <= 0) {
+      frontendLogger.warn('Invalid chart time range', {
         component: 'InteractiveChart',
-        data: { timeMin, timeMax, timeRange }
+        data: { timeMin, timeMax, chartTimeRange }
       });
       return;
     }
     
-    // Draw area under curve with gradient
+    // NOTE: Refined gradient with subtle glow effect
     const areaGradient = ctx.createLinearGradient(0, padding, 0, padding + chartHeight);
-    areaGradient.addColorStop(0, 'rgba(74, 222, 128, 0.25)');
-    areaGradient.addColorStop(1, 'rgba(74, 222, 128, 0.03)');
+    areaGradient.addColorStop(0, 'rgba(34, 197, 94, 0.12)'); // green-500
+    areaGradient.addColorStop(0.3, 'rgba(34, 197, 94, 0.06)');
+    areaGradient.addColorStop(0.7, 'rgba(34, 197, 94, 0.02)');
+    areaGradient.addColorStop(1, 'rgba(34, 197, 94, 0)');
     
     ctx.fillStyle = areaGradient;
     ctx.beginPath();
     
-    // ENTERPRISE FIX: Use sorted data for consistent rendering
-    sortedData.forEach((point, index) => {
-      // ENTERPRISE: Skip invalid points
-      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) {
-        return;
-      }
+    // Calculate all valid points for area fill
+    const areaPoints: { x: number; y: number }[] = [];
+    sortedData.forEach((point) => {
+      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) return;
       
-      // TIME-BASED X positioning (not index-based)
-      const x = padding + ((point.timestamp - timeMin) / timeRange) * chartWidth;
+      const x = padding + ((point.timestamp - timeMin) / chartTimeRange) * chartWidth;
       const y = padding + chartHeight - ((point.price - displayMin) / displayRange) * chartHeight;
       
-      // ENTERPRISE: Validate coordinates
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        return;
-      }
-      
-      if (index === 0) {
-        ctx.moveTo(x, padding + chartHeight);
-        ctx.lineTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        areaPoints.push({ x, y });
       }
     });
     
-    ctx.lineTo(padding + chartWidth, padding + chartHeight);
-    ctx.closePath();
-    ctx.fill();
+    // CLEAN AREA FILL: Use straight segments matching the line
+    if (areaPoints.length >= 2) {
+      ctx.moveTo(areaPoints[0].x, padding + chartHeight);
+      ctx.lineTo(areaPoints[0].x, areaPoints[0].y);
+      for (let i = 1; i < areaPoints.length; i++) {
+        ctx.lineTo(areaPoints[i].x, areaPoints[i].y);
+      }
+      ctx.lineTo(areaPoints[areaPoints.length - 1].x, padding + chartHeight);
+      ctx.closePath();
+      ctx.fill();
+    }
 
-    // Draw main line with enhanced styling
-    ctx.strokeStyle = '#4ade80';
-    ctx.lineWidth = 2.5;
-    ctx.shadowColor = '#4ade80';
-    ctx.shadowBlur = 8;
+    // NOTE: Clean line with refined glow and gradient stroke
+    const lineGradient = ctx.createLinearGradient(0, padding, 0, padding + chartHeight);
+    lineGradient.addColorStop(0, 'rgba(34, 197, 94, 0.9)');
+    lineGradient.addColorStop(1, 'rgba(34, 197, 94, 0.65)');
+    ctx.strokeStyle = lineGradient;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(34, 197, 94, 0.45)';
+    ctx.shadowBlur = 6;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
 
-    // ENTERPRISE FIX: Use sorted data for consistent rendering
-    sortedData.forEach((point, index) => {
-      // ENTERPRISE: Skip invalid points
-      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) {
-        return;
-      }
+    // Calculate all valid points first
+    const validPoints: { x: number; y: number }[] = [];
+    sortedData.forEach((point) => {
+      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) return;
       
-      // TIME-BASED X positioning (not index-based)
-      const x = padding + ((point.timestamp - timeMin) / timeRange) * chartWidth;
+      const x = padding + ((point.timestamp - timeMin) / chartTimeRange) * chartWidth;
       const y = padding + chartHeight - ((point.price - displayMin) / displayRange) * chartHeight;
       
-      // ENTERPRISE: Validate coordinates
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        return;
-      }
-      
-      if (index === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        validPoints.push({ x, y });
       }
     });
+
+    // CLEAN LINE: Use straight segments for consistent, professional look
+    // Bezier curves cause "swirling" when points are close together
+    if (validPoints.length >= 2) {
+      ctx.moveTo(validPoints[0].x, validPoints[0].y);
+      
+      // Draw clean straight line segments through all points
+      for (let i = 1; i < validPoints.length; i++) {
+        ctx.lineTo(validPoints[i].x, validPoints[i].y);
+      }
+    }
 
     ctx.stroke();
-
-    // Draw data points with enhanced styling (only show some for performance)
     ctx.shadowBlur = 0;
-    const pointInterval = Math.max(1, Math.floor(sortedData.length / 50)); // Show ~50 points max
-    // ENTERPRISE FIX: Use sorted data for consistent rendering
-    sortedData.forEach((point, index) => {
-      // Only draw points at intervals to reduce visual clutter
-      if (index % pointInterval !== 0 && index !== sortedData.length - 1) return;
-      
-      // ENTERPRISE: Skip invalid points
-      if (!Number.isFinite(point.price) || !Number.isFinite(point.timestamp)) {
-        return;
-      }
-      
-      // TIME-BASED X positioning (not index-based)
-      const x = padding + ((point.timestamp - timeMin) / timeRange) * chartWidth;
-      const y = padding + chartHeight - ((point.price - displayMin) / displayRange) * chartHeight;
-      
-      // ENTERPRISE: Validate coordinates
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        return;
-      }
-      
-      // Outer glow
-      ctx.fillStyle = 'rgba(74, 222, 128, 0.25)';
-      ctx.beginPath();
-      ctx.arc(x, y, 6, 0, 2 * Math.PI);
-      ctx.fill();
-      
-      // Inner point
-      ctx.fillStyle = '#4ade80';
-      ctx.beginPath();
-      ctx.arc(x, y, 3, 0, 2 * Math.PI);
-      ctx.fill();
-    });
 
-    // Draw hovered point with enhanced styling
+    // NOTE: Minimal live indicator at current value (smoothed)
+    const livePoint = renderLive || sortedData[sortedData.length - 1];
+    if (livePoint) {
+      const lastX = padding + ((livePoint.timestamp - timeMin) / chartTimeRange) * chartWidth;
+      const lastY = padding + chartHeight - ((livePoint.price - displayMin) / displayRange) * chartHeight;
+      
+      // Subtle breathing animation (very slow, elegant)
+      const breathPhase = (animationTick % 240) / 240; // 0-1 over 8 seconds (slower)
+      const breathOpacity = 0.12 + Math.sin(breathPhase * Math.PI * 2) * 0.1; // 0.02-0.22
+      
+      // Outer glow ring (very subtle)
+      ctx.strokeStyle = `rgba(34, 197, 94, ${breathOpacity})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 10, 0, 2 * Math.PI);
+      ctx.stroke();
+      
+      // Inner solid dot
+      ctx.fillStyle = '#22c55e';
+      ctx.shadowColor = 'rgba(34, 197, 94, 0.55)';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 3.5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // NOTE: Minimal crosshair on hover
     if (hoveredPoint) {
-      // TIME-BASED X positioning for hover point
-      const x = padding + ((hoveredPoint.timestamp - timeMin) / timeRange) * chartWidth;
+      const x = padding + ((hoveredPoint.timestamp - timeMin) / chartTimeRange) * chartWidth;
       const y = padding + chartHeight - ((hoveredPoint.price - displayMin) / displayRange) * chartHeight;
       
-      // Enhanced hover effect
-      ctx.fillStyle = 'rgba(74, 222, 128, 0.4)';
+      // Clamp Y to chart bounds
+      const clampedY = Math.max(padding, Math.min(padding + chartHeight, y));
+      
+      // Vertical crosshair line - solid, subtle
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
+      ctx.moveTo(x, padding);
+      ctx.lineTo(x, padding + chartHeight);
+      ctx.stroke();
+      
+      // Horizontal crosshair line to Y-axis - dashed
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.beginPath();
+      ctx.moveTo(padding, clampedY);
+      ctx.lineTo(x, clampedY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Y-axis price label - minimal pill
+      const priceText = `$${hoveredPoint.price.toFixed(2)}`;
+      ctx.font = '500 9px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+      const priceWidth = ctx.measureText(priceText).width + 10;
+      
+      // Background pill
+      ctx.fillStyle = '#22c55e';
+      ctx.beginPath();
+      ctx.roundRect(padding - priceWidth - 6, clampedY - 8, priceWidth, 16, 2);
       ctx.fill();
       
+      // Price text
+      ctx.fillStyle = '#000';
+      ctx.textAlign = 'right';
+      ctx.fillText(priceText, padding - 10, clampedY + 3);
+      ctx.textAlign = 'left';
+      
+      // Intersection dot - clean and minimal
+      ctx.shadowColor = 'rgba(16, 185, 129, 0.5)';
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#10b981';
+      ctx.beginPath();
+      ctx.arc(x, clampedY, 5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      
+      // White center dot
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(x, y, 4, 0, 2 * Math.PI);
+      ctx.arc(x, clampedY, 2, 0, 2 * Math.PI);
       ctx.fill();
     }
 
-    // Draw Y-axis labels with enhanced styling
-    ctx.fillStyle = '#4ade80';
-    ctx.font = 'bold 11px monospace';
+    // NOTE: Ultra-minimal Y-axis labels
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.font = '9px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
     ctx.textAlign = 'right';
-    ctx.shadowColor = 'rgba(74, 222, 128, 0.4)';
-    ctx.shadowBlur = 3;
+    ctx.shadowBlur = 0;
     
-    for (let i = 0; i <= 10; i++) {
-      const price = displayMax - (displayRange / 10) * i;
-      const y = padding + (chartHeight / 10) * i + 4;
-      ctx.fillText(`$${price.toFixed(2)}`, padding - 15, y);
+    // Only 4 price labels for cleaner look (skip first and last)
+    for (let i = 1; i < 4; i++) {
+      const price = displayMax - (displayRange / 4) * i;
+      const y = padding + (chartHeight / 4) * i + 3;
+      ctx.fillText(`$${price.toFixed(2)}`, padding - 8, y);
     }
 
-    // Draw X-axis labels with enhanced styling
-    // ENTERPRISE FIX: Use time-based positioning to match chart rendering
+    // NOTE: Minimal X-axis labels
     ctx.textAlign = 'center';
-    ctx.shadowBlur = 3;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.font = '9px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
     
-    for (let i = 0; i <= 8; i++) {
-      // Calculate time position based on time range (not index)
-      const timeValue = timeMin + (timeRange * i / 8);
+    const labelCount = 5; // Fewer labels for cleaner look
+    
+    for (let i = 0; i <= labelCount; i++) {
+      const timeValue = timeMin + (chartTimeRange * i / labelCount);
       const time = new Date(timeValue);
-      // Use time-based X positioning to match chart line rendering
-      const x = padding + ((timeValue - timeMin) / timeRange) * chartWidth;
+      const x = padding + ((timeValue - timeMin) / chartTimeRange) * chartWidth;
       
-      // Only draw if x is within chart bounds
+      // Format labels based on selected time range view
+      let label = '';
+      
+      if (timeRange === '24H') {
+        const hours = String(time.getHours()).padStart(2, '0');
+        const minutes = String(time.getMinutes()).padStart(2, '0');
+        label = `${hours}:${minutes}`;
+      } else if (timeRange === '7D') {
+        const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+        label = days[time.getDay()];
+      } else {
+        const month = String(time.getMonth() + 1).padStart(2, '0');
+        const day = String(time.getDate()).padStart(2, '0');
+        label = `${month}/${day}`;
+      }
+      
       if (x >= padding && x <= padding + chartWidth) {
-        ctx.fillText(time.toLocaleTimeString(), x, rect.height - 15);
+        ctx.fillText(label, x, rect.height - 8);
       }
     }
 
-    // Reset shadow
-    ctx.shadowBlur = 0;
-
-    // Highlight current price point with pulsing animation
-    // ENTERPRISE FIX: Use sorted data and find most recent point
+    // NOTE: Current price label (right side of chart)
     if (sortedData.length > 0) {
       const currentPoint = sortedData[sortedData.length - 1];
-      // TIME-BASED X positioning for current point
-      const x = padding + ((currentPoint.timestamp - timeMin) / timeRange) * chartWidth;
+      const x = padding + ((currentPoint.timestamp - timeMin) / chartTimeRange) * chartWidth;
       const y = padding + chartHeight - ((currentPoint.price - displayMin) / displayRange) * chartHeight;
       
-      ctx.fillStyle = '#4ade80';
-      ctx.shadowColor = '#4ade80';
-      ctx.shadowBlur = 12;
-      ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
-      ctx.fill();
-      
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-      
-      // Current price label
-      ctx.fillStyle = '#4ade80';
-      ctx.font = 'bold 12px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`Current: $${currentPoint.price.toFixed(2)}`, padding + chartWidth - 120, y - 5);
+      // Price label on the right edge
+      if (x < padding + chartWidth - 50) {
+        ctx.fillStyle = '#22c55e';
+        ctx.font = '600 10px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`$${currentPoint.price.toFixed(2)}`, x + 10, y + 3);
+      }
     }
+    
+    ctx.shadowBlur = 0;
 
-  }, [filteredChartData, hoveredPoint, isLoading, allHistoricalData.length]);
+  }, [filteredChartData, hoveredPoint, isLoading, allHistoricalData.length, animationTick, liveLineEnd]);
 
-  // WORLD-CLASS: Memoize mouse handlers to prevent recreation
+  // ACCURATE: Mouse handler with linear interpolation for precise price at cursor position
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || filteredChartData.length === 0) return;
@@ -946,260 +1167,325 @@ const InteractiveChart = React.memo(function InteractiveChart({
     const padding = 60;
     const chartWidth = rect.width - (padding * 2);
     
-    // TIME-BASED: Calculate which timestamp the mouse is over
-    const timeMin = filteredChartData[0].timestamp;
-    const timeMax = filteredChartData[filteredChartData.length - 1].timestamp;
-    const timeRange = timeMax - timeMin || 1;
-    
-    const relativeX = mouseX - padding;
-    const hoveredTimestamp = timeMin + (relativeX / chartWidth) * timeRange;
-    
-    // Find the closest data point to this timestamp
-    let closestPoint = filteredChartData[0];
-    let minDistance = Math.abs(filteredChartData[0].timestamp - hoveredTimestamp);
-    
-    for (const point of filteredChartData) {
-      const distance = Math.abs(point.timestamp - hoveredTimestamp);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestPoint = point;
+    // Include live line end point if available
+    let allPoints = [...filteredChartData];
+    if (liveLineEnd && liveLineEnd.timestamp > 0 && liveLineEnd.price > 0) {
+      const lastPoint = allPoints[allPoints.length - 1];
+      if (!lastPoint || liveLineEnd.timestamp > lastPoint.timestamp) {
+        allPoints.push({
+          timestamp: liveLineEnd.timestamp,
+          price: liveLineEnd.price,
+          change: liveLineEnd.price - (initialBalanceRef.current || liveLineEnd.price),
+          changePercent: initialBalanceRef.current ? ((liveLineEnd.price - initialBalanceRef.current) / initialBalanceRef.current) * 100 : 0
+        });
       }
     }
     
-    setHoveredPoint(closestPoint);
-  }, [filteredChartData]);
+    // Sort by timestamp
+    allPoints.sort((a, b) => a.timestamp - b.timestamp);
+    
+    // Calculate time range
+    const timeMin = allPoints[0].timestamp;
+    const timeMax = allPoints[allPoints.length - 1].timestamp;
+    const timeRange = timeMax - timeMin || 1;
+    
+    // Calculate hovered timestamp from mouse position
+    const relativeX = mouseX - padding;
+    
+    // Clamp to chart bounds
+    if (relativeX < 0 || relativeX > chartWidth) {
+      setHoveredPoint(null);
+      return;
+    }
+    
+    const hoveredTimestamp = timeMin + (relativeX / chartWidth) * timeRange;
+    
+    // Find the two points that bracket the hovered timestamp for interpolation
+    let leftPoint = allPoints[0];
+    let rightPoint = allPoints[allPoints.length - 1];
+    
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      if (allPoints[i].timestamp <= hoveredTimestamp && allPoints[i + 1].timestamp >= hoveredTimestamp) {
+        leftPoint = allPoints[i];
+        rightPoint = allPoints[i + 1];
+        break;
+      }
+    }
+    
+    // Linear interpolation for accurate price at cursor position
+    const timeDiff = rightPoint.timestamp - leftPoint.timestamp;
+    const t = timeDiff > 0 ? (hoveredTimestamp - leftPoint.timestamp) / timeDiff : 0;
+    
+    // Interpolate price
+    const interpolatedPrice = leftPoint.price + (rightPoint.price - leftPoint.price) * t;
+    const startPrice = initialBalanceRef.current || allPoints[0].price;
+    const interpolatedChange = interpolatedPrice - startPrice;
+    const interpolatedChangePercent = startPrice > 0 ? (interpolatedChange / startPrice) * 100 : 0;
+    
+    // Create interpolated point
+    const interpolatedPoint: ChartDataPoint = {
+      timestamp: hoveredTimestamp,
+      price: interpolatedPrice,
+      change: interpolatedChange,
+      changePercent: interpolatedChangePercent
+    };
+    
+    setHoveredPoint(interpolatedPoint);
+  }, [filteredChartData, liveLineEnd]);
 
   const handleCanvasMouseLeave = useCallback(() => {
     setHoveredPoint(null);
   }, []);
 
   // NOF1.AI STYLE: Calculate metrics from filtered chart start point
-  const startBalance = initialBalanceRef.current || (filteredChartData.length > 0 ? filteredChartData[0].price : initialBalance);
-  const totalChange = currentBalance - startBalance;
+  // CRITICAL: Prefer the live balance from the API over any other source
+  const actualBalance = currentBalance > 0 ? currentBalance : initialBalance;
+  const startBalance = initialBalanceRef.current || (filteredChartData.length > 0 ? filteredChartData[0].price : actualBalance);
+  const totalChange = actualBalance - startBalance;
   const totalChangePercent = startBalance > 0 ? (totalChange / startBalance) * 100 : 0;
+
+  const gridStyle = {
+    background: `
+      linear-gradient(180deg, rgba(255,255,255,0.015) 0%, rgba(0,0,0,0) 100%),
+      linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)
+    `,
+    backgroundSize: '100% 100%, 40px 40px, 40px 40px'
+  };
+  
+  // Check if we have any data to display
+  const hasData = filteredChartData.length > 0 || (initialBalanceRef.current !== null && currentBalance >= 0);
   
   const validPrices = filteredChartData.map(d => d.price).filter(p => Number.isFinite(p));
-  const maxBalance = validPrices.length > 0 ? Math.max(...validPrices) : currentBalance;
-  const minBalance = validPrices.length > 0 ? Math.min(...validPrices) : currentBalance;
+  const maxBalance = validPrices.length > 0 ? Math.max(...validPrices) : (currentBalance || initialBalance || 100);
+  const minBalance = validPrices.length > 0 ? Math.min(...validPrices) : (currentBalance || initialBalance || 100);
 
-  if (isLoading) {
+  // NOTE: Loading state - show only briefly while fetching initial data
+  // Don't block forever - allow chart to render even with 0 balance
+  if (isLoading && isInitialLoadRef.current && !hasData) {
     return (
-      <div className={`flex items-center justify-center h-96 ${className}`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto mb-2"></div>
-          <p className="text-green-500/60 text-sm">Loading portfolio chart...</p>
+      <div className={`flex flex-col h-full bg-[#0a0a0a] ${className}`}>
+        {/* Skeleton Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.04]">
+          <div className="flex items-center gap-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
+            <div className="h-3 w-16 bg-white/10 rounded animate-pulse" />
+          </div>
+          <div className="flex gap-1">
+            {[1,2,3].map(i => (
+              <div key={i} className="h-6 w-10 bg-white/5 rounded animate-pulse" />
+            ))}
+          </div>
+        </div>
+        {/* Skeleton Chart */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-6 h-6 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+            <span className="text-[11px] text-white/30 font-medium tracking-wide">LOADING CHART</span>
+          </div>
         </div>
       </div>
     );
   }
 
+  // NOTE: Error state
   if (error) {
     return (
-      <div className={`flex items-center justify-center h-96 ${className}`} role="alert">
-        <div className="text-center">
-          <p className="text-red-500 mb-2">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            aria-label="Retry loading chart"
-            role="button"
-            tabIndex={0}
-            className="px-3 py-1 text-xs border border-red-500 text-red-500 hover:bg-red-500/10 transition-all"
-          >
-            Retry
-          </button>
+      <div className={`flex flex-col h-full bg-[#0a0a0a] ${className}`} role="alert">
+        <div className="flex-1 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4 max-w-xs text-center">
+            <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+              <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-[13px] text-white/70 mb-1">Chart loading failed</p>
+              <p className="text-[11px] text-white/30">{error}</p>
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-1.5 text-[11px] font-medium text-white/80 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md transition-all"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const latestPoint = filteredChartData[filteredChartData.length - 1] || chartData[chartData.length - 1];
+  // Allow 0 balance - some accounts may have 0
+  const livePrice = liveLineEnd?.price !== undefined && liveLineEnd.price !== null ? liveLineEnd.price : undefined;
+  const latestPrice = smoothedPrice !== null && smoothedPrice !== undefined 
+    ? smoothedPrice 
+    : (livePrice !== undefined 
+      ? livePrice 
+      : (latestPoint?.price !== undefined 
+        ? latestPoint.price 
+        : (currentBalance !== null && currentBalance !== undefined ? currentBalance : initialBalance)));
+  const basePrice = filteredChartData.length > 0
+    ? filteredChartData[0].price
+    : (initialBalanceRef.current !== null ? initialBalanceRef.current : (latestPrice || initialBalance));
+  const latestPercent = basePrice > 0 ? ((latestPrice - basePrice) / basePrice) * 100 : 0;
+  const isStale = Date.now() - lastUpdated > 15000;
+
+  if (compact) {
+    return (
+      <div className={`flex flex-col h-full bg-[#0a0a0a] ${className}`}>
+        <div className="flex items-start justify-between gap-2 px-3 py-2 border-b border-white/[0.04] flex-wrap">
+          <div className="text-[11px] font-semibold text-white tabular-nums leading-tight">
+            {formatCurrency(latestPrice)}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap text-right">
+            <div className={`text-[11px] font-semibold leading-tight ${latestPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {formatPercent(latestPercent)}
+            </div>
+            <div className="text-[10px] text-white/40 leading-tight">
+              {isStale ? 'Stale' : 'Live'} · {formatTimeAgoShort(lastUpdated)}
+            </div>
+          </div>
+        </div>
+        <div className="relative flex-1 rounded-lg overflow-hidden" style={gridStyle}>
+          <div className="absolute inset-0 rounded-lg border border-white/[0.03] pointer-events-none" />
+          {filteredChartData.length < 2 && (
+            <div className="absolute inset-0 flex items-center justify-center text-[11px] text-white/40">
+              No data yet
+            </div>
+          )}
+          <canvas
+            ref={canvasRef}
+            className="w-full h-full cursor-crosshair"
+            onMouseMove={handleCanvasMouseMove}
+            onMouseLeave={handleCanvasMouseLeave}
+          />
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex flex-col h-full ${className}`}>
-      {/* ENTERPRISE: Enhanced Live Status Indicator */}
-      <div className="flex items-center justify-between px-6 py-2 bg-black/40 border-b border-green-400/20">
-        <div className="flex items-center gap-3">
-          {/* Connection Status */}
-          <div className="flex items-center gap-2">
-            <AnimatePresence mode="wait">
-              {connectionStatus === 'connected' && (
-                <motion.div
-                  key="connected"
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  exit={{ scale: 0 }}
-                  className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-lg shadow-green-500/50"
-                />
-              )}
-              {connectionStatus === 'connecting' && (
-                <motion.div
-                  key="connecting"
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1, rotate: 360 }}
-                  exit={{ scale: 0 }}
-                  transition={{ rotate: { duration: 1, repeat: Infinity, ease: "linear" } }}
-                  className="w-2 h-2 rounded-full bg-yellow-500 shadow-lg shadow-yellow-500/50"
-                />
-              )}
-              {connectionStatus === 'disconnected' && (
-                <motion.div
-                  key="disconnected"
-                  initial={{ scale: 0 }}
-                  animate={{ scale: [1, 1.2, 1] }}
-                  exit={{ scale: 0 }}
-                  transition={{ duration: 1, repeat: Infinity }}
-                  className="w-2 h-2 rounded-full bg-orange-500 shadow-lg shadow-orange-500/50"
-                />
-              )}
-              {connectionStatus === 'error' && (
-                <motion.div
-                  key="error"
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  exit={{ scale: 0 }}
-                  className="w-2 h-2 rounded-full bg-red-500 shadow-lg shadow-red-500/50"
-                />
-              )}
-            </AnimatePresence>
-            
-            <div className="flex flex-col">
-              <h3 className={`text-xs font-bold uppercase tracking-wider ${
-                connectionStatus === 'connected' ? 'text-green-400' :
-                connectionStatus === 'connecting' ? 'text-yellow-400' :
-                connectionStatus === 'disconnected' ? 'text-orange-400' :
-                'text-red-400'
-              }`}>
-                {connectionStatus === 'connected' && 'LIVE TRACKING'}
-                {connectionStatus === 'connecting' && 'CONNECTING...'}
-                {connectionStatus === 'disconnected' && 'RECONNECTING...'}
-                {connectionStatus === 'error' && 'CONNECTION ERROR'}
-              </h3>
-              <span className="text-[10px] text-green-400/50">Updated {getTimeAgo(lastUpdated)}</span>
-            </div>
+    <div className={`flex flex-col h-full bg-[#0a0a0a] ${className}`}>
+      {/* NOTE: Minimal Status Bar */}
+      <div className="relative flex items-center justify-between px-3 py-2 border-b border-white/[0.03]">
+        {/* Left: Connection Status */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex items-center justify-center w-4 h-4">
+            <div className={`w-1.5 h-1.5 rounded-full ${
+              connectionStatus === 'connected' ? 'bg-emerald-400' :
+              connectionStatus === 'connecting' ? 'bg-amber-400' :
+              connectionStatus === 'disconnected' ? 'bg-orange-400' :
+              'bg-red-400'
+            }`} />
+            {connectionStatus === 'connected' && (
+              <div className="absolute w-3 h-3 rounded-full bg-emerald-400/30 animate-ping" />
+            )}
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[10px] font-semibold text-white/60 tracking-wider uppercase">
+              {connectionStatus === 'connected' ? 'Live' : connectionStatus}
+            </span>
+            <span className="text-[9px] text-white/20">{getTimeAgo(lastUpdated)}</span>
           </div>
         </div>
         
-        {/* ENTERPRISE: Performance Metrics */}
-        <div className="flex items-center gap-4 text-[10px] text-green-400/60 font-mono">
-          <div className="flex items-center gap-1">
-            <span className="text-green-400/40">LATENCY:</span>
-            <span className={`font-bold ${
-              performanceMetrics.avgLatency < 100 ? 'text-green-400' :
-              performanceMetrics.avgLatency < 300 ? 'text-yellow-400' :
-              'text-orange-400'
-            }`}>
-              {performanceMetrics.avgLatency.toFixed(0)}ms
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-green-400/40">SUCCESS:</span>
-            <span className={`font-bold ${
-              performanceMetrics.successRate >= 95 ? 'text-green-400' :
-              performanceMetrics.successRate >= 80 ? 'text-yellow-400' :
-              'text-red-400'
-            }`}>
-              {performanceMetrics.successRate.toFixed(1)}%
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-green-400/40">REQUESTS:</span>
-            <span className="font-bold text-green-400">{performanceMetrics.totalRequests}</span>
-          </div>
-        </div>
-      </div>
-
-
-      {/* Time Range Controls */}
-      <div className="flex items-center justify-center mb-2">
-        <div className="flex items-center space-x-1">
+        {/* Center: Time Range Selector */}
+        <div className="flex items-center gap-0.5 p-0.5 bg-white/[0.02] rounded border border-white/[0.04]">
           {(['24H', '7D', '30D'] as const).map((range) => (
             <button
               key={range}
               onClick={() => setTimeRange(range)}
-              aria-label={`View ${range} time range`}
-              aria-pressed={timeRange === range}
-              role="button"
-              tabIndex={0}
-              className={`px-2 py-1 text-xs font-bold border transition-all ${
+              className={`px-2.5 py-1 text-[9px] font-bold tracking-wider rounded-sm transition-all duration-150 ${
                 timeRange === range
-                  ? 'border-green-400 bg-green-400/20 text-green-400'
-                  : 'border-green-400/30 text-green-400/60 hover:border-green-400/60'
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-white/25 hover:text-white/40 hover:bg-white/[0.02]'
               }`}
             >
               {range}
             </button>
           ))}
         </div>
+        
+        {/* Right: Performance Metrics + Live/Stale */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] text-white/15 font-medium tracking-wider">LAT</span>
+            <span className={`text-[9px] font-mono font-semibold tabular-nums ${
+              performanceMetrics.avgLatency < 100 ? 'text-emerald-400/70' :
+              performanceMetrics.avgLatency < 300 ? 'text-amber-400/70' :
+              'text-orange-400/70'
+            }`}>
+              {performanceMetrics.avgLatency.toFixed(0)}ms
+            </span>
+          </div>
+          <div className="h-2.5 w-px bg-white/[0.06]" />
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] text-white/15 font-medium tracking-wider">UP</span>
+            <span className={`text-[9px] font-mono font-semibold tabular-nums ${
+              performanceMetrics.successRate >= 95 ? 'text-emerald-400/70' :
+              performanceMetrics.successRate >= 80 ? 'text-amber-400/70' :
+              'text-red-400/70'
+            }`}>
+              {performanceMetrics.successRate.toFixed(0)}%
+            </span>
+          </div>
+          <div className="h-2.5 w-px bg-white/[0.06]" />
+          <LiveStatusBadge compact />
+        </div>
       </div>
 
-      {/* Interactive Chart - Futuristic Terminal */}
-      <div className="relative bg-gradient-to-br from-black/60 via-black/30 to-black/60 rounded-lg border border-green-400/40 overflow-hidden h-96 mx-4 mb-2 shadow-2xl shadow-green-400/20 backdrop-blur-sm">
-        {/* Futuristic Background Effects */}
-        <div className="absolute inset-0 opacity-30">
-          {/* Animated Grid */}
-          <div className="absolute inset-0" style={{
-            backgroundImage: `
-              linear-gradient(rgba(74, 222, 128, 0.1) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(74, 222, 128, 0.1) 1px, transparent 1px)
-            `,
-            backgroundSize: '20px 20px',
-            animation: 'grid-move 20s linear infinite'
-          }}></div>
-          
-          {/* Scanning Lines */}
-          <div className="absolute inset-0">
-            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-400/60 to-transparent animate-pulse"></div>
-            <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-green-400/60 to-transparent animate-pulse" style={{animationDelay: '1s'}}></div>
+      {/* NOTE: Chart Canvas Container */}
+      <div className="relative flex-1 mx-2 my-1 rounded-lg overflow-hidden" style={gridStyle}>
+        {/* Subtle border frame */}
+        <div className="absolute inset-0 rounded-lg border border-white/[0.03] pointer-events-none" />
+        
+        {filteredChartData.length < 2 && (
+          <div className="absolute inset-0 flex items-center justify-center text-[11px] text-white/40 z-10 backdrop-blur-[1px] bg-black/10">
+            No data yet
           </div>
-          
-          {/* Corner Brackets */}
-          <div className="absolute top-2 left-2 w-6 h-6 border-l-2 border-t-2 border-green-400/60"></div>
-          <div className="absolute top-2 right-2 w-6 h-6 border-r-2 border-t-2 border-green-400/60"></div>
-          <div className="absolute bottom-2 left-2 w-6 h-6 border-l-2 border-b-2 border-green-400/60"></div>
-          <div className="absolute bottom-2 right-2 w-6 h-6 border-r-2 border-b-2 border-green-400/60"></div>
-        </div>
-        
-        {/* Animated Background Glow */}
-        <div className="absolute inset-0 bg-gradient-to-r from-green-400/5 via-transparent to-blue-400/5 animate-pulse"></div>
-        
-        {/* Data Stream Effect */}
-        <div className="absolute top-4 left-4 text-xs text-green-400/40 font-mono animate-pulse">
-          <div className="animate-bounce">● LIVE DATA STREAM</div>
-          <div className="text-[10px] opacity-50">Updated: {getTimeAgo(lastUpdated)}</div>
-        </div>
+        )}
         
         <canvas
           ref={canvasRef}
-          className="w-full h-full cursor-crosshair relative z-10"
+          className="w-full h-full cursor-crosshair"
           onMouseMove={handleCanvasMouseMove}
           onMouseLeave={handleCanvasMouseLeave}
         />
         
-        {/* Chart Overlay Effects */}
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-green-400/50 to-transparent"></div>
-        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-green-400/50 to-transparent"></div>
-        
-        {/* Tooltip */}
-        {hoveredPoint && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8, y: -10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="absolute bg-black/95 border border-green-400/60 rounded-lg p-3 pointer-events-none z-20 shadow-2xl shadow-green-400/20 backdrop-blur-sm"
-            style={{
-              left: '50%',
-              top: '20px',
-              transform: 'translateX(-50%)'
-            }}
-          >
-            <div className="text-green-400 text-sm">
-              <div className="font-bold text-green-300">{new Date(hoveredPoint.timestamp).toLocaleString()}</div>
-              <div className="text-green-200">Price: <span className="text-white font-bold">${hoveredPoint.price.toFixed(2)}</span></div>
-              <div className={hoveredPoint.change >= 0 ? 'text-green-300' : 'text-red-400'}>
-                Change: <span className="text-white font-bold">{hoveredPoint.change >= 0 ? '+' : ''}${hoveredPoint.change.toFixed(2)} ({hoveredPoint.changePercent >= 0 ? '+' : ''}{hoveredPoint.changePercent.toFixed(2)}%)</span>
+        {/* NOTE: Refined Tooltip */}
+        <AnimatePresence>
+          {hoveredPoint && (
+            <motion.div
+              initial={{ opacity: 0, y: -4, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.96 }}
+              transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
+              className="absolute left-1/2 top-4 -translate-x-1/2 z-20 pointer-events-none"
+            >
+              <div className="bg-[#141414] border border-white/[0.08] rounded-lg px-4 py-2.5 shadow-2xl shadow-black/50 backdrop-blur-xl">
+                <div className="flex items-center gap-4">
+                  {/* Time */}
+                  <div className="text-[10px] text-white/30 font-mono tracking-wide">
+                    {formatTimestampShort(hoveredPoint.timestamp)}
+                  </div>
+                  {/* Divider */}
+                  <div className="h-3 w-px bg-white/10" />
+                  {/* Price */}
+                  <div className="text-[13px] text-white font-semibold tabular-nums tracking-tight">
+                    {formatCurrency(hoveredPoint.price)}
+                  </div>
+                  {/* Change */}
+                  <div className={`text-[11px] font-medium tabular-nums ${
+                    hoveredPoint.change >= 0 ? 'text-emerald-400' : 'text-red-400'
+                  }`}>
+                    {formatPercent(hoveredPoint.changePercent)}
+                  </div>
+                </div>
               </div>
-            </div>
-            {/* Tooltip Arrow */}
-            <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-black/95 border-r border-b border-green-400/60 rotate-45"></div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

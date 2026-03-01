@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { wsMarketService } from '@/services/websocketMarketService';
+import { wsMarketService } from '@/services/exchange/websocketMarketService';
 import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
@@ -110,4 +110,5 @@ export async function POST(request: NextRequest) {
     }, { status: 500 });
   }
 }
+
 

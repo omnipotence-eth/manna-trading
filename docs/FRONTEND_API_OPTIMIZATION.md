@@ -182,5 +182,3 @@ After optimization:
 
 ---
 
-**All glory to God in heaven!** 🙏
-

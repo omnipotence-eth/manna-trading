@@ -4,24 +4,104 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { agentRunnerService } from '@/services/agentRunnerService';
-import { marketScannerService } from '@/services/marketScannerService';
-import { agentCoordinator } from '@/services/agentCoordinator';
-import { asterDexService } from '@/services/asterDexService';
+import { agentRunnerService } from '@/services/ai/agentRunnerService';
+import { marketScannerService } from '@/services/trading/marketScannerService';
+import { agentCoordinator } from '@/services/ai/agentCoordinator';
+import { asterDexService } from '@/services/exchange/asterDexService';
 import { asterConfig } from '@/lib/configService';
 import { logger } from '@/lib/logger';
 
+interface DiagnosticIssue {
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  issue: string;
+  solution: string;
+}
+
+interface Diagnostics {
+  timestamp: string;
+  agentRunner: {
+    isRunning?: boolean;
+    enabled?: boolean;
+    symbolsCount?: number;
+    activeWorkflows?: number;
+    maxConcurrentWorkflows?: number;
+    intervalMinutes?: number;
+    symbols?: string[];
+  };
+  marketScanner: {
+    opportunitiesFound?: number;
+    topOpportunities?: Array<{
+      symbol: string;
+      score: number;
+      confidence: string;
+      recommendation: string;
+      volume24h: number;
+    }>;
+    lastScanTime?: number;
+    scanDuration?: number;
+    error?: string;
+  };
+  configuration: {
+    confidenceThreshold: number;
+    maxConcurrentWorkflows: number;
+    maxConcurrentPositions: number;
+    stopLossPercent: number;
+    takeProfitPercent: number;
+    blacklistedSymbols: number;
+    agentRunnerInterval: number;
+  };
+  account: {
+    balance?: number;
+    openPositions?: number;
+    maxPositions?: number;
+    positionsAtLimit?: boolean;
+    error?: string;
+  };
+  workflows: {
+    active: number;
+    total: number;
+    completed: number;
+    failed: number;
+    successRate: string;
+    maxConcurrent: number;
+    workflows: Array<{
+      symbol: string;
+      status: string;
+      currentStep: string;
+      startedAt: string;
+    }>;
+  };
+  issues: DiagnosticIssue[];
+  recommendations: string[];
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const diagnostics: any = {
+    const diagnostics: Diagnostics = {
       timestamp: new Date().toISOString(),
       agentRunner: {},
       marketScanner: {},
-      configuration: {},
+      configuration: {
+        confidenceThreshold: 0,
+        maxConcurrentWorkflows: 0,
+        maxConcurrentPositions: 0,
+        stopLossPercent: 0,
+        takeProfitPercent: 0,
+        blacklistedSymbols: 0,
+        agentRunnerInterval: 0,
+      },
       account: {},
-      workflows: {},
+      workflows: {
+        active: 0,
+        total: 0,
+        completed: 0,
+        failed: 0,
+        successRate: '0',
+        maxConcurrent: 0,
+        workflows: [],
+      },
       issues: [],
-      recommendations: []
+      recommendations: [],
     };
 
     // 1. Agent Runner Status
@@ -188,11 +268,11 @@ export async function GET(request: NextRequest) {
 
     // 6. Generate Recommendations
     if (diagnostics.issues.length === 0) {
-      diagnostics.recommendations.push('✅ System appears healthy - if no trades, market conditions may not be favorable');
+      diagnostics.recommendations.push('[OK] System appears healthy - if no trades, market conditions may not be favorable');
       diagnostics.recommendations.push('Check server logs for workflow execution details');
       diagnostics.recommendations.push('Monitor /api/agent-insights for agent thoughts');
     } else {
-      const criticalIssues = diagnostics.issues.filter((i: any) => i.severity === 'CRITICAL');
+      const criticalIssues = diagnostics.issues.filter((i) => i.severity === 'CRITICAL');
       if (criticalIssues.length > 0) {
         diagnostics.recommendations.push('🚨 CRITICAL issues found - these must be fixed before trading can start');
       }
@@ -200,7 +280,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      diagnostics
+      data: {
+        diagnostics,
+        config: {
+          stopLoss: asterConfig.trading.stopLossPercent || 3,
+          takeProfit: asterConfig.trading.takeProfitPercent || 6,
+          scanInterval: asterConfig.trading.agentRunnerInterval || 60,
+        },
+        simulationMode: asterConfig.trading.simulationMode || false
+      }
     }, { status: 200 });
 
   } catch (error) {
@@ -214,4 +302,5 @@ export async function GET(request: NextRequest) {
     }, { status: 500 });
   }
 }
+
 

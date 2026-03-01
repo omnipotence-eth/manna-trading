@@ -61,10 +61,16 @@ Thumbs.db
 # Logs
 logs/
 *.log
+*-logs-*.txt
+dev-logs-*.txt
+boot-logs-*.txt
 
 # Cache
 .cache/
 .temp/
+
+# Temporary files
+tmp/
 
 # Local data storage (trades, positions, etc.)
 data/

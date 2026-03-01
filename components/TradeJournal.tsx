@@ -3,6 +3,9 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
+import { 
+  Briefcase, MagnifyingGlass, ChartBar, Target, Money, Lightbulb 
+} from 'phosphor-react';
 
 interface JournalEntry {
   id: string;
@@ -197,18 +200,33 @@ export default function TradeJournal() {
       <div className="space-y-4 max-h-[800px] overflow-y-auto">
         {sortedEntries.length === 0 ? (
           <div className="glass-effect p-12 rounded-lg text-center border border-green-500/20">
-            <div className="text-6xl mb-4">💼</div>
+            <Briefcase size={64} weight="duotone" className="text-green-500/40 mx-auto mb-4" />
             <div className="text-green-500/40 text-xl mb-3 font-bold">No Trades Executed Yet</div>
             <div className="text-green-500/60 text-sm max-w-md mx-auto space-y-2">
-              <div>🔍 Market Scanner: Active (every 2 min)</div>
-              <div>📊 4 AI Agents: Analyzing opportunities</div>
-              <div>🎯 Confidence Threshold: 65% minimum (70% for accounts &lt;$500)</div>
-              <div>💰 Position Size: 5-20% of balance</div>
+              <div className="flex items-center justify-center gap-2">
+                <MagnifyingGlass size={16} weight="fill" className="text-[#00ff88]" />
+                Market Scanner: Active (every 2 min)
+              </div>
+              <div className="flex items-center justify-center gap-2">
+                <ChartBar size={16} weight="fill" className="text-[#00ff88]" />
+                4 AI Agents: Analyzing opportunities
+              </div>
+              <div className="flex items-center justify-center gap-2">
+                <Target size={16} weight="fill" className="text-[#00ff88]" />
+                Confidence Threshold: 65% minimum (70% for accounts &lt;$500)
+              </div>
+              <div className="flex items-center justify-center gap-2">
+                <Money size={16} weight="fill" className="text-[#00ff88]" />
+                Position Size: 5-20% of balance
+              </div>
               <div className="text-yellow-500/80 mt-3">First trade will appear here automatically</div>
               <div className="text-green-500/60 text-xs mt-2">Add $20+ balance for optimal trading</div>
             </div>
             <div className="mt-6 p-4 bg-neon-blue/5 border border-neon-blue/30 rounded-lg text-left max-w-md mx-auto">
-              <div className="text-xs text-neon-blue font-bold mb-2">💡 WHAT&apos;S LOGGED:</div>
+              <div className="text-xs text-neon-blue font-bold mb-2 flex items-center gap-2">
+                <Lightbulb size={14} weight="fill" />
+                WHAT&apos;S LOGGED:
+              </div>
               <ul className="text-xs text-green-500/60 space-y-1">
                 <li>• Entry/Exit prices & P&L (ROE %)</li>
                 <li>• AI reasoning & confidence scores</li>

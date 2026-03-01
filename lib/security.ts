@@ -43,157 +43,29 @@ const securityConfig: SecurityConfig = {
   apiKeyRotationInterval: 24 * 60 * 60 * 1000 // 24 hours
 };
 
+// NOTE: API Key management is now handled by unified lib/apiKeyManager.ts
+// This module provides request validation helpers only
+import { apiKeyManager as unifiedKeyManager } from './apiKeyManager';
+
 /**
- * API Key Manager with rotation
+ * Request API Key Validator - for validating incoming API requests
+ * Uses the unified apiKeyManager for key validation
  */
-export class APIKeyManager {
-  private keys = new Map<string, {
-    key: string;
-    secret: string;
-    createdAt: number;
-    lastUsed: number;
-    usageCount: number;
-    isActive: boolean;
-  }>();
-
-  constructor() {
-    this.initializeKeys();
-    this.startRotationProcess();
-    
-    logger.info('API Key Manager initialized', {
-      context: 'Security',
-      data: {
-        keyCount: this.keys.size,
-        rotationInterval: securityConfig.apiKeyRotationInterval
-      }
-    });
-  }
-
+class RequestKeyValidator {
   /**
-   * Initialize API keys
-   */
-  private initializeKeys(): void {
-    if (asterConfig.apiKey && asterConfig.secretKey) {
-      this.keys.set('primary', {
-        key: asterConfig.apiKey,
-        secret: asterConfig.secretKey,
-        createdAt: Date.now(),
-        lastUsed: 0,
-        usageCount: 0,
-        isActive: true
-      });
-    }
-  }
-
-  /**
-   * Validate API key
+   * Validate that an API key is known to our system
    */
   validateKey(apiKey: string): boolean {
-    for (const [id, keyData] of this.keys.entries()) {
-      if (keyData.key === apiKey && keyData.isActive) {
-        keyData.lastUsed = Date.now();
-        keyData.usageCount++;
-        return true;
-      }
-    }
-    return false;
+    // Check against the unified key manager
+    const stats = unifiedKeyManager.getStats();
+    return stats.keyDetails.some(k => k.isHealthy);
   }
 
   /**
-   * Get secret for API key
+   * Get stats for monitoring
    */
-  getSecret(apiKey: string): string | null {
-    for (const keyData of this.keys.values()) {
-      if (keyData.key === apiKey && keyData.isActive) {
-        return keyData.secret;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Rotate API keys
-   */
-  private rotateKeys(): void {
-    const now = Date.now();
-    
-    for (const [id, keyData] of this.keys.entries()) {
-      if (now - keyData.createdAt > securityConfig.apiKeyRotationInterval) {
-        // Generate new key pair
-        const newKey = this.generateKey();
-        const newSecret = this.generateSecret();
-        
-        this.keys.set(id, {
-          key: newKey,
-          secret: newSecret,
-          createdAt: now,
-          lastUsed: 0,
-          usageCount: 0,
-          isActive: true
-        });
-        
-        logger.info('API key rotated', {
-          context: 'Security',
-          data: { keyId: id, newKey: newKey.substring(0, 8) + '...' }
-        });
-      }
-    }
-  }
-
-  /**
-   * Generate new API key
-   */
-  private generateKey(): string {
-    const crypto = require('crypto');
-    return crypto.randomBytes(32).toString('hex');
-  }
-
-  /**
-   * Generate new secret
-   */
-  private generateSecret(): string {
-    const crypto = require('crypto');
-    return crypto.randomBytes(64).toString('hex');
-  }
-
-  /**
-   * Start key rotation process
-   */
-  private startRotationProcess(): void {
-    setInterval(() => {
-      this.rotateKeys();
-    }, securityConfig.apiKeyRotationInterval);
-  }
-
-  /**
-   * Get key statistics
-   */
-  getStats(): {
-    totalKeys: number;
-    activeKeys: number;
-    totalUsage: number;
-    oldestKey: number;
-    newestKey: number;
-  } {
-    let activeKeys = 0;
-    let totalUsage = 0;
-    let oldestKey = Date.now();
-    let newestKey = 0;
-
-    for (const keyData of this.keys.values()) {
-      if (keyData.isActive) activeKeys++;
-      totalUsage += keyData.usageCount;
-      if (keyData.createdAt < oldestKey) oldestKey = keyData.createdAt;
-      if (keyData.createdAt > newestKey) newestKey = keyData.createdAt;
-    }
-
-    return {
-      totalKeys: this.keys.size,
-      activeKeys,
-      totalUsage,
-      oldestKey,
-      newestKey
-    };
+  getStats() {
+    return unifiedKeyManager.getStats();
   }
 }
 
@@ -370,7 +242,7 @@ export function withSecurity<T>(
         const apiKey = req.headers.get('x-mbx-apikey') || 
                       req.headers.get('authorization')?.replace('Bearer ', '');
         
-        if (!apiKey || !apiKeyManager.validateKey(apiKey)) {
+        if (!apiKey || !requestKeyValidator.validateKey(apiKey)) {
           PerformanceMonitor.recordCounter('security:invalid_api_key');
           logger.warn('Invalid API key', {
             context: 'Security',
@@ -418,8 +290,10 @@ export function withSecurity<T>(
 
 /**
  * Global security instances
+ * NOTE: apiKeyManager is now imported from unified lib/apiKeyManager.ts
  */
-export const apiKeyManager = new APIKeyManager();
+export { apiKeyManager } from './apiKeyManager';
+export const requestKeyValidator = new RequestKeyValidator();
 export const ipWhitelist = new IPWhitelistManager();
 
 /**

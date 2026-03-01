@@ -1,7 +1,7 @@
 /**
  * OPTIMIZED Agent Prompts for DeepSeek R1
  * Leverages Chain-of-Thought reasoning for superior trading decisions
- * Tailored for 14B parameter model with advanced reasoning capabilities
+ * Tailored for 14B parameter model with advanced reasoning capabilities (optimized for quality and stability)
  */
 
 import { MarketData, AnalystReports, FinalDecision, Portfolio, RiskApprovedTrade } from './agentPrompts';
@@ -86,9 +86,9 @@ DEEP SEEK R1 TECHNICAL ANALYSIS REQUEST
 SYMBOL: ${data.symbol}
 OBJECTIVE: Determine if this is a tradeable setup with institutional edge
 
-══════════════════════════════════════════════════
+==================================================
 PRICE & VOLUME DATA
-══════════════════════════════════════════════════
+==================================================
 Current Price: $${data.price}
 24h Range: ${(data as any).low24h !== undefined && (data as any).high24h !== undefined ? `$${(data as any).low24h} - $${(data as any).high24h}` : (data.low24h !== undefined && data.high24h !== undefined ? `$${data.low24h} - $${data.high24h}` : 'N/A')}
 24h Change: ${data.priceChange24h !== undefined && data.priceChange24h !== null ? `${data.priceChange24h.toFixed(2)}%` : (data.priceChangePercent24h !== undefined && data.priceChangePercent24h !== null ? `${data.priceChangePercent24h.toFixed(2)}%` : 'N/A')}
@@ -105,12 +105,12 @@ ${(data as any).buyVolume !== undefined && (data as any).sellVolume !== undefine
 Buy Volume: ${((data as any).buyVolume || 0).toLocaleString()} (${((data as any).buyVolume / ((data as any).buyVolume + (data as any).sellVolume || 1) * 100).toFixed(1)}% of total)
 Sell Volume: ${((data as any).sellVolume || 0).toLocaleString()} (${((data as any).sellVolume / ((data as any).buyVolume + (data as any).sellVolume || 1) * 100).toFixed(1)}% of total)
 Buy/Sell Ratio: ${((data as any).buySellRatio || 1.0).toFixed(2)}x ${((data as any).buySellRatio || 1.0) > 1.5 ? 'STRONG BUYING PRESSURE (LONG bias)' : ((data as any).buySellRatio || 1.0) < 0.7 ? 'STRONG SELLING PRESSURE (SHORT bias)' : 'NEUTRAL'}
-${((data as any).buySellRatio || 1.0) > 1.5 ? '⚠️ More buyers than sellers = BULLISH momentum' : ((data as any).buySellRatio || 1.0) < 0.7 ? '⚠️ More sellers than buyers = BEARISH momentum (SHORT opportunity)' : 'Balanced order flow'}
+${((data as any).buySellRatio || 1.0) > 1.5 ? '[WARN] More buyers than sellers = BULLISH momentum' : ((data as any).buySellRatio || 1.0) < 0.7 ? '[WARN] More sellers than buyers = BEARISH momentum (SHORT opportunity)' : 'Balanced order flow'}
 ` : 'Buy/sell volume data unavailable - using total volume only'}
 
-══════════════════════════════════════════════════
+==================================================
 LIQUIDITY & EXECUTION QUALITY
-══════════════════════════════════════════════════
+==================================================
 ${(data as any).orderBookDepth ? `
 Bid Liquidity: $${(((data as any).orderBookDepth.bidLiquidity || 0) / 1000).toFixed(1)}K
 Ask Liquidity: $${(((data as any).orderBookDepth.askLiquidity || 0) / 1000).toFixed(1)}K
@@ -122,9 +122,9 @@ Liquidity Score: ${(data as any).orderBookDepth.liquidityScore || 0}/100
 Bid/Ask Spread: ${(data as any).bidAskSpread !== undefined && (data as any).bidAskSpread !== null ? (data as any).bidAskSpread.toFixed(4) : (data.spread !== undefined && data.spread !== null ? data.spread.toFixed(4) : 'N/A')} ${(() => { const spreadValue = (data as any).bidAskSpread !== undefined && (data as any).bidAskSpread !== null ? (data as any).bidAskSpread : (data.spread !== undefined && data.spread !== null ? data.spread : null); return spreadValue !== null && spreadValue !== undefined && data.price && spreadValue < data.price * 0.003 ? 'TIGHT' : 'WIDE'; })()}
 Overall Liquidity: ${data.liquidityScore || 0}/100 ${(data.liquidityScore || 0) > 75 ? 'EXCELLENT' : (data.liquidityScore || 0) > 50 ? 'GOOD' : 'THIN'}
 
-══════════════════════════════════════════════════
+==================================================
 TECHNICAL INDICATORS
-══════════════════════════════════════════════════
+==================================================
 RSI(14): ${(data as any).rsi !== undefined && (data as any).rsi !== null ? (data as any).rsi.toFixed(1) : 'N/A'} ${
   (data as any).rsi !== undefined && (data as any).rsi !== null ? (
     (data as any).rsi > 75 ? 'EXTREMELY OVERBOUGHT' :
@@ -159,9 +159,9 @@ Volatility (ATR%): ${(data as any).volatility !== undefined && (data as any).vol
   ) : ''
 }
 
-══════════════════════════════════════════════════
+==================================================
 MOMENTUM & TREND
-══════════════════════════════════════════════════
+==================================================
 1h Change: ${(data as any).change1h !== undefined && (data as any).change1h !== null ? `${(data as any).change1h.toFixed(2)}%` : 'N/A'} ${(data as any).change1h !== undefined && (data as any).change1h !== null ? ((data as any).change1h > 2 ? 'UP' : (data as any).change1h < -2 ? 'DOWN' : 'FLAT') : ''}
 4h Change: ${(data as any).change4h !== undefined && (data as any).change4h !== null ? `${(data as any).change4h.toFixed(2)}%` : 'N/A'} ${(data as any).change4h !== undefined && (data as any).change4h !== null ? ((data as any).change4h > 5 ? 'UP' : (data as any).change4h < -5 ? 'DOWN' : 'FLAT') : ''}
 24h Change: ${data.priceChange24h !== undefined && data.priceChange24h !== null ? `${data.priceChange24h.toFixed(2)}%` : (data.priceChangePercent24h !== undefined && data.priceChangePercent24h !== null ? `${data.priceChangePercent24h.toFixed(2)}%` : 'N/A')}
@@ -175,9 +175,9 @@ Momentum Score: ${
   ) : 'UNAVAILABLE (missing timeframe data)'
 }
 
-══════════════════════════════════════════════════
+==================================================
 DEEPSEEK R1 ANALYSIS TASK
-══════════════════════════════════════════════════
+==================================================
 
 Use your advanced Chain-of-Thought reasoning to analyze this setup:
 
@@ -275,8 +275,8 @@ ROLE & AUTHORITY:
 - Final decision-maker on all trades
 - Synthesize multi-agent analysis into actionable trades
 - Override individual analysts when macro conditions warrant
-- Balance capital preservation with learning opportunities
-- SYSTEM LEARNING MODE: We need to trade to learn - small, well-managed trades (3% risk, 3:1 R:R) are acceptable for pattern recognition
+- QUALITY OVER QUANTITY: Only approve exceptional opportunities
+- PROFIT FOCUS: Every trade must have positive expected value and clear edge
 
 REASONING FRAMEWORK (DEEPSEEK R1 ENHANCED):
 Use systematic Chain-of-Thought analysis:
@@ -314,57 +314,87 @@ Use systematic Chain-of-Thought analysis:
    - If perfect storm of confirmations → MAXIMUM CONVICTION
 </thinking>
 
-DECISION CRITERIA - MANDATORY TRADING:
-🚀 HIGH CONVICTION (70-100% confidence) → MUST TRADE:
-- Technical Analyst confidence ≥60%
-- Clear price structure (support/resistance identified)
-- Volume confirmation (even if below average)
-- AUTOMATIC BUY or SELL - NO HOLD ALLOWED
+DECISION CRITERIA - DUAL STRATEGY (MICRO + MACRO):
 
-⚡ MODERATE CONVICTION (50-69% confidence) → TRADE (reduced size):
-- Any technical setup with defined stop-loss
-- Risk/reward ≥1.5:1
-- This is our LEARNING ZONE - we trade to learn
-- MUST TRADE with smaller position size
+==================================================
+MICRO TRADES (Quick Profit Scalps) - 55%+ confidence
+==================================================
+- Target: 0.5-1.5% profit in 5-30 minutes
+- Risk/Reward: ≥1.5:1 (lower barrier for quick trades)
+- Stop-loss: Tight 0.5-0.75%
+- Position size: 1-2% of portfolio (smaller, more frequent)
+- Ideal conditions:
+  [OK] Clear short-term momentum (1-5 min charts)
+  [OK] Volume spike (1.5x+ average)
+  [OK] Low spread (<0.1%)
+  [OK] High liquidity score (>70)
+  
+MICRO TRADE TRIGGERS:
+- Momentum burst with volume confirmation
+- Quick bounce/rejection at support/resistance
+- Order flow imbalance (bid/ask ratio > 1.5 or < 0.7)
+- Breakout on high volume (immediate entry)
+- Whale order appearing/disappearing (follow smart money)
 
-📊 LOW CONVICTION (40-49% confidence) → PROBE TRADE:
-- Minimal position (1-2% of balance)
-- Tight stops
-- Trade for data collection and learning
+==================================================
+MACRO TRADES (Swing/Trend Trades) - 70%+ confidence
+==================================================
+- Target: 3-7% profit over hours/days
+- Risk/Reward: ≥2.5:1 (higher barrier for larger risk)
+- Stop-loss: 2-3% with trailing activation at 2%
+- Position size: 2-3% of portfolio
+- Ideal conditions:
+  [OK] Multi-timeframe alignment (1H, 4H, Daily)
+  [OK] Technical + sentiment consensus
+  [OK] Clear trend or range setup
+  [OK] Strong fundamental catalyst
 
-⛔ HOLD - EXTREMELY RARE (only when):
-- Price stuck at mid-range with ZERO momentum
-- No identifiable support/resistance levels
-- Technical confidence below 35%
-- NEVER HOLD if Technical Analyst shows 50%+ confidence!
+[WARN] MODERATE (60-69% confidence) → MICRO TRADE ONLY:
+- Not strong enough for macro but has short-term edge
+- Use micro trade parameters (tight stop, quick target)
+- Maximum 1% position size
 
-🔥 MANDATORY TRADING RULES:
-✅ Technical Analyst 60%+ confidence = ALWAYS TRADE (BUY or SELL)
-✅ Volume spike detected = ALWAYS TRADE in direction of spike
-✅ Price at support/resistance = ALWAYS TRADE the bounce/rejection
-✅ Range-bound market = TRADE boundaries (BUY support, SELL resistance)
-✅ When in doubt with 45%+ confidence = TRADE with smaller size
+[HOLD] HOLD (below 55% confidence) → NO TRADE:
+- Wait for better setup
+- Preserve capital for A+ opportunities
+- Record the setup for ML training but don't trade
 
-❌ NEVER HOLD when:
-- Technical Analyst shows BUY/SELL with 50%+ confidence
-- Clear support/resistance level nearby
-- Volume indicates directional pressure
-- Market showing any trend (up or down)
+MICRO TRADE THRESHOLDS (LOWER BARRIER):
+[OK] Confidence ≥55%
+[OK] Risk/Reward ≥1.5:1
+[OK] Win Probability ≥50%
+[OK] Volume ≥1.2x average
+[OK] Spread <0.1%
+[OK] Immediate momentum confirmation
+
+MACRO TRADE THRESHOLDS (HIGHER BARRIER):
+[OK] Confidence ≥70%
+[OK] Risk/Reward ≥2.5:1
+[OK] Win Probability ≥55%
+[OK] Multi-timeframe agreement ≥60%
+[OK] Expected Value ≥1.5% per trade
+[OK] Clear stop-loss with defined risk
+
+[REJECT] AUTOMATIC REJECTION:
+- Confidence <55% → HOLD (no exceptions)
+- No volume confirmation → HOLD (no conviction)
+- Conflicting major timeframes → HOLD (wait for alignment)
+- No clear invalidation → HOLD (undefined risk)
+- High spread (>0.15%) → HOLD (execution cost too high)
 
 PSYCHOLOGICAL DISCIPLINE:
-- Fear of missing out (FOMO) is the enemy, but paralysis by analysis is also dangerous
-- Patience is profitable, but we must trade to learn - the system learns from every trade
-- When risk/reward is favorable (3:1+) and confidence is reasonable (45%+), TAKE THE TRADE
-- Small, well-managed losses are acceptable for learning - proper stops and position sizing protect capital
-- Capital preservation is achieved through risk management (3% max risk, 3:1 R:R), not by avoiding all trades
-- LEARNING PRINCIPLE: We cannot learn without trading - take calculated risks within strict risk parameters
+- PATIENCE IS PROFITABLE: The best trade is often NO trade
+- FOMO is the enemy: Missing a trade costs nothing, losing capital costs everything
+- QUALITY breeds CONSISTENCY: 10 high-quality trades > 100 mediocre trades
+- EVERY REJECTED TRADE is data: Record why you passed for ML training
+- COMPOUND EDGE: Small consistent wins > occasional big wins with frequent losses
 
 MARKET REGIME AWARENESS:
-- TRENDING UP: BUY pullbacks to support, ride momentum LONG ✅ EXECUTE
-- TRENDING DOWN: SELL rallies to resistance, ride momentum SHORT ✅ EXECUTE
-- MEAN-REVERTING: Fade extremes - BUY oversold dips, SELL overbought rips ✅ EXECUTE
-- VOLATILE: Reduce size, widen stops, take quick profits (both directions) ✅ EXECUTE WITH CAUTION
-- RANGE-BOUND: BUY near support, SELL near resistance - THIS IS PROFITABLE! ✅ EXECUTE (range-bound doesn't mean "don't trade" - it means trade the range!)
+- TRENDING UP: BUY pullbacks to support, ride momentum LONG [EXECUTE]
+- TRENDING DOWN: SELL rallies to resistance, ride momentum SHORT [EXECUTE]
+- MEAN-REVERTING: Fade extremes - BUY oversold dips, SELL overbought rips [EXECUTE]
+- VOLATILE: Reduce size, widen stops, take quick profits (both directions) [EXECUTE WITH CAUTION]
+- RANGE-BOUND: BUY near support, SELL near resistance - THIS IS PROFITABLE! [EXECUTE] (range-bound doesn't mean "don't trade" - it means trade the range!)
 
 CRITICAL MINDSET - NO DIRECTIONAL BIAS:
 - We trade futures - SELL (SHORT) makes money just as fast as BUY (LONG)
@@ -375,14 +405,27 @@ CRITICAL MINDSET - NO DIRECTIONAL BIAS:
 - NO PREFERENCE - only follow the signals and analytics
 - Money flows BOTH ways - capture it ALL
 
-SCALPING MINDSET - FREQUENT PROFITS:
-- Close ANY profitable position when:
-  * Volume spike reverses (whale exiting)
-  * Profit target hit (secure gains immediately)
-  * Better opportunity appears (reallocate capital)
-  * Time-based exit (quick trades = frequent profits)
-- Small wins compound fast - take 0.5-2% profits frequently
-- Don't hold for huge moves - secure profits and re-enter
+PROFIT-FOCUSED EXECUTION:
+
+MICRO TRADE EXITS (AGGRESSIVE):
+- Take profit IMMEDIATELY at 0.5%+ (any profit is good profit)
+- Exit at 1.0% if held >5 minutes (lock in gains)
+- Exit at 1.5% regardless of momentum (secure the bag)
+- If momentum fades while profitable → EXIT NOW
+- If volume spikes against position while profitable → EXIT NOW
+- Never let a micro profit turn into a loss
+
+MACRO TRADE EXITS (PATIENT):
+- Partial exit (25%) at 2.5% profit → secure initial gains
+- Trailing stop activates at 3% profit → let winners run
+- Full exit at 5%+ OR trailing stop hit
+- Time-based: reassess after 24 hours
+
+RISK RULES (BOTH):
+- NEVER move stop-loss against the trade
+- SCALE OUT at multiple targets
+- RECORD all decisions for ML training (both trades and passes)
+- If position is flat after 30 min (micro) or 4 hours (macro) → consider exit
 
 OUTPUT EXCELLENCE:
 - Start with <thinking> tags showing your reasoning
@@ -395,9 +438,9 @@ OUTPUT EXCELLENCE:
     debateTemplate: (reports: AnalystReports) => {
       const reportsWithSymbol = reports as any;
       return `
-╔════════════════════════════════════════════════════╗
+╔==================================================══╗
 ║   CHIEF ANALYST DECISION ROOM - DEEPSEEK R1 POWERED ║
-╚════════════════════════════════════════════════════╝
+╚==================================================══╝
 
 SYMBOL: ${reportsWithSymbol.symbol || 'N/A'}
 CURRENT PRICE: $${reportsWithSymbol.currentPrice || 'N/A'}
@@ -418,10 +461,10 @@ ${(reports.technical as any).marketData?.multiTimeframe ? `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MULTI-TIMEFRAME ANALYSIS (CRITICAL FOR DECISION)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 TIMEFRAME CONFLUENCE: ${(reports.technical as any).marketData.multiTimeframe.bullishTimeframes}/${(reports.technical as any).marketData.multiTimeframe.totalTimeframes} bullish, ${(reports.technical as any).marketData.multiTimeframe.bearishTimeframes}/${(reports.technical as any).marketData.multiTimeframe.totalTimeframes} bearish
+TIMEFRAME CONFLUENCE: ${(reports.technical as any).marketData.multiTimeframe.bullishTimeframes}/${(reports.technical as any).marketData.multiTimeframe.totalTimeframes} bullish, ${(reports.technical as any).marketData.multiTimeframe.bearishTimeframes}/${(reports.technical as any).marketData.multiTimeframe.totalTimeframes} bearish
 
 ${Object.entries((reports.technical as any).marketData.multiTimeframe.timeframes || {}).map(([tf, analysis]: [string, any]) => {
-  const trend = analysis.trend === 'BULLISH' ? '🟢 BULLISH' : analysis.trend === 'BEARISH' ? '🔴 BEARISH' : '⚪ NEUTRAL';
+  const trend = analysis.trend === 'BULLISH' ? '[BULLISH]' : analysis.trend === 'BEARISH' ? '[BEARISH]' : '[NEUTRAL]';
   const momentumDir = analysis.momentum > 0 ? '+' : '';
   return `  ${tf.padEnd(4)}: ${trend} | Score: ${analysis.score.toFixed(1)} | Momentum: ${momentumDir}${analysis.momentum.toFixed(2)}% | RSI: ${analysis.rsi?.toFixed(1) || 'N/A'} | Signals: ${analysis.signals.slice(0, 3).join(', ') || 'None'}`;
 }).join('\n')}
@@ -435,7 +478,7 @@ CRITICAL RULES:
 - Higher timeframes (1h, 4h) override lower timeframes for direction
 - Lower timeframes (1m, 5m) provide entry timing
 - Mixed timeframes = WAIT for clarity or trade dominant higher timeframe
-` : '⚠️ Multi-timeframe analysis not available'}
+` : '[WARN] Multi-timeframe analysis not available'}
 
 RISK FACTORS: ${(reports.technical as any)?.risks?.join(', ') || 'None'}
 TIME HORIZON: ${(reports.technical as any)?.timeframe || 'Not specified'}
@@ -641,26 +684,26 @@ Use <thinking> tags to show your risk assessment process:
 
 STRICT RISK RULES (OPTIMIZED FOR QUIET MARKETS - REALISTIC THRESHOLDS):
 1. MINIMUM BALANCE: Never trade with less than $5 or 5% of total balance
-2. CONFIDENCE THRESHOLD: Require 40%+ confidence minimum (ALIGNED with Agent Runner filtering at 35%)
-   - Accounts <$100: Require 40%+ confidence (tiered sizing compensates)
-   - Accounts $100-$200: Require 40%+ confidence  
-   - Accounts $200-$500: Require 40%+ confidence
-   - Accounts $500-$2000: Require 40%+ confidence
-   - Accounts >$2000: Require 40%+ confidence
-   - NOTE: 40% threshold aligns with Agent Runner filtering (35%+) while remaining conservative. Quality filters (score >=35, volume, liquidity) still provide protection.
+2. CONFIDENCE THRESHOLD: Require 70%+ confidence minimum (TIGHTENED for quality trades only)
+   - Accounts <$100: Require 70%+ confidence (only perfect setups)
+   - Accounts $100-$200: Require 70%+ confidence  
+   - Accounts $200-$500: Require 70%+ confidence
+   - Accounts $500-$2000: Require 70%+ confidence
+   - Accounts >$2000: Require 70%+ confidence
+   - NOTE: 70% threshold ensures only high-quality setups are traded. Quality over quantity - better to skip marginal trades.
 3. RESPECT AI DECISIONS BUT UNDERSTAND CONTEXT:
    - If Chief Analyst says HOLD with <40% confidence: We HOLD (truly unclear)
    - If Chief Analyst says BUY/SELL with 45-60% confidence in RANGE-BOUND market: 
      This is ACCEPTABLE - range trades are predictable at boundaries
    - Only veto if the trade clearly violates risk rules
-4. POSITION SIZING (ULTRA CONSERVATIVE FOR $100 ACCOUNTS):
-   - Accounts <$100: Risk 2-3% of balance per trade MAXIMUM (ULTRA CONSERVATIVE)
-   - Accounts $100-$200: Risk 2-5% of balance per trade MAXIMUM
-   - Accounts $200-$500: Risk 3-8% of balance per trade
-   - Accounts $500-$2000: Risk 5-12% of balance per trade
-   - Accounts >$2000: Risk 5-15% of balance per trade
-   - NEVER risk more than 3% per trade if account <$100
-   - NEVER risk more than 5% per trade if account <$500
+4. POSITION SIZING (TIGHTENED - ULTRA CONSERVATIVE):
+   - Accounts <$100: Risk 1-2% of balance per trade MAXIMUM (TIGHTENED from 2-3%)
+   - Accounts $100-$200: Risk 1.5-3% of balance per trade MAXIMUM (TIGHTENED from 2-5%)
+   - Accounts $200-$500: Risk 2-5% of balance per trade (TIGHTENED from 3-8%)
+   - Accounts $500-$2000: Risk 3-8% of balance per trade (TIGHTENED from 5-12%)
+   - Accounts >$2000: Risk 3-10% of balance per trade (TIGHTENED from 5-15%)
+   - NEVER risk more than 2% per trade if account <$100 (TIGHTENED from 3%)
+   - NEVER risk more than 3% per trade if account <$500 (TIGHTENED from 5%)
 5. LEVERAGE CAP (ZERO LEVERAGE FOR MICRO ACCOUNTS):
    - MAXIMIZE LEVERAGE based on confidence and symbol limits
    - Small accounts NEED leverage to grow - use 50-100% of symbol's max leverage
@@ -670,12 +713,12 @@ STRICT RISK RULES (OPTIMIZED FOR QUIET MARKETS - REALISTIC THRESHOLDS):
    - Check exchange for each symbol's max leverage (varies by coin: 10x-125x)
    - With proper stops, leverage amplifies gains - maximize responsibly
 6. STOP-LOSS MANDATORY: Every trade MUST have a stop-loss (ATR-based, minimum 4% for volatility)
-7. RISK/REWARD MINIMUM: RELAXED for learning phase (system must trade to learn!)
-   - Accounts <$100: Minimum 2:1 R:R (we trade to learn - capital protected by small position sizes)
-   - Accounts $100-$200: Minimum 2:1 R:R 
-   - Accounts $200-$500: Minimum 1.5:1 R:R
-   - Accounts >$500: Minimum 1.5:1 R:R
-   - IMPORTANT: Position sizing (2-3% risk) protects capital, NOT high R:R requirements!
+7. RISK/REWARD MINIMUM: TIGHTENED for quality trades only
+   - Accounts <$100: Minimum 3:1 R:R (TIGHTENED from 2:1 - only high-quality setups)
+   - Accounts $100-$200: Minimum 3:1 R:R (TIGHTENED from 2:1)
+   - Accounts $200-$500: Minimum 2.5:1 R:R (TIGHTENED from 1.5:1)
+   - Accounts >$500: Minimum 2.5:1 R:R (TIGHTENED from 1.5:1)
+   - IMPORTANT: Tighter R:R requirements ensure only asymmetric risk/reward trades are taken!
 8. KELLY CRITERION: Use 15% fractional Kelly (ultra-conservative - avoid over-betting)
 9. MAX CONCURRENT POSITIONS: Maximum 1 position for accounts <$100, 2 for larger accounts
 10. MAX PORTFOLIO RISK: Never risk more than 5% of total account for <$100, 10% for larger accounts
@@ -690,14 +733,14 @@ POSITION SIZING FORMULA (Kelly Criterion - ULTRA CONSERVATIVE FOR $100 ACCOUNTS)
 Kelly % = (Win% × AvgWin - Loss% × AvgLoss) / AvgWin
 Ultra-Conservative: Use 15% of full Kelly (ultra-fractional Kelly for micro accounts)
 Confidence Adjustment: Multiply by (0.2 + confidence × 0.3) for micro accounts
-Account Size Adjustment:
-  - Accounts <$100: Final Range: 2-3% of available balance (ULTRA CONSERVATIVE)
-  - Accounts $100-$200: Final Range: 2-5% of available balance
-  - Accounts $200-$500: Final Range: 3-8% of available balance
-  - Accounts $500-$2000: Final Range: 5-12% of available balance
-  - Accounts >$2000: Final Range: 5-15% of available balance
-CRITICAL: Never risk more than 3% per trade if account <$100
-CRITICAL: Never risk more than 5% per trade if account <$500
+Account Size Adjustment (TIGHTENED):
+  - Accounts <$100: Final Range: 1-2% of available balance (TIGHTENED from 2-3%)
+  - Accounts $100-$200: Final Range: 1.5-3% of available balance (TIGHTENED from 2-5%)
+  - Accounts $200-$500: Final Range: 2-5% of available balance (TIGHTENED from 3-8%)
+  - Accounts $500-$2000: Final Range: 3-8% of available balance (TIGHTENED from 5-12%)
+  - Accounts >$2000: Final Range: 3-10% of available balance (TIGHTENED from 5-15%)
+CRITICAL: Never risk more than 2% per trade if account <$100 (TIGHTENED from 3%)
+CRITICAL: Never risk more than 3% per trade if account <$500 (TIGHTENED from 5%)
 
 LEVERAGE GUIDELINES (ZERO LEVERAGE FOR MICRO ACCOUNTS):
 LEVERAGE STRATEGY: MAXIMIZE for small account growth
@@ -721,44 +764,56 @@ STOP-LOSS CALCULATION (ATR-Based - WIDER FOR VOLATILITY):
 - High Volatility (>20%): Minimum 5% stop-loss
 - NEVER set stop-loss tighter than 4% for accounts <$500
 
-TAKE-PROFIT CALCULATION (RELAXED for learning phase):
-- Base R:R: 2.0:1 (minimum acceptable - we must trade to learn!)
-- Accounts <$100: Require minimum 2:1 R:R (small positions = safe learning)
-- Accounts $100-$500: Require minimum 2:1 R:R
-- Accounts >$500: Require minimum 1.5:1 R:R
-- High confidence bonus (≥75%): Add 0.5 (target 2.5:1)
+TAKE-PROFIT CALCULATION (TIGHTENED for quality):
+- Base R:R: 3.0:1 (TIGHTENED - minimum acceptable for quality trades)
+- Accounts <$100: Require minimum 3:1 R:R (TIGHTENED from 2:1)
+- Accounts $100-$500: Require minimum 3:1 R:R (TIGHTENED from 2:1)
+- Accounts >$500: Require minimum 2.5:1 R:R (TIGHTENED from 1.5:1)
+- High confidence bonus (≥75%): Add 0.5 (target 3.5:1)
 - Take Profit % = Stop Loss % × Risk/Reward Ratio
-- Example: 4% stop-loss × 2:1 R:R = 8% take-profit target
-- IMPORTANT: Don't reject trades just because R:R isn't perfect - approve with calculated levels!
+- Example: 4% stop-loss × 3:1 R:R = 12% take-profit target
+- IMPORTANT: Only approve trades with asymmetric risk/reward (3:1+ for small accounts)!
 
 OUTPUT FORMAT (JSON):
 {
   "approved": true/false,
   "action": "BUY" | "SELL" | "HOLD",
-  "positionSize": <number of units>,
+  "positionSize": <number of units - REQUIRED if approved=true, must be > 0>,
   "leverage": <suggest 15x default, system will optimize per symbol based on confidence>,
-  "stopLoss": <price level>,
-  "takeProfit": <price level>,
-  "riskPercentage": <2-5 for accounts <$200, 3-8 for $200-$500>,
+  "stopLoss": <price level - REQUIRED if approved=true>,
+  "takeProfit": <price level - REQUIRED if approved=true>,
+  "riskPercentage": <2-5 for accounts <$200, 3-8 for $200-$500 - REQUIRED if approved=true>,
   "expectedRisk": <stop loss %>,
   "expectedReward": <take profit %>,
-  "riskRewardRatio": <reward/risk ratio - minimum 3:1 for small accounts>,
+  "riskRewardRatio": <reward/risk ratio - minimum 3:1 for small accounts - REQUIRED if approved=true>,
   "maxConcurrentPositions": <1-2 maximum>,
   "reasoning": "<detailed explanation of decision, including account size considerations>"
 }
 
-REJECTION REASONS (VERY LIMITED - we must trade to learn!):
+CRITICAL: If approved=true, you MUST provide:
+- positionSize: A positive number > 0 (calculate from riskPercentage and stopLoss if needed)
+- stopLoss: A valid price level > 0
+- takeProfit: A valid price level > 0
+- riskPercentage: A number between 1-10
+- riskRewardRatio: A number >= 2.5 (minimum for quality trades)
+
+If approved=false, you can omit positionSize, stopLoss, and takeProfit, but must provide reasoning.
+
+REJECTION REASONS (TIGHTENED - Quality over Quantity):
 1. "Insufficient balance: $X < $5 minimum"
-2. "Confidence X% below 40% threshold"
-3. ONLY reject HOLD if Chief Analyst explicitly said HOLD with <45% confidence
+2. "Confidence X% below 70% threshold" (TIGHTENED from 40%)
+3. "Risk/Reward ratio X:1 below 3:1 minimum" (TIGHTENED from 2:1)
+4. "Position size would exceed 2% risk limit" (TIGHTENED from 3%)
+5. ONLY reject HOLD if Chief Analyst explicitly said HOLD with <70% confidence
 
-⚠️ DO NOT REJECT for these reasons - APPROVE with proper risk management:
-- R:R not perfect → APPROVE with 2:1 calculated levels
-- Volatility high → APPROVE with wider stops and smaller position
-- Volume low → APPROVE with smaller position size
-- Liquidity low → APPROVE with limit orders
+[REJECT] REJECT trades that don't meet quality standards:
+- R:R below 3:1 → REJECT (TIGHTENED - need asymmetric risk/reward)
+- Confidence below 70% → REJECT (TIGHTENED - only high-quality setups)
+- Volatility too high with tight stops → REJECT (risk management)
+- Volume too low → REJECT (execution risk)
+- Liquidity too low → REJECT (slippage risk)
 
-APPROVE MOST TRADES! The system learns from trading. Rejection should be RARE.
+QUALITY OVER QUANTITY! Better to skip marginal trades than take losses.
 15. "Spread too wide (>0.5%) - can't exit positions properly"
 16. "Order book liquidity too low (<0.3) - slippage risk"
 
@@ -785,6 +840,7 @@ You are the FINAL CHECKPOINT. If anything feels off—balance too low, confidenc
       chiefDecision: any;
       lessonsLearned?: any;
       dynamicConfig?: any;
+      liquidationInsights?: any;
     }) => `Perform a comprehensive risk assessment for this trading opportunity.
 
 SYMBOL: ${data.symbol}
@@ -841,6 +897,18 @@ ${data.dynamicConfig ? `RL-OPTIMIZED PARAMETERS (Learned from ${data.dynamicConf
 
 USE RL PARAMETERS: These parameters were learned from your trading history. Use them as guidance, but still apply your risk management judgment.` : ''}
 
+${data.liquidationInsights ? `LIQUIDATION HISTORY (Learn from Past Mistakes):
+- Total Liquidations (Last 30 Days): ${data.liquidationInsights.totalLiquidations || 0}
+- Affected Symbols: ${data.liquidationInsights.symbols?.join(', ') || 'None'}
+${data.liquidationInsights.warning ? `- [WARN] WARNING: ${data.liquidationInsights.warning}` : ''}
+${data.liquidationInsights.recentLiquidations?.length > 0 ? `
+- Recent Liquidations:
+${data.liquidationInsights.recentLiquidations.slice(0, 3).map((liq: any) => `  * ${liq.symbol} ${liq.side} @ $${liq.price} (${new Date(liq.time).toLocaleDateString()})`).join('\n')}
+` : ''}
+- ACTION: If this symbol (${data.symbol}) has recent liquidations, reduce leverage or position size by 50%
+- ACTION: If liquidation count >= 3, be extra conservative with risk management
+- ACTION: Avoid repeating the same mistakes that led to liquidations` : 'No liquidation history available'}
+
 TASK:
 Using DeepSeek R1 Chain-of-Thought reasoning, perform a complete risk assessment:
 
@@ -850,7 +918,7 @@ ${data.availableBalance < 200 ? 'CRITICAL: Account <$200 - EXTREME CONSERVATISM 
 ${data.availableBalance < 500 ? 'WARNING: Account <$500 - NO LEVERAGE ALLOWED, MAX 5% RISK PER TRADE' : ''}
 
 1. BALANCE CHECK: Is $${data.availableBalance.toFixed(2)} sufficient? (minimum $5 or 5% of balance)
-2. CONFIDENCE CHECK: Is ${((data.chiefDecision?.confidence || 0) * 100).toFixed(1)}% ≥ 40% threshold? (ALIGNED with Agent Runner filtering at 35%)
+2. CONFIDENCE CHECK: Is ${((data.chiefDecision?.confidence || 0) * 100).toFixed(1)}% ≥ 70% threshold? (TIGHTENED - only high-quality setups)
 3. VETO CHECK: Did Chief Analyst say HOLD? (must respect)
 4. QUALITY FILTERS: 
    - Volume >2x average? (${data.marketData?.volume24h || 'N/A'} vs average)
@@ -859,10 +927,10 @@ ${data.availableBalance < 500 ? 'WARNING: Account <$500 - NO LEVERAGE ALLOWED, M
    - Spread <0.5%? (${data.marketData?.spread || 'N/A'}%)
    - Market regime favorable? (trending/mean-reverting, NOT volatile/chop)
    - CRITICAL: Reject coins with low liquidity/wide spreads (like COSMO/APE - execution problems)
-5. POSITION SIZING: Calculate Kelly Criterion-based size (${data.availableBalance < 100 ? '2-3%' : data.availableBalance < 200 ? '2-5%' : data.availableBalance < 500 ? '3-8%' : '5-12%'} range for this account size)
+5. POSITION SIZING: Calculate Kelly Criterion-based size (${data.availableBalance < 100 ? '1-2%' : data.availableBalance < 200 ? '1.5-3%' : data.availableBalance < 500 ? '2-5%' : '3-8%'} range for this account size - TIGHTENED)
 6. LEVERAGE: Suggest 15x default (system will optimize per symbol based on confidence and exchange limits - MAXIMIZE for growth)
 7. STOP-LOSS: Calculate ATR-based stop (minimum 4% for small accounts, volatility-adjusted)
-8. TAKE-PROFIT: Calculate target (minimum ${data.availableBalance < 100 ? '4:1' : data.availableBalance < 200 ? '3.5:1' : data.availableBalance < 500 ? '3:1' : '2.5:1'} R:R required - HIGHER for smaller accounts)
+8. TAKE-PROFIT: Calculate target (minimum ${data.availableBalance < 100 ? '3:1' : data.availableBalance < 200 ? '3:1' : data.availableBalance < 500 ? '3:1' : '2.5:1'} R:R required - TIGHTENED for quality)
 9. CONCURRENT POSITIONS: Check if adding this would exceed ${data.availableBalance < 100 ? '1' : '1-2'} max positions
 10. PORTFOLIO RISK: Ensure total risk across all positions <${data.availableBalance < 100 ? '5%' : '10%'} of account
 11. FINAL DECISION: APPROVE or REJECT? (Only approve if ALL conditions met - BE EXTREMELY SELECTIVE)

@@ -68,38 +68,7 @@ export function StartupInitializer() {
     return () => clearTimeout(timer);
   }, []);
 
-  // PROFESSIONAL: Show subtle loading indicator during initialization
-  if (status === 'initializing') {
-    return (
-      <div className="fixed top-4 right-4 z-50 bg-black/90 border border-green-400/30 rounded-lg px-4 py-2 shadow-lg backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse"></div>
-          <span className="text-xs text-green-400 font-mono uppercase tracking-wider">
-            Initializing Services...
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === 'error') {
-    return (
-      <div className="fixed top-4 right-4 z-50 bg-black/90 border border-red-400/30 rounded-lg px-4 py-2 shadow-lg backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 rounded-full bg-red-400"></div>
-          <span className="text-xs text-red-400 font-mono uppercase tracking-wider">
-            Initialization Failed
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // Success state - hide after 2 seconds
-  if (status === 'success' && initialized) {
-    return null;
-  }
-
+  // Component runs silently in background - no UI indicators
   return null;
 }
 

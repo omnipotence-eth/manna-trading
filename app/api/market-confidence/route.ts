@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
-import { marketScannerService } from '@/services/marketScannerService';
+import { marketScannerService } from '@/services/trading/marketScannerService';
 
 /**
  * Market Confidence Analysis API
@@ -8,7 +8,7 @@ import { marketScannerService } from '@/services/marketScannerService';
  */
 export async function GET(request: NextRequest) {
   try {
-    logger.info('📊 Running market confidence analysis', {
+    logger.info('[ANALYSIS] Running market confidence analysis', {
       context: 'MarketConfidenceAnalysis'
     });
 
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     
     // Get all symbols analyzed (including those that didn't become opportunities)
     // We need to check the internal scanner state or re-analyze with relaxed filters
-    const { asterDexService } = await import('@/services/asterDexService');
+    const { asterDexService } = await import('@/services/exchange/asterDexService');
     const exchangeInfo = await asterDexService.getExchangeInfo();
     const allSymbols = exchangeInfo.topSymbolsByVolume || exchangeInfo.symbols || [];
     
@@ -132,14 +132,14 @@ export async function GET(request: NextRequest) {
             ? Math.max(55, Math.round(avgConfidence * 100) - 10)
             : 55,
           note: avgConfidence === 0
-            ? '⚠️ No opportunities found - current filters may be too strict. Consider lowering confidence threshold to 55-60%'
+            ? '[WARN] No opportunities found - current filters may be too strict. Consider lowering confidence threshold to 55-60%'
             : avgConfidence > 0.7 
-            ? '✅ Market confidence is high - can use 70%+ threshold'
+            ? '[OK] Market confidence is high - can use 70%+ threshold'
             : avgConfidence > 0.6
-            ? '✅ Market confidence is moderate - use 60-65% threshold'
+            ? '[OK] Market confidence is moderate - use 60-65% threshold'
             : avgConfidence > 0.5
-            ? '⚠️ Market confidence is low-moderate - use 55-60% threshold with quality filters'
-            : '⚠️ Market confidence is low - use 55% threshold with very tight quality filters'
+            ? '[WARN] Market confidence is low-moderate - use 55-60% threshold with quality filters'
+            : '[WARN] Market confidence is low - use 55% threshold with very tight quality filters'
         }
       }
     });
@@ -154,4 +154,5 @@ export async function GET(request: NextRequest) {
     }, { status: 500 });
   }
 }
+
 

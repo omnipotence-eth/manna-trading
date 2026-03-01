@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
         [cutoffTime]
       );
 
-      logger.info(`🗑️ Deleted old model messages`, {
+      logger.info(`[CLEANUP] Deleted old model messages`, {
         context: 'ModelMessageAPI',
         data: { cutoffTime, deleted: result.rowCount || 0 }
       });
@@ -57,12 +57,12 @@ export async function POST(request: NextRequest) {
       message: 'Model message added',
       messageId: message.id,
     });
-  } catch (error: any) {
+  } catch (error) {
     logger.error('Failed to add model message', error, { context: 'ModelMessageAPI' });
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Unknown error',
+        error: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
     );
@@ -91,7 +91,15 @@ export async function GET(request: NextRequest) {
       [cutoffTime, limit]
     );
 
-    const messages = result.rows.map((row: any) => ({
+    interface MessageRow {
+      id: string;
+      model: string;
+      message: string;
+      timestamp: Date | string;
+      type: string;
+    }
+
+    const messages = result.rows.map((row: MessageRow) => ({
       id: row.id,
       model: row.model,
       message: row.message,

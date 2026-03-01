@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { logger } from '@/lib/logger';
+import { Warning } from 'phosphor-react';
 
 interface Props {
   children: React.ReactNode;
@@ -66,7 +67,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <div className="min-h-screen flex items-center justify-center bg-black p-4">
           <div className="glass-effect p-8 rounded-lg max-w-2xl w-full">
             <div className="flex items-center gap-3 mb-4">
-              <div className="text-3xl">⚠️</div>
+              <Warning size={32} weight="fill" className="text-red-500" />
               <h2 className="text-red-500 text-2xl font-bold">
                 Something went wrong
               </h2>
