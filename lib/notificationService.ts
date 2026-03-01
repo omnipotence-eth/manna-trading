@@ -1,6 +1,6 @@
 /**
- * Trade notifications via Discord webhook or generic webhook
- * Set DISCORD_WEBHOOK_URL or NOTIFICATION_WEBHOOK_URL in env to enable
+ * Trade notifications via Discord webhook, Telegram, or generic webhook
+ * Set DISCORD_WEBHOOK_URL, TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID, or NOTIFICATION_WEBHOOK_URL in env to enable
  */
 
 import { logger } from '@/lib/logger';
@@ -8,6 +8,8 @@ import { logger } from '@/lib/logger';
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK_URL || '';
 const GENERIC_WEBHOOK = process.env.NOTIFICATION_WEBHOOK_URL || '';
 const WEBHOOK = DISCORD_WEBHOOK || GENERIC_WEBHOOK;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
 export type TradeEvent = 'opened' | 'closed';
 
@@ -27,7 +29,36 @@ export interface TradeNotificationPayload {
 }
 
 function isConfigured(): boolean {
-  return !!WEBHOOK;
+  return !!WEBHOOK || (!!TELEGRAM_BOT_TOKEN && !!TELEGRAM_CHAT_ID);
+}
+
+function isTelegramConfigured(): boolean {
+  return !!TELEGRAM_BOT_TOKEN && !!TELEGRAM_CHAT_ID;
+}
+
+/**
+ * Send a plain text message to Telegram (for daily report or custom alerts).
+ */
+export async function sendTelegramMessage(text: string): Promise<void> {
+  if (!isTelegramConfigured()) return;
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text,
+        disable_web_page_preview: true,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      logger.warn('Telegram sendMessage failed', { context: 'NotificationService', status: res.status, err });
+    }
+  } catch (e) {
+    logger.warn('Telegram request failed', { context: 'NotificationService', error: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 /**
@@ -71,7 +102,10 @@ export async function sendTradeNotification(payload: TradeNotificationPayload): 
     } catch (e) {
       logger.warn('Discord webhook failed', { context: 'NotificationService', error: e instanceof Error ? e.message : String(e) });
     }
-    return;
+  }
+
+  if (isTelegramConfigured()) {
+    await sendTelegramMessage(msg);
   }
 
   if (GENERIC_WEBHOOK) {
@@ -87,4 +121,4 @@ export async function sendTradeNotification(payload: TradeNotificationPayload): 
   }
 }
 
-export const notificationService = { sendTradeNotification, isConfigured };
+export const notificationService = { sendTradeNotification, sendTelegramMessage, isConfigured };

@@ -154,7 +154,8 @@ Workflow state: `PENDING` → `RUNNING` → `COMPLETED` or `FAILED`. Steps can r
 
 Core persistence is PostgreSQL (Supabase). Main concepts:
 
-- **trades** — Closed trade history (symbol, side, sizes, prices, PnL, entry/exit metadata).
+- **trades** — Closed trade history (symbol, side, sizes, prices, PnL, entry/exit metadata). Optional **source** column (`simulation` | `live`) for paper vs live.
+- **audit_events** — Audit trail: agent/runner/execution events (type, source, payload JSON). Used for “why no trade”, circuit breaker, and opportunity counts.
 - **open_positions** — Current positions (entry, size, leverage, stop-loss, take-profit, trailing stop, PnL).
 - **closed_positions** — Archived closed positions.
 - **ml_training_data** — Features and outcomes for ML training.
@@ -197,6 +198,38 @@ Typical TTL guidance: ticker/prices short (e.g. 1–5 s), order book very short,
 - **API keys**: Stored and used only on the server; never sent to the client.
 - **Database**: Credentials in environment variables; production uses SSL; queries are parameterized.
 - **Client**: No secrets in client state; API routes validate inputs; CORS is configured for the production domain.
+- **Public API**: Optional `PUBLIC_API_KEY` env; when set, `/api/public/*` (and optionally other endpoints) require `X-API-Key` or `Authorization: Bearer` and are rate-limited (e.g. 60 req/min per key) via `lib/publicApiRateLimit.ts`.
+
+---
+
+## Health, Diagnostics, and Status
+
+- **GET /api/health** — Full health check (services, config, circuit breakers).
+- **GET /api/health/ready** — Readiness: `ready` boolean, `missing[]`, `warnings[]`, and checks for Aster, LLM, and database. Safe to call before app is fully configured.
+- **GET /api/diagnostics/why-no-trades** — Runner status, last cycle diagnostic (opportunities filtered, circuit breaker, thresholds), and strategy summary. Surfaces “why no trade” in the dashboard (Info tab).
+- **GET /api/audit-events** — Recent audit events (no_opportunities, opportunities_found, circuit_breaker_triggered, etc.) from the runner and execution layer.
+- **Status page** — `/status` renders a simple UI that calls `/api/health/ready` and `/api/health` and displays readiness, checks, missing, warnings, and links to APIs.
+
+---
+
+## Notifications and Cron
+
+- **Notifications**: Trade open/close events can be sent to **Discord** (`DISCORD_WEBHOOK_URL`), **Telegram** (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`), or a generic webhook (`NOTIFICATION_WEBHOOK_URL`) via `lib/notificationService.ts`.
+- **Daily report**: **GET /api/cron/daily-report** (cron-authorized) sends a short daily summary (today’s trades, PnL, account value) to Telegram and optionally Discord. Vercel cron can invoke it (e.g. 20:00 UTC).
+- **Trading cycle cron**: **GET /api/cron/trading-cycle** runs one agent cycle (for serverless/cron). Protected by `CRON_SECRET` when set.
+
+---
+
+## Paper Trading and Presets
+
+- **Paper vs live**: Trades are tagged with **source** (`simulation` | `live`) from config at write time. Export supports `?source=simulation|live` and includes `source` in CSV/tax/audit.
+- **Paper presets**: When `TRADING_SIMULATION_MODE=true` and **PAPER_PRESET** is set (`conservative` | `balanced` | `aggressive`), **effectiveTradingConfig** in `lib/configService.ts` merges preset overrides (e.g. confidence, min score, stop loss, max positions, daily loss). Runner and diagnostics use this effective config.
+
+---
+
+## Backtest
+
+- **GET /api/backtest** — Fetches historical klines from Aster DEX, runs RSI/trend scoring over a sliding window, and returns per-bar scores and summary (avg/max/min score, bullish/bearish counts). Query params: `symbol`, `interval`, `limit`.
 
 ---
 

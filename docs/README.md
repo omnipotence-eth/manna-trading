@@ -15,15 +15,15 @@
 
 ### Core documentation
 
+- **[SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md)** — Technical architecture (services, data flow, DB schema, health/diagnostics, audit, paper presets, backtest)
+- **[API_DOCUMENTATION.md](./API_DOCUMENTATION.md)** — API reference (core, health/ready, diagnostics/why-no-trades, export with source filter, audit-events, public/quote, backtest)
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — Architecture overview
 - **[MASTER_GUIDE.md](./MASTER_GUIDE.md)** — Complete system guide
-- **[SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md)** — Technical architecture
-- **[API_DOCUMENTATION.md](./API_DOCUMENTATION.md)** — API reference
 - **[MATHEMATICAL_FOUNDATIONS.md](./MATHEMATICAL_FOUNDATIONS.md)** — Trading algorithms
 
 ### Export & reporting
 
-- **[TAX_EXPORT.md](./TAX_EXPORT.md)** — Tax and audit CSV export (`/api/export?format=tax|audit`)
+- **[TAX_EXPORT.md](./TAX_EXPORT.md)** — Tax and audit CSV export (`/api/export?format=tax|audit`); supports `source=simulation|live`
 
 ### Deployment & operations
 
@@ -45,6 +45,7 @@
 | New users | [START_HERE.md](../START_HERE.md) → [QUICK_START.md](./QUICK_START.md) → [ARCHITECTURE.md](./ARCHITECTURE.md) |
 | Developers | [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md), [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) |
 | Operations | [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md) |
+| Status / health | App route `/status`; APIs: `/api/health/ready`, `/api/health`, `/api/diagnostics/why-no-trades` |
 
 ---
 

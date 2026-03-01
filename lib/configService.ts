@@ -163,6 +163,44 @@ export const asterConfig = {
   }
 };
 
+/** Paper trading presets (apply when TRADING_SIMULATION_MODE=true and PAPER_PRESET is set) */
+const PAPER_PRESET = (getEnvVar('PAPER_PRESET', '')).toLowerCase();
+type TradingConfig = typeof asterConfig.trading;
+const PRESET_OVERRIDES: Record<string, Partial<TradingConfig>> = {
+  conservative: {
+    confidenceThreshold: 0.80,
+    minOpportunityScore: 65,
+    stopLossPercent: 2.0,
+    maxConcurrentPositions: 1,
+    maxConcurrentWorkflows: 1,
+    maxDailyLossPercent: 5,
+    takeProfitPercent: 5.0,
+  },
+  balanced: {}, // use env/defaults
+  aggressive: {
+    confidenceThreshold: 0.60,
+    minOpportunityScore: 40,
+    stopLossPercent: 4.0,
+    maxConcurrentPositions: 3,
+    maxConcurrentWorkflows: 3,
+    maxDailyLossPercent: 15,
+    takeProfitPercent: 10.0,
+  },
+};
+
+/**
+ * Effective trading config: when in simulation mode and PAPER_PRESET is set (conservative|balanced|aggressive),
+ * returns merged config with preset overrides; otherwise returns asterConfig.trading.
+ */
+export const effectiveTradingConfig: TradingConfig =
+  asterConfig.trading.simulationMode &&
+  PAPER_PRESET &&
+  PRESET_OVERRIDES[PAPER_PRESET] != null
+    ? { ...asterConfig.trading, ...PRESET_OVERRIDES[PAPER_PRESET] }
+    : asterConfig.trading;
+
+export const paperPreset = PAPER_PRESET && PRESET_OVERRIDES[PAPER_PRESET] != null ? PAPER_PRESET : null;
+
 /**
  * AI Model Configuration (DeepSeek R1)
  */

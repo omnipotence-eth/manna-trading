@@ -10,9 +10,12 @@ Complete reference for all REST API endpoints.
 
 - [Authentication](#authentication)
 - [Core Endpoints](#core-endpoints)
+- [Health & Diagnostics](#health--diagnostics)
 - [Trading Endpoints](#trading-endpoints)
+- [Export & Audit](#export--audit)
 - [Market Data Endpoints](#market-data-endpoints)
 - [AI/ML Endpoints](#aiml-endpoints)
+- [Public API & Backtest](#public-api--backtest)
 - [WebSocket Streams](#websocket-streams)
 - [Error Handling](#error-handling)
 
@@ -162,6 +165,99 @@ Detailed health status with metrics.
 
 ---
 
+## 🏥 Health & Diagnostics
+
+### GET /api/health/ready
+
+Readiness check: env and critical services. Returns `ready`, `missing[]`, `warnings[]`, and per-check status. Safe when config is incomplete.
+
+**Response:**
+```json
+{
+  "ready": true,
+  "timestamp": "2025-02-28T12:00:00.000Z",
+  "missing": [],
+  "warnings": [],
+  "checks": {
+    "aster": true,
+    "llm": true,
+    "database": true
+  }
+}
+```
+
+---
+
+### GET /api/diagnostics/why-no-trades
+
+Why no trades? Runner status, last cycle diagnostic, and strategy summary (for dashboard “Why no trades?” block).
+
+**Response:**
+```json
+{
+  "ok": true,
+  "runner": {
+    "isRunning": true,
+    "activeWorkflowCount": 0,
+    "config": { "intervalMinutes": 2, "enabled": true, "symbolsCount": 25 }
+  },
+  "lastCycleDiagnostic": {
+    "at": "2025-02-28T12:00:00.000Z",
+    "totalOpportunities": 5,
+    "afterScoreFilter": 2,
+    "afterConfidenceFilter": 0,
+    "hadOpportunities": false,
+    "reason": "All opportunities filtered out",
+    "minScoreUsed": 50,
+    "confidenceThresholdUsed": 0.7
+  },
+  "strategySummary": {
+    "simulationMode": true,
+    "paperPreset": "balanced",
+    "minOpportunityScore": 50,
+    "confidenceThreshold": 0.7,
+    "maxConcurrentWorkflows": 2,
+    "maxDailyLossPercent": 10,
+    "maxDailyLossUsd": 0
+  },
+  "message": "No trade: All opportunities filtered out (score/confidence thresholds: 50/70%)."
+}
+```
+
+---
+
+### GET /api/audit-events
+
+Recent audit events (runner/execution: no_opportunities, opportunities_found, circuit_breaker_triggered).
+
+**Query Parameters:**
+- `limit` (optional): Max events (default: 50, max: 200)
+- `type` (optional): Filter by type
+
+**Response:**
+```json
+{
+  "success": true,
+  "events": [
+    {
+      "id": "audit_1701648000_abc123",
+      "at": "2025-02-28T12:00:00.000Z",
+      "type": "no_opportunities",
+      "source": "agent_runner",
+      "payload": { "totalOpportunities": 5, "afterConfidenceFilter": 0 }
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/cron/daily-report
+
+Cron-only: sends daily summary (today’s trades, PnL, account value) to Telegram and optionally Discord. Use `Authorization: Bearer <CRON_SECRET>` or `X-Cron-Secret`.
+
+---
+
 ## 📈 Trading Endpoints
 
 ### GET /api/positions
@@ -227,6 +323,7 @@ Get trade history.
 - `limit` (optional): Number of trades (default: 50)
 - `symbol` (optional): Filter by symbol
 - `side` (optional): Filter by LONG/SHORT
+- `source` (optional): Filter by `simulation` or `live` (paper vs live)
 
 **Response:**
 ```json
@@ -312,6 +409,35 @@ Get performance metrics.
   }
 }
 ```
+
+---
+
+## 📤 Export & Audit
+
+### GET /api/export
+
+Export trades and optional simulation stats.
+
+**Query Parameters:**
+- `format`: `json` | `csv` | `tax` | `audit` (default: json)
+- `limit`: Max trades (default: 500, max: 2000)
+- `days`: Lookback days (default: 30)
+- `source`: Filter by `simulation` or `live` (paper vs live)
+- `stats`: Include simulation stats when format=json (default: true)
+
+**Response (format=json):**
+```json
+{
+  "success": true,
+  "data": {
+    "trades": [ { "id": "...", "symbol": "BTCUSDT", "source": "simulation", ... } ],
+    "stats": { ... },
+    "meta": { "count": 50, "days": 30, "sourceFilter": "all", "exportedAt": "..." }
+  }
+}
+```
+
+CSV/tax/audit downloads include a `source` column. See [TAX_EXPORT.md](./TAX_EXPORT.md).
 
 ---
 
@@ -574,6 +700,55 @@ Trigger multi-agent analysis.
     { "id": "risk_assessment", "status": "pending" },
     { "id": "execution_planning", "status": "pending" },
     { "id": "trade_execution", "status": "pending" }
+  ]
+}
+```
+
+---
+
+## 🌐 Public API & Backtest
+
+### GET /api/public/quote
+
+Minimal public quote/status. When `PUBLIC_API_KEY` is set, requires `X-API-Key` or `Authorization: Bearer <key>` and is rate-limited (60 req/min per key).
+
+**Response:**
+```json
+{
+  "ok": true,
+  "service": "Manna",
+  "timestamp": "2025-02-28T12:00:00.000Z",
+  "message": "Use authenticated endpoints for trading data."
+}
+```
+
+---
+
+### GET /api/backtest
+
+Backtest: fetch historical klines and run RSI/trend scoring over a sliding window.
+
+**Query Parameters:**
+- `symbol` (optional): Symbol (default: BTCUSDT)
+- `interval` (optional): Kline interval (default: 1h)
+- `limit` (optional): Number of bars (default: 100, max: 500)
+
+**Response:**
+```json
+{
+  "success": true,
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "bars": 80,
+  "summary": {
+    "avgScore": 52.5,
+    "maxScore": 75,
+    "minScore": 35,
+    "bullishBars": 45,
+    "bearishBars": 20
+  },
+  "results": [
+    { "time": 1701648000000, "score": 55, "trend": "BULLISH", "rsi": 58.2 }
   ]
 }
 ```

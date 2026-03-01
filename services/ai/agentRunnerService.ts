@@ -5,6 +5,7 @@
  */
 
 import { logger } from '@/lib/logger';
+import { recordAuditEvent } from '@/lib/db';
 import { agentCoordinator } from '@/services/ai/agentCoordinator';
 import { asterConfig } from '@/lib/configService';
 import { asterDexService } from '@/services/exchange/asterDexService';
@@ -28,6 +29,18 @@ export class AgentRunnerService {
   private lastSymbolUpdate: number = 0;
   private symbolUpdateInterval = 24 * 60 * 60 * 1000; // Update symbols every 24 hours
   private cycleCount: number = 0; // Track trading cycles for debugging
+  /** Last cycle summary for "why no trade?" diagnostic */
+  private lastCycleDiagnostic: {
+    at: string;
+    totalOpportunities: number;
+    afterScoreFilter: number;
+    afterConfidenceFilter: number;
+    minScoreUsed: number;
+    confidenceThresholdUsed: number;
+    hadOpportunities: boolean;
+    reason?: string;
+    circuitBreakerTriggered?: boolean;
+  } | null = null;
 
   constructor() {
     this.config = {
@@ -525,6 +538,22 @@ export class AgentRunnerService {
               balance,
               maxDailyLossPercent: maxDailyPercent
             });
+            this.lastCycleDiagnostic = {
+              at: new Date().toISOString(),
+              totalOpportunities: 0,
+              afterScoreFilter: 0,
+              afterConfidenceFilter: 0,
+              minScoreUsed: 0,
+              confidenceThresholdUsed: 0,
+              hadOpportunities: false,
+              reason: 'Circuit breaker: daily loss limit (percent) reached',
+              circuitBreakerTriggered: true,
+            };
+            recordAuditEvent({
+              type: 'circuit_breaker_triggered',
+              source: 'agent_runner',
+              payload: { reason: 'daily_loss_percent', todayPnL, balance, maxDailyPercent: maxDailyPercent },
+            }).catch(() => {});
             return;
           }
           if (maxDailyUsd > 0 && absLoss >= maxDailyUsd) {
@@ -533,6 +562,22 @@ export class AgentRunnerService {
               todayPnL,
               maxDailyLossUsd: maxDailyUsd
             });
+            this.lastCycleDiagnostic = {
+              at: new Date().toISOString(),
+              totalOpportunities: 0,
+              afterScoreFilter: 0,
+              afterConfidenceFilter: 0,
+              minScoreUsed: 0,
+              confidenceThresholdUsed: 0,
+              hadOpportunities: false,
+              reason: 'Circuit breaker: daily loss limit (USD) reached',
+              circuitBreakerTriggered: true,
+            };
+            recordAuditEvent({
+              type: 'circuit_breaker_triggered',
+              source: 'agent_runner',
+              payload: { reason: 'daily_loss_usd', todayPnL, maxDailyUsd },
+            }).catch(() => {});
             return;
           }
         }
@@ -623,8 +668,9 @@ export class AgentRunnerService {
       // MVP OPTIMIZATION: Lower thresholds for testing - more trades, still safe
       // Quality filters relaxed for MVP, but blacklist + problematic coin detector still active
       // CRITICAL FIX: Use centralized confidence threshold from config (respects .env.local)
-      const confidenceThreshold = asterConfig.trading.confidenceThreshold;
-      const minScore = asterConfig.trading.minOpportunityScore ?? 50;
+      const { asterConfig, effectiveTradingConfig } = await import('@/lib/configService');
+      const confidenceThreshold = effectiveTradingConfig.confidenceThreshold;
+      const minScore = effectiveTradingConfig.minOpportunityScore ?? 50;
       let topOpportunities = scanResult.opportunities
         .filter(opp => opp.score >= minScore) // Use config: 50 default so simulation can get trades
         .filter(opp => opp.confidence >= confidenceThreshold) // CRITICAL FIX: Use config value (now 70%)
@@ -747,6 +793,21 @@ export class AgentRunnerService {
             message: 'All opportunities filtered out - check filter criteria'
           }
         });
+        this.lastCycleDiagnostic = {
+          at: new Date().toISOString(),
+          totalOpportunities: scanResult.opportunities.length,
+          afterScoreFilter: scanResult.opportunities.filter(o => o.score >= minScore).length,
+          afterConfidenceFilter: scanResult.opportunities.filter(o => o.confidence >= confidenceThreshold).length,
+          minScoreUsed: minScore,
+          confidenceThresholdUsed: confidenceThreshold,
+          hadOpportunities: false,
+          reason: 'All opportunities filtered out',
+        };
+        recordAuditEvent({
+          type: 'no_opportunities',
+          source: 'agent_runner',
+          payload: { ...this.lastCycleDiagnostic },
+        }).catch(() => {});
         return;
       }
 
@@ -763,6 +824,21 @@ export class AgentRunnerService {
           }))
         }
       });
+
+      this.lastCycleDiagnostic = {
+        at: new Date().toISOString(),
+        totalOpportunities: scanResult.opportunities.length,
+        afterScoreFilter: scanResult.opportunities.filter(o => o.score >= minScore).length,
+        afterConfidenceFilter: scanResult.opportunities.filter(o => o.confidence >= confidenceThreshold).length,
+        minScoreUsed: minScore,
+        confidenceThresholdUsed: confidenceThreshold,
+        hadOpportunities: true,
+      };
+      recordAuditEvent({
+        type: 'opportunities_found',
+        source: 'agent_runner',
+        payload: { count: topOpportunities.length, cycle: this.cycleCount },
+      }).catch(() => {});
 
       // Start workflows for top opportunities that don't have active workflows
       const availableSlots = this.config.maxConcurrentWorkflows - this.activeWorkflows.size;
@@ -1102,12 +1178,14 @@ export class AgentRunnerService {
     config: AgentRunnerConfig;
     activeWorkflows: string[];
     activeWorkflowCount: number;
+    lastCycleDiagnostic: typeof this.lastCycleDiagnostic;
   } {
     const status = {
       isRunning: this.isRunning,
       config: this.config,
       activeWorkflows: Array.from(this.activeWorkflows),
-      activeWorkflowCount: this.activeWorkflows.size
+      activeWorkflowCount: this.activeWorkflows.size,
+      lastCycleDiagnostic: this.lastCycleDiagnostic
     };
     
     // Log status checks to track when/why status is being checked

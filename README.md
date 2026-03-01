@@ -10,6 +10,8 @@
 
 **A sophisticated multi-agent AI trading system leveraging DeepSeek R1 for autonomous cryptocurrency trading on Aster DEX**
 
+**What is this?** Manna is a full-stack AI trading system: it scans markets, scores opportunities, runs a four-agent pipeline (Technical → Chief → Risk → Execution), and places or simulates trades on Aster DEX. It includes a live dashboard, tax/audit export, Discord/Telegram alerts, daily loss circuit breaker, and optional backtest—all configurable for simulation (default) or live trading.
+
 [Quick Start](#-quick-start) • [Demo](#-demo) • [Architecture](#-architecture) • [Configuration](#-configuration) • [Documentation](#-documentation) • [Lessons learned](LESSONS.md) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
 
 </div>

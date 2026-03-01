@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') || '500', 10), 2000);
     const days = parseInt(searchParams.get('days') || '30', 10);
     const includeStats = searchParams.get('stats') !== 'false';
+    const sourceFilter = searchParams.get('source'); // 'simulation' | 'live' | undefined
 
     let trades: Array<{
       id: string;
@@ -43,6 +44,7 @@ export async function GET(request: NextRequest) {
       entryReason: string;
       exitReason: string;
       duration: number;
+      source?: 'simulation' | 'live';
     }> = [];
 
     const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -50,7 +52,10 @@ export async function GET(request: NextRequest) {
     if (dbConfig.connectionString && dbConfig.connectionString !== 'postgresql://localhost:5432/manna_dev') {
       try {
         await initializeDatabase();
-        const all = await getTrades({ limit: 1000 });
+        const all = await getTrades({
+          limit: 1000,
+          source: sourceFilter === 'live' ? 'live' : sourceFilter === 'simulation' ? 'simulation' : undefined,
+        });
         trades = all
           .filter((t) => new Date(t.timestamp) >= cutoffDate)
           .slice(0, limit)
@@ -69,6 +74,7 @@ export async function GET(request: NextRequest) {
             entryReason: t.entryReason || '',
             exitReason: t.exitReason || '',
             duration: t.duration || 0,
+            source: t.source,
           }));
       } catch {
         await initMemory();
@@ -91,6 +97,7 @@ export async function GET(request: NextRequest) {
             entryReason: (t as { entryReason?: string }).entryReason || '',
             exitReason: (t as { exitReason?: string }).exitReason || '',
             duration: (t as { duration?: number }).duration || 0,
+            source: (t as { source?: 'simulation' | 'live' }).source,
           }));
       }
     } else {
@@ -114,6 +121,7 @@ export async function GET(request: NextRequest) {
           entryReason: (t as { entryReason?: string }).entryReason || '',
           exitReason: (t as { exitReason?: string }).exitReason || '',
           duration: (t as { duration?: number }).duration || 0,
+          source: asterConfig.trading.simulationMode ? 'simulation' : 'live',
         }));
     }
 
@@ -125,10 +133,10 @@ export async function GET(request: NextRequest) {
 
     if (format === 'csv') {
       const header =
-        'id,timestamp,model,symbol,side,size,entryPrice,exitPrice,pnl,pnlPercent,leverage,entryReason,exitReason,duration';
+        'id,timestamp,model,symbol,side,size,entryPrice,exitPrice,pnl,pnlPercent,leverage,entryReason,exitReason,duration,source';
       const rows = trades.map(
         (t) =>
-          `${t.id},${t.timestamp},${escapeCsv(t.model)},${t.symbol},${t.side},${t.size},${t.entryPrice},${t.exitPrice},${t.pnl},${t.pnlPercent},${t.leverage},${escapeCsv(t.entryReason)},${escapeCsv(t.exitReason)},${t.duration}`
+          `${t.id},${t.timestamp},${escapeCsv(t.model)},${t.symbol},${t.side},${t.size},${t.entryPrice},${t.exitPrice},${t.pnl},${t.pnlPercent},${t.leverage},${escapeCsv(t.entryReason)},${escapeCsv(t.exitReason)},${t.duration},${t.source ?? 'simulation'}`
       );
       const body = [header, ...rows].join('\n');
       return new NextResponse(body, {
@@ -140,13 +148,13 @@ export async function GET(request: NextRequest) {
     }
 
     if (format === 'tax') {
-      const header = 'date,symbol,side,size,entryPrice,exitPrice,costBasis,proceeds,pnl,fees,notes';
+      const header = 'date,symbol,side,size,entryPrice,exitPrice,costBasis,proceeds,pnl,fees,notes,source';
       const rows = trades.map((t) => {
         const date = t.timestamp.slice(0, 10);
         const costBasis = t.size * t.entryPrice;
         const proceeds = t.size * (t.exitPrice || t.entryPrice);
         const notes = [t.entryReason, t.exitReason].filter(Boolean).join(' | ');
-        return `${date},${t.symbol},${t.side},${t.size},${t.entryPrice},${t.exitPrice || ''},${costBasis},${proceeds},${t.pnl},0,${escapeCsv(notes)}`;
+        return `${date},${t.symbol},${t.side},${t.size},${t.entryPrice},${t.exitPrice || ''},${costBasis},${proceeds},${t.pnl},0,${escapeCsv(notes)},${t.source ?? 'simulation'}`;
       });
       const body = [header, ...rows].join('\n');
       return new NextResponse(body, {
@@ -158,9 +166,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (format === 'audit') {
-      const header = 'id,date,symbol,side,entryPrice,exitPrice,pnl,why_entry,why_exit';
+      const header = 'id,date,symbol,side,entryPrice,exitPrice,pnl,why_entry,why_exit,source';
       const rows = trades.map((t) =>
-        `${t.id},${t.timestamp.slice(0, 10)},${t.symbol},${t.side},${t.entryPrice},${t.exitPrice || ''},${t.pnl},${escapeCsv(t.entryReason)},${escapeCsv(t.exitReason)}`
+        `${t.id},${t.timestamp.slice(0, 10)},${t.symbol},${t.side},${t.entryPrice},${t.exitPrice || ''},${t.pnl},${escapeCsv(t.entryReason)},${escapeCsv(t.exitReason)},${t.source ?? 'simulation'}`
       );
       const body = [header, ...rows].join('\n');
       return new NextResponse(body, {
@@ -176,7 +184,7 @@ export async function GET(request: NextRequest) {
       data: {
         trades,
         stats: stats || undefined,
-        meta: { count: trades.length, days, limit, exportedAt: new Date().toISOString() },
+        meta: { count: trades.length, days, limit, sourceFilter: sourceFilter || 'all', exportedAt: new Date().toISOString() },
       },
     });
   } catch (error) {

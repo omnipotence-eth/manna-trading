@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [7.2.0] - 2025-02-28
+
+### Added
+
+- **Health & readiness**
+  - `GET /api/health/ready` — readiness check with `ready`, `missing[]`, `warnings[]`, and Aster/LLM/DB checks
+  - Status page at `/status` — UI for readiness, checks, missing, warnings, and API links
+
+- **Diagnostics**
+  - `GET /api/diagnostics/why-no-trades` — runner status, last cycle diagnostic, strategy summary
+  - “Why no trades? / Strategy” block on dashboard Info tab (NOF1Dashboard)
+
+- **Notifications**
+  - Telegram support: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`; trade notifications and daily report
+  - `GET /api/cron/daily-report` — cron-only daily summary to Telegram/Discord (Vercel cron at 20:00 UTC)
+
+- **Paper vs live**
+  - `source` column on `trades` (`simulation` | `live`); set at write from config
+  - Export: `?source=simulation|live` and `source` column in CSV/tax/audit
+
+- **Paper presets**
+  - `PAPER_PRESET` env: `conservative` | `balanced` | `aggressive`; overrides thresholds in simulation via `effectiveTradingConfig`
+
+- **Audit trail**
+  - `audit_events` table; `recordAuditEvent()` / `getAuditEvents()`; runner writes no_opportunities, opportunities_found, circuit_breaker_triggered
+  - `GET /api/audit-events?limit=&type=`
+
+- **Public API**
+  - `lib/publicApiRateLimit.ts` — optional `PUBLIC_API_KEY` + 60/min rate limit
+  - `GET /api/public/quote` — protected when key set
+
+- **Backtest**
+  - `GET /api/backtest?symbol=&interval=&limit=` — historical klines + RSI/trend scoring, returns per-bar scores and summary
+
+- **Tests**
+  - `__tests__/lib/circuitBreaker.test.ts` — CircuitBreaker execute, open after threshold, getStats
+  - `__tests__/api/export.test.ts` — export route JSON and source filter (mocked)
+  - `__tests__/api/backtest.test.ts` — backtest route with mocked klines
+
+### Changed
+
+- Agent runner uses `effectiveTradingConfig` for confidence and min score (respects paper preset)
+- `getTrades()` supports `source` filter; export API includes source in all formats
+- Jest setup: guard `window.matchMedia` mock for Node test environment
+- Documentation: SYSTEM_ARCHITECTURE.md, API_DOCUMENTATION.md, docs/README.md updated with new endpoints and behavior
+
+---
+
 ## [3.5.0] - 2025-11-03
 
 ### Added

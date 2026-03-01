@@ -74,6 +74,12 @@ function InfoTab() {
     websocket: string;
     apiKeys: string;
   } | null>(null);
+  const [whyNoTrades, setWhyNoTrades] = useState<{
+    message: string;
+    runner?: { isRunning: boolean; activeWorkflowCount: number; config?: { intervalMinutes: number; enabled: boolean; symbolsCount: number } };
+    lastCycleDiagnostic?: { at: string; hadOpportunities: boolean; reason?: string; totalOpportunities: number; minScoreUsed: number; confidenceThresholdUsed: number } | null;
+    strategySummary?: Record<string, unknown>;
+  } | null>(null);
 
   // Fetch real trade data from database and config
   useEffect(() => {
@@ -175,12 +181,31 @@ function InfoTab() {
       }
     };
 
+    const fetchWhyNoTrades = async () => {
+      try {
+        const res = await fetch('/api/diagnostics/why-no-trades', { headers: { 'Cache-Control': 'no-cache' } });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && data.message) {
+            setWhyNoTrades({
+              message: data.message,
+              runner: data.runner,
+              lastCycleDiagnostic: data.lastCycleDiagnostic ?? null,
+              strategySummary: data.strategySummary ?? {},
+            });
+          }
+        }
+      } catch { /* ignore */ }
+    };
+
     fetchTradeData();
     fetchConfig();
     fetchInfrastructure();
+    fetchWhyNoTrades();
     const interval = setInterval(() => {
       fetchTradeData();
       fetchInfrastructure();
+      fetchWhyNoTrades();
     }, 10000); // Update every 10 seconds
     return () => clearInterval(interval);
   }, []);
@@ -457,6 +482,37 @@ function InfoTab() {
           </div>
         </div>
       </div>
+
+      {/* Why no trades? / Strategy summary */}
+      {whyNoTrades && (
+        <div className="space-y-2">
+          <div className="border-b border-white/[0.05] pb-1">
+            <h3 className="text-[10px] font-mono text-[#555] uppercase tracking-wider">Why no trades? / Strategy</h3>
+          </div>
+          <div className="border border-white/[0.05] bg-[#0a0a0a] p-3 space-y-2">
+            <p className="text-[11px] text-[#aaa] font-mono">{whyNoTrades.message}</p>
+            {whyNoTrades.runner && (
+              <div className="grid grid-cols-2 gap-2 text-[9px] font-mono text-[#666]">
+                <span>Runner: {whyNoTrades.runner.isRunning ? 'Running' : 'Stopped'}</span>
+                <span>Workflows: {whyNoTrades.runner.activeWorkflowCount}</span>
+                {whyNoTrades.runner.config && (
+                  <>
+                    <span>Interval: {whyNoTrades.runner.config.intervalMinutes}m</span>
+                    <span>Symbols: {whyNoTrades.runner.config.symbolsCount ?? 0}</span>
+                  </>
+                )}
+              </div>
+            )}
+            {whyNoTrades.strategySummary && Object.keys(whyNoTrades.strategySummary).length > 0 && (
+              <div className="pt-1 border-t border-white/[0.04] grid grid-cols-2 gap-x-3 gap-y-1 text-[9px] font-mono text-[#555]">
+                {Object.entries(whyNoTrades.strategySummary).map(([k, v]) => (
+                  <span key={k}>{k.replace(/([A-Z])/g, ' $1').trim()}: {String(v)}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Infrastructure */}
       <div className="space-y-2">

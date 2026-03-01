@@ -113,6 +113,8 @@ export interface Trade {
   exitTimestamp: string | null;
   duration: number;
   createdAt?: Date;
+  /** 'simulation' | 'live' - paper vs live trade */
+  source?: 'simulation' | 'live';
 }
 
 export interface TradeRejection {
@@ -151,15 +153,18 @@ export async function recordTradeEntry(entry: {
   takeProfit?: number;
   stopLoss?: number;
   style?: string;
+  source?: 'simulation' | 'live';
 }) {
   if (!dbConfig.isConfigured) return;
   await initializeDatabase();
+  const { asterConfig } = await import('@/lib/configService');
+  const source = entry.source ?? (asterConfig.trading.simulationMode ? 'simulation' : 'live');
   await sql(
     `
     INSERT INTO trades (
       id, timestamp, model, symbol, side, size, entry_price, leverage,
-      entry_reason, entry_confidence, entry_signals, entry_market_regime, entry_score
-    ) VALUES ($1, to_timestamp($2/1000.0), 'auto', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      entry_reason, entry_confidence, entry_signals, entry_market_regime, entry_score, source
+    ) VALUES ($1, to_timestamp($2/1000.0), 'auto', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     ON CONFLICT (id) DO NOTHING;
     `,
     [
@@ -174,9 +179,58 @@ export async function recordTradeEntry(entry: {
       entry.entryConfidence ?? null,
       entry.entrySignals ? JSON.stringify(entry.entrySignals) : null,
       entry.entryMarketRegime || null,
-      entry.entryScore || null
+      entry.entryScore || null,
+      source,
     ]
   );
+}
+
+/**
+ * Record an audit event (runner, execution, circuit breaker, etc.)
+ */
+export async function recordAuditEvent(event: {
+  type: string;
+  source: string;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  if (!dbConfig.isConfigured) return;
+  await initializeDatabase();
+  const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  await sql(
+    `INSERT INTO audit_events (id, type, source, payload) VALUES ($1, $2, $3, $4);`,
+    [
+      id,
+      event.type,
+      event.source,
+      event.payload ? JSON.stringify(event.payload) : null,
+    ]
+  );
+}
+
+/**
+ * Get recent audit events (for status/audit UI)
+ */
+export async function getAuditEvents(filters?: { limit?: number; type?: string }): Promise<Array<{ id: string; at: string; type: string; source: string; payload: Record<string, unknown> | null }>> {
+  if (!dbConfig.isConfigured) return [];
+  try {
+    const limit = filters?.limit ?? 50;
+    const type = filters?.type ?? null;
+    const result = await sql(
+      `SELECT id, at, type, source, payload FROM audit_events
+       WHERE ($1::text IS NULL OR type = $1)
+       ORDER BY at DESC LIMIT $2`,
+      [type, limit]
+    );
+    return result.rows.map((row: any) => ({
+      id: row.id,
+      at: row.at,
+      type: row.type,
+      source: row.source,
+      payload: row.payload,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -308,6 +362,13 @@ export async function initializeDatabase() {
       // Columns may already be nullable, ignore error
     }
 
+    // Paper vs live: source column for trades (simulation vs live)
+    try {
+      await sql(`ALTER TABLE trades ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'simulation';`);
+    } catch {
+      // ignore
+    }
+
     // Create model_messages table for chat/analysis messages
     await sql(`
       CREATE TABLE IF NOT EXISTS model_messages (
@@ -335,6 +396,22 @@ export async function initializeDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Audit trail: agent/runner/execution events
+    await sql(`
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id VARCHAR(255) PRIMARY KEY,
+        at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        type VARCHAR(64) NOT NULL,
+        source VARCHAR(64) NOT NULL,
+        payload JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    try {
+      await sql(`CREATE INDEX IF NOT EXISTS idx_audit_events_at ON audit_events(at DESC);`);
+      await sql(`CREATE INDEX IF NOT EXISTS idx_audit_events_type ON audit_events(type);`);
+    } catch { /* ignore */ }
 
     // Create open_positions table for active position monitoring
     await sql(`
@@ -482,8 +559,8 @@ export async function addTrade(trade: Trade): Promise<boolean> {
         entry_price, exit_price, pnl, pnl_percent, leverage,
         entry_reason, entry_confidence, entry_signals,
         entry_market_regime, entry_score, exit_reason,
-        exit_timestamp, duration
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        exit_timestamp, duration, source
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       ON CONFLICT (id) DO NOTHING;
     `, [
       trade.id,
@@ -504,7 +581,8 @@ export async function addTrade(trade: Trade): Promise<boolean> {
       trade.entryScore,
       trade.exitReason,
       trade.exitTimestamp,
-      trade.duration
+      trade.duration,
+      trade.source ?? (await import('@/lib/configService')).asterConfig.trading.simulationMode ? 'simulation' : 'live',
     ]);
 
     logger.info(`Trade saved to database: ${trade.symbol} | P&L: $${trade.pnl.toFixed(2)}`, {
@@ -534,6 +612,7 @@ export async function addTrade(trade: Trade): Promise<boolean> {
 export async function getTrades(filters?: {
   symbol?: string;
   model?: string;
+  source?: 'simulation' | 'live';
   limit?: number;
   offset?: number;
 }): Promise<Trade[]> {
@@ -541,22 +620,22 @@ export async function getTrades(filters?: {
     const limit = filters?.limit || 100;
     const offset = filters?.offset || 0;
     
-    // OPTIMIZED: Single parameterized query with optional WHERE clauses
     const result = await sql(`
       SELECT * FROM trades 
       WHERE ($1::text IS NULL OR symbol = $1)
         AND ($2::text IS NULL OR model = $2)
+        AND ($3::text IS NULL OR COALESCE(source, 'simulation') = $3)
       ORDER BY timestamp DESC 
-      LIMIT $3
-      OFFSET $4
+      LIMIT $4
+      OFFSET $5
     `, [
       filters?.symbol || null,
       filters?.model || null,
+      filters?.source || null,
       limit,
       offset
     ]);
     
-    // Transform rows to Trade objects
     const trades: Trade[] = result.rows.map((row: any) => ({
       id: row.id,
       timestamp: row.timestamp,
@@ -570,7 +649,7 @@ export async function getTrades(filters?: {
       pnlPercent: parseFloat(row.pnl_percent),
       leverage: parseInt(row.leverage),
       entryReason: row.entry_reason,
-      entryConfidence: parseFloat(row.entry_confidence) * 100, // Convert decimal back to percentage (0.50 -> 50)
+      entryConfidence: parseFloat(row.entry_confidence) * 100,
       entrySignals: row.entry_signals,
       entryMarketRegime: row.entry_market_regime,
       entryScore: row.entry_score,
@@ -578,6 +657,7 @@ export async function getTrades(filters?: {
       exitTimestamp: row.exit_timestamp,
       duration: parseInt(row.duration),
       createdAt: row.created_at,
+      source: row.source === 'live' ? 'live' : 'simulation',
     }));
 
     return trades;
@@ -679,6 +759,25 @@ export async function getTodayRealizedPnL(): Promise<number> {
     `);
     const total = result.rows[0]?.total;
     return typeof total === 'number' ? total : parseFloat(total as string) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Number of trades closed today (for daily report)
+ */
+export async function getTodayTradeCount(): Promise<number> {
+  if (!dbConfig.isConfigured) return 0;
+  try {
+    const result = await sql(`
+      SELECT COUNT(*) as cnt
+      FROM trades
+      WHERE exit_timestamp IS NOT NULL
+        AND (exit_timestamp AT TIME ZONE 'UTC')::date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
+    `);
+    const cnt = result.rows[0]?.cnt;
+    return typeof cnt === 'number' ? cnt : parseInt(String(cnt), 10) || 0;
   } catch {
     return 0;
   }
