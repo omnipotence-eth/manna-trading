@@ -3,6 +3,7 @@
  * Provides comprehensive security features for API protection
  */
 
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { logger } from './logger';
 import { PerformanceMonitor } from './performanceMonitor';
@@ -49,16 +50,41 @@ import { apiKeyManager as unifiedKeyManager } from './apiKeyManager';
 
 /**
  * Request API Key Validator - for validating incoming API requests
- * Uses the unified apiKeyManager for key validation
+ * Checks that a supplied key matches one of our configured Aster DEX keys.
  */
 class RequestKeyValidator {
   /**
-   * Validate that an API key is known to our system
+   * Validate that an API key matches a key known to this system.
+   * Uses constant-time comparison to prevent timing attacks.
    */
   validateKey(apiKey: string): boolean {
-    // Check against the unified key manager
-    const stats = unifiedKeyManager.getStats();
-    return stats.keyDetails.some(k => k.isHealthy);
+    if (!apiKey) return false;
+
+    const configuredKeys: string[] = [];
+
+    // Single key (most common)
+    if (process.env.ASTER_API_KEY) configuredKeys.push(process.env.ASTER_API_KEY);
+
+    // Comma-separated pool
+    if (process.env.ASTER_API_KEYS) {
+      configuredKeys.push(...process.env.ASTER_API_KEYS.split(',').map(k => k.trim()).filter(Boolean));
+    }
+
+    // Numbered pool (ASTER_API_KEY_1 … ASTER_API_KEY_N)
+    const keyCount = parseInt(process.env.API_KEY_COUNT || '0', 10);
+    for (let i = 1; i <= keyCount; i++) {
+      const k = process.env[`ASTER_API_KEY_${i}`];
+      if (k) configuredKeys.push(k);
+    }
+
+    if (configuredKeys.length === 0) return false;
+
+    const incomingBuf = Buffer.from(apiKey);
+    return configuredKeys.some(k => {
+      const configuredBuf = Buffer.from(k);
+      if (incomingBuf.length !== configuredBuf.length) return false;
+      return crypto.timingSafeEqual(incomingBuf, configuredBuf);
+    });
   }
 
   /**
@@ -82,17 +108,15 @@ export class RequestSigningValidator {
     secret: string
   ): boolean {
     try {
-      const crypto = require('crypto');
-      
       // Get request body
       const body = request.body;
       if (!body) return false;
-      
+
       // Create signature
       const hmac = crypto.createHmac('sha256', secret);
       hmac.update(JSON.stringify(body));
       const signature = hmac.digest('hex');
-      
+
       return signature === expectedSignature;
     } catch (error) {
       logger.error('Signature validation failed', error, { context: 'Security' });
@@ -103,8 +127,7 @@ export class RequestSigningValidator {
   /**
    * Generate request signature
    */
-  static generateSignature(data: any, secret: string): string {
-    const crypto = require('crypto');
+  static generateSignature(data: unknown, secret: string): string {
     const hmac = crypto.createHmac('sha256', secret);
     hmac.update(JSON.stringify(data));
     return hmac.digest('hex');
@@ -197,9 +220,11 @@ export function withSecurity<T>(
     const timer = PerformanceMonitor.startTimer('security:middleware');
     
     try {
-      // Check request size
+      // Fast-fail on Content-Length header as an early hint.
+      // Note: Content-Length can be spoofed by clients; enforce the true body size
+      // limit when reading the body in each handler (don't rely solely on this check).
       const contentLength = req.headers.get('content-length');
-      if (contentLength && parseInt(contentLength) > securityConfig.maxRequestSize) {
+      if (contentLength && parseInt(contentLength, 10) > securityConfig.maxRequestSize) {
         PerformanceMonitor.recordCounter('security:request_too_large');
         return NextResponse.json(
           { error: 'Request too large' } as T,
@@ -226,9 +251,17 @@ export function withSecurity<T>(
       }
 
       // Check CORS
-      if (securityConfig.enableCORS) {
-        const origin = req.headers.get('origin');
-        if (origin && !securityConfig.allowedOrigins.includes(origin)) {
+      const requestOrigin = req.headers.get('origin');
+      if (securityConfig.enableCORS && requestOrigin) {
+        const originAllowed = securityConfig.allowedOrigins.some(allowed => {
+          if (allowed.includes('*')) {
+            // Support simple wildcard patterns like https://*.vercel.app
+            const pattern = new RegExp('^' + allowed.replace('.', '\\.').replace('*', '[^.]+') + '$');
+            return pattern.test(requestOrigin);
+          }
+          return allowed === requestOrigin;
+        });
+        if (!originAllowed) {
           PerformanceMonitor.recordCounter('security:cors_blocked');
           return NextResponse.json(
             { error: 'CORS policy violation' } as T,
@@ -265,10 +298,13 @@ export function withSecurity<T>(
       response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
       response.headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
       
-      if (securityConfig.enableCORS) {
-        response.headers.set('Access-Control-Allow-Origin', '*');
+      if (securityConfig.enableCORS && requestOrigin) {
+        // Reflect the specific allowed origin rather than using a wildcard,
+        // so the allowlist check above is not bypassed.
+        response.headers.set('Access-Control-Allow-Origin', requestOrigin);
         response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
         response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-MBX-APIKEY');
+        response.headers.set('Vary', 'Origin');
       }
 
       const duration = timer.end();
