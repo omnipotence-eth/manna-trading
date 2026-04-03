@@ -215,3 +215,63 @@ export const MATH_CONSTANTS = {
   }
 } as const;
 
+/**
+ * EQUITY-SPECIFIC CONSTANTS — US stocks and ETFs via Alpaca Markets
+ * Traditional finance moves differently from crypto — calibrated accordingly.
+ */
+export const EQUITY_CONSTANTS = {
+  // Volatility profile — equities move much less than crypto
+  TYPICAL_DAILY_RANGE_PCT: 1.5,   // Average large-cap daily range (%)
+  HIGH_VOLATILITY_THRESHOLD: 3.0, // High-vol day (earnings, macro events)
+  LOW_VOLATILITY_THRESHOLD: 0.5,  // Low-vol / consolidation day
+
+  // Position sizing — no leverage by default on Alpaca (cash account)
+  DEFAULT_LEVERAGE: 1,            // No leverage in paper mode
+  MAX_POSITION_PCT: 10,           // Max 10% of portfolio per position
+  MAX_PORTFOLIO_RISK_PCT: 20,     // Max 20% of portfolio at risk
+
+  // Risk / reward — tighter than crypto due to lower volatility
+  MIN_RR_RATIO: 2.0,
+  DEFAULT_STOP_PCT: 1.5,         // 1.5% stop-loss (vs 3–4% for crypto)
+  DEFAULT_TARGET_PCT: 3.5,       // 3.5% take-profit (2.33:1 R:R)
+  ATR_STOP_MULTIPLIER: 2.0,      // Stop = 2× ATR for equities
+
+  // Scanning — only scan during market hours
+  SCAN_INTERVAL_MINUTES: 5,       // Scan every 5 minutes during market hours
+  MIN_DOLLAR_VOLUME: 50_000_000,  // $50M min daily dollar volume (large-cap only)
+  MIN_PRICE: 5,                   // Skip penny stocks < $5
+  MIN_VOLUME_RATIO: 1.3,          // 1.3× average volume for opportunity
+
+  // PDT (Pattern Day Trader) rule awareness
+  PDT_ACCOUNT_MINIMUM: 25_000,   // Accounts < $25k limited to 3 day trades / 5 days
+  MAX_DAY_TRADES_SMALL_ACCOUNT: 3,
+
+  // Extended hours trading (pre/post market)
+  ALLOW_EXTENDED_HOURS: false,    // Off by default — worse fills, higher risk
+
+  // Score thresholds (same 0–100 scale as crypto scanner)
+  MIN_SCORE_TO_TRADE: 60,
+  STRONG_SIGNAL_SCORE: 75,
+} as const;
+
+/** Default watchlist of highly liquid US equities + ETFs */
+export const DEFAULT_STOCK_WATCHLIST = [
+  // Broad market ETFs
+  'SPY', 'QQQ', 'IWM', 'DIA',
+  // Sector ETFs
+  'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY',
+  // Commodities / bonds
+  'GLD', 'TLT',
+  // Mega-cap tech
+  'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'TSLA', 'AMD', 'AVGO', 'ORCL',
+  // Finance
+  'JPM', 'BAC', 'GS', 'V', 'MA',
+  // Healthcare
+  'UNH', 'JNJ', 'ABBV', 'MRK',
+  // Consumer / retail
+  'WMT', 'COST', 'HD', 'SBUX',
+  // Energy
+  'XOM', 'CVX',
+] as const;
+
+export type StockSymbol = typeof DEFAULT_STOCK_WATCHLIST[number];
