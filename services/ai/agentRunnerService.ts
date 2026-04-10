@@ -20,6 +20,18 @@ export interface AgentRunnerConfig {
   minVolumeThreshold: number; // Minimum 24h volume in USDT
 }
 
+export interface CycleDiagnostic {
+  at: string;
+  totalOpportunities: number;
+  afterScoreFilter: number;
+  afterConfidenceFilter: number;
+  minScoreUsed: number;
+  confidenceThresholdUsed: number;
+  hadOpportunities: boolean;
+  reason?: string;
+  circuitBreakerTriggered?: boolean;
+}
+
 export class AgentRunnerService {
   private isRunning = false;
   private intervalId: NodeJS.Timeout | null = null;
@@ -30,17 +42,7 @@ export class AgentRunnerService {
   private symbolUpdateInterval = 24 * 60 * 60 * 1000; // Update symbols every 24 hours
   private cycleCount: number = 0; // Track trading cycles for debugging
   /** Last cycle summary for "why no trade?" diagnostic */
-  private lastCycleDiagnostic: {
-    at: string;
-    totalOpportunities: number;
-    afterScoreFilter: number;
-    afterConfidenceFilter: number;
-    minScoreUsed: number;
-    confidenceThresholdUsed: number;
-    hadOpportunities: boolean;
-    reason?: string;
-    circuitBreakerTriggered?: boolean;
-  } | null = null;
+  private lastCycleDiagnostic: CycleDiagnostic | null = null;
 
   constructor() {
     this.config = {
@@ -1178,7 +1180,7 @@ export class AgentRunnerService {
     config: AgentRunnerConfig;
     activeWorkflows: string[];
     activeWorkflowCount: number;
-    lastCycleDiagnostic: typeof this.lastCycleDiagnostic;
+    lastCycleDiagnostic: CycleDiagnostic | null;
   } {
     const status = {
       isRunning: this.isRunning,

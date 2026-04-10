@@ -82,7 +82,8 @@ boot-logs-*.txt
 tmp/
 
 # Local data storage (trades, positions, etc.)
-data/
+/data/
+!services/data/
 *.json
 !package.json
 !package-lock.json
