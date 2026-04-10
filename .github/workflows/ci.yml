@@ -75,4 +75,7 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
           ASTER_API_KEY: ci-placeholder
           ASTER_SECRET_KEY: ci-placeholder
+          ASTER_BASE_URL: https://fapi.asterdex.com
           NEXT_PUBLIC_ASTER_API_KEY: ci-placeholder
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          TRADING_SIMULATION_MODE: "true"
