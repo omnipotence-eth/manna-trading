@@ -34,7 +34,7 @@
     "react-grid-layout": "^1.5.2",
     "recharts": "^2.15.4",
     "ws": "^8.18.3",
-    "zustand": "^4.5.4"
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
