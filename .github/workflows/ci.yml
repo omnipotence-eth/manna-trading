@@ -73,3 +73,6 @@ jobs:
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+          ASTER_API_KEY: ci-placeholder
+          ASTER_SECRET_KEY: ci-placeholder
+          NEXT_PUBLIC_ASTER_API_KEY: ci-placeholder
