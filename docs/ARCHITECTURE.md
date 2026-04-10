@@ -127,7 +127,7 @@ Services are singletons (using `globalThis`) so one instance survives Next.js ho
 - **Code layout**: `CODEBASE_STRUCTURE.md`
 - **Detailed design**: `docs/SYSTEM_ARCHITECTURE.md` (services, DB schema, caching, errors)
 - **APIs**: `docs/API_DOCUMENTATION.md`
-- **Operations**: `docs/MASTER_GUIDE.md`, `START_HERE.md`
+- **Operations**: `docs/MASTER_GUIDE.md`, `STARTUP_GUIDE.md`
 
 ---
 
