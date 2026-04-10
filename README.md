@@ -2,11 +2,11 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-7.1.0-00ff88?style=for-the-badge)
-![Next.js](https://img.shields.io/badge/Next.js-14.2-000000?style=for-the-badge&logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178C6?style=for-the-badge&logo=typescript)
-![DeepSeek](https://img.shields.io/badge/AI-DeepSeek%20R1-6366f1?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-00ff88?style=for-the-badge)
+[![CI](https://github.com/omnipotence-eth/manna-trading/actions/workflows/ci.yml/badge.svg)](https://github.com/omnipotence-eth/manna-trading/actions/workflows/ci.yml)
+[![Next.js 14](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![DeepSeek R1](https://img.shields.io/badge/DeepSeek-R1_Reasoning-orange?style=flat-square)](https://deepseek.com/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 **A sophisticated multi-agent AI trading system leveraging DeepSeek R1 for autonomous cryptocurrency trading on Aster DEX**
 
