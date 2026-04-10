@@ -206,7 +206,7 @@ import { frontendLogger } from '@/lib/frontendLogger';
 | Document | Description |
 |----------|-------------|
 | `README.md` | Project overview and setup |
-| `START_HERE.md` | Quick start |
+| `STARTUP_GUIDE.md` | Local setup walkthrough |
 | `LESSONS.md` | Design trade-offs and lessons learned |
 | `docs/ARCHITECTURE.md` | Architecture overview |
 | `docs/SYSTEM_ARCHITECTURE.md` | Detailed system design |

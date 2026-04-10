@@ -18,6 +18,12 @@
 
 ---
 
+## Why
+
+Most AI trading bots are toy demos — a single LLM call with no risk management, no position sizing, no real market data. Manna exists to prove that multi-agent AI orchestration works in a domain where mistakes cost money. Each agent has a distinct responsibility (analysis, strategy, risk, execution), and the pipeline enforces discipline: Kelly Criterion sizes positions mathematically, circuit breakers halt trading during drawdowns, and the system runs in simulation mode by default so you can validate before risking capital. This is what production AI looks like when the stakes are real.
+
+---
+
 ## Overview
 
 Manna is an autonomous trading system that combines:
@@ -233,7 +239,6 @@ Open http://localhost:3000 — The system auto-initializes and begins simulated 
 |------|--------|
 | Deploy | [Deploy with Vercel](https://vercel.com/new) → Import `https://github.com/omnipotence-eth/manna-trading` and add environment variables (see [Configuration](#-configuration)). |
 | Demo URL | After deployment, your app will be available at `https://your-project.vercel.app`. Use this link in your portfolio or resume. |
-| Optional | Add a screenshot (e.g. `docs/dashboard-screenshot.png`) and link it here for a visual preview. |
 
 ---
 

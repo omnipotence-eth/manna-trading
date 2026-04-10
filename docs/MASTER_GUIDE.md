@@ -95,7 +95,7 @@ RATE_LIMIT_PER_KEY_RPS=1
 
 **Guides:**
 - `README.md` - Full documentation
-- `START_HERE.md` - Quick start guide
+- `STARTUP_GUIDE.md` - Local setup walkthrough
 - `docs/SYSTEM_ARCHITECTURE.md` - Architecture overview
 - `docs/API_DOCUMENTATION.md` - API reference
 

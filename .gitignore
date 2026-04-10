@@ -50,9 +50,18 @@ next-env.d.ts
 # IDE
 .vscode/
 .idea/
+.cursorrules
+.cursorignore
 *.swp
 *.swo
 *~
+
+# Internal session files
+NEXT_SESSION.md
+PROJECT_ASSESSMENT.md
+PRE_RELEASE_CHECKLIST.md
+START_HERE.md
+docs/internal/
 
 # OS
 Thumbs.db

@@ -9,9 +9,8 @@
 
 ### Getting started
 
-- **[START_HERE.md](../START_HERE.md)** — Quick start
+- **[README.md](../README.md)** — Project overview and quick start
 - **[QUICK_START.md](./QUICK_START.md)** — Detailed setup
-- **[STARTUP_COMMANDS.md](./STARTUP_COMMANDS.md)** — Startup commands
 
 ### Core documentation
 
@@ -28,13 +27,12 @@
 ### Deployment & operations
 
 - **[PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md)** — Production deployment
-- **[TERMINAL_LOG_MONITORING.md](./TERMINAL_LOG_MONITORING.md)** — Log monitoring
-
 ### Reference
 
 - **[LESSONS.md](../LESSONS.md)** — Design trade-offs and lessons learned
 - **[FUTURE_FEATURES.md](./FUTURE_FEATURES.md)** — Planned features
-- Other references: QUANT_DATA_SOURCES, BOOT_OUTPUT_REFERENCE, etc. (see repo)
+- **[QUANT_DATA_SOURCES.md](./QUANT_DATA_SOURCES.md)** — Quantitative data sources
+- **[AI_MODELS_REFERENCE.md](./AI_MODELS_REFERENCE.md)** — AI model configuration
 
 ---
 
@@ -42,7 +40,7 @@
 
 | Role | Start with |
 |------|------------|
-| New users | [START_HERE.md](../START_HERE.md) → [QUICK_START.md](./QUICK_START.md) → [ARCHITECTURE.md](./ARCHITECTURE.md) |
+| New users | [README.md](../README.md) → [QUICK_START.md](./QUICK_START.md) → [ARCHITECTURE.md](./ARCHITECTURE.md) |
 | Developers | [SYSTEM_ARCHITECTURE.md](./SYSTEM_ARCHITECTURE.md), [API_DOCUMENTATION.md](./API_DOCUMENTATION.md) |
 | Operations | [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md) |
 | Status / health | App route `/status`; APIs: `/api/health/ready`, `/api/health`, `/api/diagnostics/why-no-trades` |
