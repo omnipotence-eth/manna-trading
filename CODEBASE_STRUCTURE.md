@@ -46,6 +46,12 @@ manna-llm-aster-crypto-trader/
 │   │   ├── agentCoordinator.ts
 │   │   ├── agentRunnerService.ts
 │   │   └── deepseekService.ts
+│   ├── data/
+│   │   ├── apiCache.ts              # TTL cache for API responses
+│   │   ├── dataIngestionService.ts  # Market data gathering/normalization
+│   │   ├── optimizedDataService.ts  # Fast cached account data
+│   │   ├── quantDataService.ts      # Quantitative market snapshots
+│   │   └── unifiedDataAggregator.ts # Real-time data aggregation
 │   ├── exchange/
 │   │   ├── asterDexService.ts
 │   │   └── websocketMarketService.ts
@@ -151,6 +157,7 @@ manna-llm-aster-crypto-trader/
 |-------------------|--------------------|
 | Trading logic     | `services/trading/` |
 | AI / agents       | `services/ai/`      |
+| Data / caching    | `services/data/`   |
 | Exchange / WebSocket | `services/exchange/` |
 | ML / RL           | `services/ml/`     |
 | Health / startup  | `services/monitoring/` |

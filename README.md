@@ -1,22 +1,25 @@
-# Manna LLM Aster Crypto Trader
-
 <div align="center">
 
-[![CI](https://github.com/omnipotence-eth/manna-trading/actions/workflows/ci.yml/badge.svg)](https://github.com/omnipotence-eth/manna-trading/actions/workflows/ci.yml)
+# Manna LLM Aster Crypto Trader
+
+**Multi-agent AI trading system — DeepSeek R1 reasoning on Aster DEX**
+
+[![CI](https://img.shields.io/github/actions/workflow/status/omnipotence-eth/manna-trading/ci.yml?style=flat-square&label=CI)](https://github.com/omnipotence-eth/manna-trading/actions/workflows/ci.yml)
+[![Node.js 18+](https://img.shields.io/badge/node-18%2B-brightgreen?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![DeepSeek R1](https://img.shields.io/badge/DeepSeek-R1_Reasoning-orange?style=flat-square)](https://deepseek.com/)
+[![ESLint](https://img.shields.io/badge/code%20style-ESLint-4B32C3?style=flat-square&logo=eslint)](https://eslint.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-**A sophisticated multi-agent AI trading system leveraging DeepSeek R1 for autonomous cryptocurrency trading on Aster DEX**
-
-**What is this?** Manna is a full-stack AI trading system: it scans markets, scores opportunities, runs a four-agent pipeline (Technical → Chief → Risk → Execution), and places or simulates trades on Aster DEX. It includes a live dashboard, tax/audit export, Discord/Telegram alerts, daily loss circuit breaker, and optional backtest—all configurable for simulation (default) or live trading.
-
-[Quick Start](#-quick-start) • [Demo](#-demo) • [Architecture](#-architecture) • [Configuration](#-configuration) • [Documentation](#-documentation) • [Lessons learned](LESSONS.md) • [Contributing](CONTRIBUTING.md) • [Security](SECURITY.md)
+[Quick Start](#quick-start) | [Architecture](#architecture) | [Configuration](#configuration) | [API Reference](#api-reference) | [Documentation](#documentation)
 
 </div>
 
 ---
+
+## What Is This
+
+A full-stack AI trading system that scans markets, scores opportunities, runs a four-agent pipeline (Technical → Chief → Risk → Execution), and places or simulates trades on Aster DEX. Includes a live dashboard, tax/audit export, Discord/Telegram alerts, daily loss circuit breaker, and optional backtest — all configurable for simulation (default) or live trading.
 
 ## Why
 
@@ -38,9 +41,9 @@ Manna is an autonomous trading system that combines:
 
 ---
 
-## ✨ Features
+## Features
 
-### 🤖 Multi-Agent AI System
+### Multi-Agent AI System
 
 | Agent | Role | Model |
 |-------|------|-------|
@@ -49,14 +52,14 @@ Manna is an autonomous trading system that combines:
 | **Risk Manager** | Kelly Criterion sizing, ATR stops, portfolio risk | DeepSeek R1 (via Groq or Ollama) |
 | **Execution Specialist** | Optimal order timing, slippage protection | DeepSeek R1 (via Groq or Ollama) |
 
-### 📊 Real-Time Data Aggregation
+### Real-Time Data Aggregation
 
 - **WebSocket Streams** — All tickers, order book depth, mark prices
 - **Funding Rate Analysis** — Sentiment detection from funding direction
 - **Liquidation Monitoring** — Detect long/short squeezes
 - **Multi-Timeframe Analysis** — 1m, 5m, 15m, 1h, 4h confluence
 
-### 📐 Mathematical Foundations
+### Mathematical Foundations
 
 | Algorithm | Application |
 |-----------|-------------|
@@ -66,14 +69,14 @@ Manna is an autonomous trading system that combines:
 | Monte Carlo Simulation | Risk of ruin analysis |
 | ATR-Based Stops | Dynamic stop-loss calculation |
 
-### 🧠 Machine Learning Pipeline
+### Machine Learning Pipeline
 
 - **30+ Features Per Trade** — Market context, AI decisions, outcomes
 - **Pattern Recognition** — Auto-detection of profitable setups
 - **Feature Importance** — Identifies which indicators matter most
 - **Continuous Learning** — System improves with every trade
 
-### 🎨 Modern Dashboard
+### Modern Dashboard
 
 - **Real-Time Charts** — Live portfolio tracking with smooth animations
 - **Position Monitor** — Current positions with P&L (simulation or live)
@@ -83,7 +86,7 @@ Manna is an autonomous trading system that combines:
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
 **Data flow in one sentence:** Cron or app load → startup → Agent Runner (market scan → score/filter → multi-agent workflow: Technical → Chief → Risk → Execution) → place order (or simulate) → Position Monitor (Chandelier/stops) → DB + notifications.
 
@@ -153,7 +156,7 @@ Manna is an autonomous trading system that combines:
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -231,7 +234,7 @@ Open http://localhost:3000 — The system auto-initializes and begins simulated 
 
 ---
 
-## 🎬 Demo
+## Demo
 
 **Live demo (simulation mode):** Deploy to Vercel and open your project URL. No real orders are placed; the dashboard shows real market data and simulated trades.
 
@@ -242,7 +245,7 @@ Open http://localhost:3000 — The system auto-initializes and begins simulated 
 
 ---
 
-## ⚙ Configuration
+## Configuration
 
 ### Trading Parameters
 
@@ -281,7 +284,7 @@ ASTER_API_SECRET_2=secret2
 
 ---
 
-## 📈 Trading System
+## Trading System
 
 ### Workflow
 
@@ -319,12 +322,12 @@ ASTER_API_SECRET_2=secret2
 
 ### Entry Criteria
 
-- ✅ Confidence ≥ 40% from Chief Analyst
-- ✅ Volume ≥ 1.5× average
-- ✅ Spread < 0.5%
-- ✅ Liquidity score > 0.7
-- ✅ Multi-timeframe alignment
-- ✅ Risk/Reward ≥ 2:1
+- Confidence ≥ 40% from Chief Analyst
+- Volume ≥ 1.5x average
+- Spread < 0.5%
+- Liquidity score > 0.7
+- Multi-timeframe alignment
+- Risk/Reward ≥ 2:1
 
 ### Exit Criteria
 
@@ -335,7 +338,7 @@ ASTER_API_SECRET_2=secret2
 
 ---
 
-## 📐 Mathematical Foundations
+## Mathematical Foundations
 
 ### Kelly Criterion
 
@@ -379,7 +382,7 @@ See [Mathematical Foundations](docs/MATHEMATICAL_FOUNDATIONS.md) for complete do
 
 ---
 
-## 🔌 API Reference
+## API Reference
 
 ### Core Endpoints
 
@@ -419,7 +422,7 @@ See [API Documentation](docs/API_DOCUMENTATION.md) for complete reference.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 For codebase layout and navigation, see **[CODEBASE_STRUCTURE.md](./CODEBASE_STRUCTURE.md)**. For an architecture overview, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
@@ -457,7 +460,7 @@ manna-llm-aster-crypto-trader/
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
 |----------|-------------|
@@ -475,7 +478,7 @@ manna-llm-aster-crypto-trader/
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### DeepSeek R1 Not Responding
 
@@ -531,7 +534,7 @@ On Vercel (or any serverless host) there is no long-lived process, so the in-app
 
 ---
 
-## 🌐 Deployment
+## Deployment
 
 ### Vercel (Recommended)
 
@@ -570,15 +573,15 @@ See [Production Deployment](docs/PRODUCTION_DEPLOYMENT.md) for complete guide.
 
 ---
 
-## 📜 License
+## License
 
 This software is licensed under the MIT License. See [LICENSE](LICENSE) for terms.
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
-## 🔒 Security
+## Security
 
 For security concerns, please see our [Security Policy](SECURITY.md). **Do not** report security vulnerabilities through public GitHub issues.
 

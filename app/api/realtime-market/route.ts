@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import type { AggregatedMarketData, LiquidationEvent } from '@/services/data/unifiedDataAggregator';
 
 // Force dynamic rendering to suppress Next.js static generation warnings
 export const dynamic = 'force-dynamic';
@@ -57,14 +58,14 @@ export async function GET(request: NextRequest) {
     }
     
     // Get recent liquidations (last 10)
-    const recentLiquidations = aggregator.getRecentLiquidations().slice(0, 10).map(liq => ({
+    const recentLiquidations = aggregator.getRecentLiquidations().slice(0, 10).map((liq: LiquidationEvent) => ({
       ...liq,
       valueFormatted: formatVolume(liq.value),
       timeAgo: getTimeAgo(liq.timestamp)
     }));
     
     // Calculate market-wide metrics
-    const allData = Array.from(aggregator.getAllMarketData().values());
+    const allData: AggregatedMarketData[] = Array.from(aggregator.getAllMarketData().values());
     const marketOverview = {
       avgScore: allData.length > 0 
         ? allData.reduce((sum, d) => sum + d.overallScore, 0) / allData.length 

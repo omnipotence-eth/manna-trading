@@ -34,11 +34,11 @@ export async function GET(request: NextRequest) {
         bypassCache,
         accountValue: accountData.accountValue,
         positions: accountData.positions.length,
-        positionDetails: accountData.positions.map(p => ({ 
-          symbol: p.symbol, 
-          side: p.side, 
+        positionDetails: accountData.positions.map((p: { symbol: string; side: string; size: number; pnl: number }) => ({
+          symbol: p.symbol,
+          side: p.side,
           size: p.size,
-          pnl: p.pnl 
+          pnl: p.pnl
         }))
       }
     });

@@ -18,7 +18,14 @@ const NOF1Dashboard = dynamic(() => import('@/components/NOF1Dashboard'), { ssr:
 const AgentsSystem = dynamic(() => import('@/components/AgentsSystem'), { ssr: false });
 const CoinAnalyzer = dynamic(() => import('@/components/CoinAnalyzer'), { ssr: false });
 const UltimateQuantDashboard = dynamic(() => import('@/components/UltimateQuantDashboard'), { ssr: false });
-const AnalyticsEmbed = dynamic(() => import('@/components/AnalyticsPanel').then((m) => () => <m.default embedded />), { ssr: false });
+const AnalyticsEmbed = dynamic(
+  () => import('@/components/AnalyticsPanel').then((m) => {
+    const Embed = () => <m.default embedded />;
+    Embed.displayName = 'AnalyticsEmbed';
+    return Embed;
+  }),
+  { ssr: false }
+);
 
 type ViewType = 'dashboard' | 'system' | 'analyze' | 'quant' | 'analytics';
 
