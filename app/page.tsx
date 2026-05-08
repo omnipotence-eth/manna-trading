@@ -78,7 +78,7 @@ export default function LandingPage() {
         {/* Source / Contact */}
         <div className="flex gap-6 text-sm text-[var(--text-400)]">
           <a
-            href="https://github.com/omnipotence-eth/manna-trading"
+            href="https://github.com/t-timms/manna-trading"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-[var(--accent)] transition-colors"

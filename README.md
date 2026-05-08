@@ -4,7 +4,7 @@
 
 **Multi-agent AI trading system — DeepSeek R1 reasoning on Aster DEX**
 
-[![CI](https://img.shields.io/github/actions/workflow/status/omnipotence-eth/manna-trading/ci.yml?style=flat-square&label=CI)](https://github.com/omnipotence-eth/manna-trading/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/t-timms/manna-trading/ci.yml?style=flat-square&label=CI)](https://github.com/t-timms/manna-trading/actions/workflows/ci.yml)
 [![Node.js 18+](https://img.shields.io/badge/node-18%2B-brightgreen?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -160,7 +160,7 @@ graph TB
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/omnipotence-eth/manna-trading.git
+git clone https://github.com/t-timms/manna-trading.git
 cd manna-trading
 
 # 2. Install dependencies
@@ -229,7 +229,7 @@ Open http://localhost:3000 — The system auto-initializes and begins simulated 
 
 | Step | Action |
 |------|--------|
-| Deploy | [Deploy with Vercel](https://vercel.com/new) → Import `https://github.com/omnipotence-eth/manna-trading` and add environment variables (see [Configuration](#-configuration)). |
+| Deploy | [Deploy with Vercel](https://vercel.com/new) → Import `https://github.com/t-timms/manna-trading` and add environment variables (see [Configuration](#-configuration)). |
 | Demo URL | After deployment, your app will be available at `https://your-project.vercel.app`. Use this link in your portfolio or resume. |
 
 ---

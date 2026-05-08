@@ -19,7 +19,7 @@
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/omnipotence-eth/manna-trading.git
+git clone https://github.com/t-timms/manna-trading.git
 cd manna-trading
 ```
 

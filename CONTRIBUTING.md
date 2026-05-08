@@ -14,10 +14,10 @@ Thank you for your interest in contributing to Manna. This document outlines gui
 1. **Fork the repository** on GitHub.
 2. **Clone your fork:**
    ```bash
-   git clone https://github.com/omnipotence-eth/manna-trading.git
+   git clone https://github.com/t-timms/manna-trading.git
    cd manna-trading
    ```
-   Replace `omnipotence-eth` with your GitHub username if you cloned a fork.
+   Replace `t-timms` with your GitHub username if you cloned a fork.
 
 3. **Install dependencies:**
    ```bash
