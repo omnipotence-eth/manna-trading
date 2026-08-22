@@ -1,6 +1,6 @@
 <div align="center">
 
-# Manna LLM Aster Crypto Trader
+# Manna Trading
 
 **Multi-agent AI trading system — DeepSeek R1 reasoning on Aster DEX**
 
